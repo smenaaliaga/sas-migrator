@@ -252,6 +252,13 @@ def run_translation(state_dir: Path, output_dir: Path, workspace: Path) -> dict:
             update={"node_id": nid, "node_label": target.get("node_label") or nid}
         )
 
+    # Persistir las traducciones: la iteración (Fase 9) re-traduce solo los
+    # nodos afectados y re-ensambla con el resto intacto.
+    trans_dir = state_dir / "translations"
+    trans_dir.mkdir(exist_ok=True)
+    for nid, nt in translations.items():
+        _dump_json(trans_dir / f"{nid}.json", json.loads(nt.model_dump_json()))
+
     mapping, failures = assemble_notebooks(
         plan, translations, Path(output_dir), db_bootstrap=bool(db_aliases)
     )
@@ -267,6 +274,85 @@ def run_translation(state_dir: Path, output_dir: Path, workspace: Path) -> dict:
         "translated": len(translations),
         "assembly_failures": len(failures),
         "targets": len(plan.get("targets", [])),
+    }
+
+
+# ── Fase 9: re-traducción de nodos afectados por una iteración ──────────────
+
+def retranslate_nodes(
+    state_dir: Path,
+    output_dir: Path,
+    workspace: Path,
+    node_ids: list[str],
+    iteration_note: str,
+) -> dict:
+    """Re-traduce SOLO los nodos afectados (con la instrucción de la iteración
+    como contexto) y re-ensambla los notebooks con el resto de las
+    traducciones persistidas intactas."""
+    from sas_migrator.core.assembly.notebook import assemble_notebooks
+
+    state_dir = Path(state_dir)
+    plan = _load_json(state_dir / "translation_plan.json")
+    targets_by_id = {str(t.get("node_id")): t for t in plan.get("targets", [])}
+    trans_dir = state_dir / "translations"
+
+    translations: dict[str, NodeTranslation] = {}
+    for path in sorted(trans_dir.glob("*.json")) if trans_dir.exists() else []:
+        nt = NodeTranslation.model_validate(_load_json(path))
+        translations[nt.node_id] = nt
+
+    caller = runtime.get_caller(workspace)
+    system = prompt_builder.build_translation_system()
+    db_aliases: list[str] = []
+    conns_path = state_dir / "db_connections.yaml"
+    if conns_path.exists():
+        conns = yaml.safe_load(conns_path.read_text(encoding="utf-8")) or {}
+        db_aliases = [str(c.get("alias", "")) for c in conns.get("connections", [])]
+
+    retranslated = 0
+    for nid in node_ids:
+        target = targets_by_id.get(nid)
+        if target is None:
+            continue
+        user = prompt_builder.build_translation_user(
+            target, _node_code(state_dir, nid), db_aliases,
+            iteration_note=iteration_note,
+        )
+        try:
+            nt = caller.call(
+                task="translation", system_blocks=system, user_content=user,
+                output_model=NodeTranslation,
+            )
+        except NeedsHuman as exc:
+            record_needs_human(
+                state_dir, phase=9, task="translation", node_id=nid,
+                reason=exc.reason, detail=exc.detail, attempts=exc.attempts,
+            )
+            continue
+        nt = nt.model_copy(
+            update={"node_id": nid, "node_label": target.get("node_label") or nid}
+        )
+        translations[nid] = nt
+        trans_dir.mkdir(exist_ok=True)
+        _dump_json(trans_dir / f"{nid}.json", json.loads(nt.model_dump_json()))
+        retranslated += 1
+
+    mapping, failures = assemble_notebooks(
+        plan, translations, Path(output_dir), db_bootstrap=bool(db_aliases)
+    )
+    for failure in failures:
+        record_needs_human(
+            state_dir, phase=9, task="assembly", node_id=failure.node_id,
+            reason="static_check_failed", detail=f"{failure.reason}: {failure.detail}",
+        )
+    _dump_json(
+        state_dir / "sas_python_mapping.json", json.loads(mapping.model_dump_json())
+    )
+    notebooks = sorted({m.notebook_path for m in mapping.mappings})
+    return {
+        "retranslated": retranslated,
+        "assembly_failures": len(failures),
+        "notebooks": notebooks,
     }
 
 

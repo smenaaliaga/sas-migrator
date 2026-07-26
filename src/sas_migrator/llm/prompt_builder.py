@@ -56,7 +56,8 @@ def header_line(payload: dict) -> str:
 
 
 def build_translation_user(
-    target: dict, node_code: str, db_aliases: list[str]
+    target: dict, node_code: str, db_aliases: list[str],
+    iteration_note: str | None = None,
 ) -> str:
     head = header_line(
         {
@@ -69,9 +70,16 @@ def build_translation_user(
             "db_aliases": db_aliases,
         }
     )
-    return (
+    user = (
         head
         + "\n\nCódigo SAS del nodo:\n```sas\n"
         + (node_code or "(sin código)")
         + "\n```\n"
     )
+    if iteration_note:
+        user += (
+            "\n## Iteración solicitada (Fase 9)\n"
+            "Re-traduce el nodo aplicando este ajuste pedido por el usuario:\n"
+            f"{iteration_note}\n"
+        )
+    return user

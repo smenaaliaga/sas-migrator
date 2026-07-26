@@ -642,6 +642,42 @@ def _phase7_execution_errors(state_path: Path) -> list[str]:
     ]
 
 
+def check_iteration_gate(state_dir: str | Path, cycle: int) -> tuple[bool, list[str]]:
+    """Gate del sub-grafo de iteración (Fase 9).
+
+    Condición de cierre de ciclo: IterationEntry del ciclo registrada y
+    completada, validación CORRIDA (validation_result poblado), auditoría sin
+    high, validación sin FAIL y sin needs_human de fase 9 pendientes.
+    """
+    state_path = Path(state_dir)
+    errors: list[str] = []
+
+    log = _load_any(state_path / "iteration_log.json") or {}
+    entry = next(
+        (e for e in log.get("iterations", []) if e.get("cycle") == cycle), None
+    )
+    if entry is None:
+        errors.append(f"Sin IterationEntry para el ciclo {cycle} en iteration_log.json")
+    else:
+        if entry.get("status") != "completed":
+            errors.append(f"IterationEntry {entry.get('id')} no está completed")
+        if not entry.get("validation_result"):
+            errors.append(
+                f"IterationEntry {entry.get('id')} sin validation_result — "
+                "la validación debe CORRER para cerrar el ciclo"
+            )
+
+    errors.extend(_phase7_semantic_regression_errors(state_path))
+    errors.extend(_phase7_validation_errors(state_path))
+
+    from sas_migrator.core.utils.needs_human import unresolved
+
+    for item in unresolved(state_path, 9):
+        errors.append(f"needs_human sin resolver: {item.id} [{item.task}]: {item.reason}")
+
+    return (len(errors) == 0, errors)
+
+
 def check_gate(phase: int, state_dir: str | Path) -> tuple[bool, list[str]]:
     """Check if all required artifacts for a phase gate are valid.
     

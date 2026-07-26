@@ -276,7 +276,13 @@ def stub_generate_notebooks(state_dir: Path, output_dir: Path) -> None:
     from sas_migrator.core.assembly.notebook import assemble_notebooks
 
     plan = json.loads((state_dir / "translation_plan.json").read_text(encoding="utf-8"))
-    mapping, failures = assemble_notebooks(plan, stub_node_translations(plan), output_dir)
+    translations = stub_node_translations(plan)
+    # Persistencia (igual que la rama LLM): la iteración re-ensambla parcial.
+    trans_dir = state_dir / "translations"
+    trans_dir.mkdir(exist_ok=True)
+    for nid, nt in translations.items():
+        _dump_json(trans_dir / f"{nid}.json", _model_dump(nt))
+    mapping, failures = assemble_notebooks(plan, translations, output_dir)
     if failures:  # el stub emite traducciones siempre válidas — esto es un bug
         raise RuntimeError(f"stub de traducción falló chequeos estáticos: {failures}")
     _dump_json(state_dir / "sas_python_mapping.json", _model_dump(mapping))

@@ -74,12 +74,11 @@ def test_start_migration_without_egp_is_typed_error(tmp_path: Path) -> None:
     assert ".egp" in result["message"]
 
 
-def test_iterate_is_honest_noop_and_authorize_errors_when_not_pending(
+def test_iterate_and_authorize_error_typed_when_preconditions_missing(
     tools: dict, tmp_path: Path
 ) -> None:
-    """iterate sigue not_available (Etapa 5 pendiente de iteración); Etapa 5:
-    authorize_execution ya es real y da error tipado si la tarjeta pendiente
-    no es execution_approval. Ninguna escribe nada en ese camino."""
+    """Etapa 5: iterate y authorize_execution son reales — sin precondiciones
+    dan error tipado y no escriben artefactos de migración."""
     def _artifacts() -> list[str]:
         # el checkpointer sqlite se crea lazy al abrir la sesión — no es un
         # artefacto de migración; se excluye del assert
@@ -91,7 +90,8 @@ def test_iterate_is_honest_noop_and_authorize_errors_when_not_pending(
 
     before = _artifacts()
     result = tools["iterate"]("haz algo")
-    assert result["status"] == "not_available"
+    assert result["status"] == "error"
+    assert "start_migration" in result["message"]
     result = tools["authorize_execution"]()
     assert result["status"] == "error"
     assert "execution" in result["message"] or "ninguna" in result["message"]

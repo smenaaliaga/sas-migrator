@@ -95,12 +95,22 @@ def build_tools(session: MigrationSession) -> dict[str, Callable[..., Any]]:
         }
         return _dump(session.answer(payload))
 
-    def iterate(instruction: str) -> dict:
-        """(Etapa 7) Itera sobre una migración completada (Fase 9)."""
-        return {
-            "status": "not_available",
-            "message": "La iteración post-migración llega en la Etapa 7 (Fase 9).",
-        }
+    def iterate(
+        instruction: str,
+        node_ids: list[str] | None = None,
+        request_type: str = "enhancement",
+    ) -> dict:
+        """Itera sobre una migración completada (Fase 9): registra la
+        IterationEntry, re-traduce los nodos indicados con la instrucción,
+        re-audita y RE-CORRE la validación; el gate del ciclo decide."""
+        if not (session.state_dir / "migration_state.json").exists():
+            return {
+                "status": "error",
+                "message": "sin migración base completa — corre start_migration primero",
+            }
+        return session.iterate(
+            instruction, request_type=request_type, affected_nodes=node_ids or []
+        )
 
     return {
         "start_migration": start_migration,

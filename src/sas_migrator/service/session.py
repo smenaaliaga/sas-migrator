@@ -117,6 +117,21 @@ class MigrationSession:
                 return InterviewCard.model_validate(intr.value)
         return None
 
+    def iterate(
+        self,
+        description: str,
+        request_type: str = "enhancement",
+        affected_nodes: list[str] | None = None,
+    ) -> dict:
+        """Corre un ciclo de iteración post-migración (Fase 9, sub-grafo con
+        gate propio). Requiere una migración base completa."""
+        from sas_migrator.graph.iteration import run_iteration
+
+        return run_iteration(
+            self.workspace, description,
+            request_type=request_type, affected_nodes=affected_nodes,
+        )
+
     def status(self) -> SessionResult:
         """Estado actual desde el checkpointer, sin avanzar el grafo."""
         if not (self.state_dir / CHECKPOINT_FILE).exists():

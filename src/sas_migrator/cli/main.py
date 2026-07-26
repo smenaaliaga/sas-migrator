@@ -145,6 +145,32 @@ def status(
 
 
 @app.command()
+def iterate(
+    describe: str = typer.Option(..., help="Qué ajustar (instrucción de la iteración)"),
+    workspace: Path = typer.Option(Path.cwd(), help="Raíz del workspace"),
+    nodes: str = typer.Option("", help="node_ids afectados, separados por coma"),
+    request_type: str = typer.Option(
+        "enhancement",
+        help="bug_fix | enhancement | postponed_improvement | new_requirement | data_change | context_update",
+    ),
+) -> None:
+    """Itera sobre una migración completada (Fase 9, sub-grafo con gate)."""
+    _utf8_stdout()
+    session = _session(workspace)
+    node_ids = [n.strip() for n in nodes.split(",") if n.strip()]
+    result = session.iterate(describe, request_type=request_type, affected_nodes=node_ids)
+    for note in result.get("notes", []):
+        typer.echo(note)
+    if result.get("done"):
+        typer.echo(f"✅ Iteración {result['entry_id']} cerrada (ciclo {result['cycle']}).")
+    else:
+        typer.echo(f"⛔ Iteración {result['entry_id']} bloqueada:")
+        for err in result.get("errors", [])[:10]:
+            typer.echo(f"   - {err}")
+        raise typer.Exit(code=1)
+
+
+@app.command()
 def serve(
     workspace: Path = typer.Option(Path.cwd(), help="Raíz del workspace"),
 ) -> None:
