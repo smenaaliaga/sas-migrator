@@ -72,6 +72,11 @@ def phase2_analysis(state: MigrationGraphState) -> dict:
     core_analyze.main(st)
     with _argv(["--state-dir", str(st)]):
         core_indexes.main()
+
+    # Parser v2: placement + inputs/outputs recuperados + reporte comparativo.
+    from sas_migrator.core.parser.enrich import enrich_state
+
+    enrich_state(st)
     core_ledger.cmd_init(st)
 
     # Criterio del code-analyst (stub): reviews, descripciones, fichas M-xxx.

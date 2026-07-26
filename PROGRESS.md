@@ -8,7 +8,15 @@
 |---|---|---|
 | **0 — Fundaciones** | ✅ Completada | Port del núcleo + fixes + config + CI. **84 tests en verde, ruff limpio.** |
 | **1 — Grafo esqueleto** | ✅ Completada | Pipeline 0-8 end-to-end con gates forzados por topología. **90 tests.** |
-| **2 — Parser SAS v2 + placement** | 🔨 En curso | Tokenizador + parsers dirigidos + clasificador de placement. |
+| **2 — Parser SAS v2 + placement** | ✅ Completada | Tokenizador + parsers dirigidos + placement con evidencia. **113 tests.** |
+
+## Etapa 2 — qué se hizo
+
+- **Tokenizador SAS real** (`core/parser/tokenizer.py`): comentarios `/* */` y `* ;` con semántica SAS correcta (un `* comentario;` solo cuenta como comentario si abre el statement — `monto = a * b;` sobrevive, el bug v1), strings con comillas escapadas, split por statements.
+- **Parsers dirigidos** (`core/parser/statements.py`): `DATA a b;` captura ambos outputs, `SET/MERGE x y` ambos inputs, `CREATE TABLE` como output (invisible en v1 — el construct más común de EG), todos los JOIN como inputs, `INSERT/DELETE/UPDATE` como escrituras, LIBNAME de 1 letra, `CONNECT TO ... AS alias` (passthrough), PROC IMPORT/EXPORT, `data=`/`out=` de PROCs, `&lib..tabla` marcado como macro-dependiente en vez de perderse.
+- **Clasificador de placement** (`core/parser/placement.py`): `sql_passthrough | sql_pushdown | pandas | hybrid | ambiguous` derivado de la estructura (origen BD/WORK/archivo de cada dataset + lógica DATA step), con evidencia y razones por nodo. Regla acordada: replica la localidad que SAS tenía; librefs sin confirmar → `ambiguous` → entrevista B4b, jamás se adivina.
+- **Integración al pipeline**: `enrich_state()` corre en la Fase 2 tras build_indexes; `nodes_index.json` gana `placement/placement_reasons/inputs_v2/outputs_v2/macro_refs`; `parser_upgrade_report.json` compara v1 vs v2 por nodo (sobre el .egp sintético ya recupera el `CREATE TABLE` que v1 perdía — test lo demuestra).
+- 23 tests nuevos de parser/placement + 3 de integración. Los campos v1 del extractor NO se tocan (el residuo de extracción sigue intacto); la migración del lineage a la vista v2 queda para la Etapa 4 (ver PREGUNTAS).
 
 ## Etapa 1 — qué se hizo
 
