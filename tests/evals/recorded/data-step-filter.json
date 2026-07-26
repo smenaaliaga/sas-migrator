@@ -1,0 +1,15 @@
+{
+  "node_id": "data-step-filter",
+  "node_label": "Filtra ventas positivas",
+  "strategy": "pandas",
+  "imports": [],
+  "cells": [
+    "ventas_pos = ventas[ventas[\"monto\"] > 0].copy()\nventas_pos[\"monto_iva\"] = ventas_pos[\"monto\"] * 1.19\n"
+  ],
+  "traceability": {
+    "sas_construct": "DATA step con subsetting IF",
+    "business_rule": "Conserva las ventas con monto positivo y calcula el monto con IVA"
+  },
+  "confidence": "high",
+  "warnings": []
+}

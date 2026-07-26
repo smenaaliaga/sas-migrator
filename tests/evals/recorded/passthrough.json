@@ -1,0 +1,17 @@
+{
+  "node_id": "passthrough",
+  "node_label": "Limpieza en BD",
+  "strategy": "sql_passthrough",
+  "imports": [],
+  "cells": [
+    "periodo = 202601  # parámetro\nwith engine.begin() as conn:\n    conn.exec_driver_sql(\"DELETE FROM dbo.resumen WHERE periodo = ?\", (periodo,))\nchk = pd.read_sql(\"SELECT COUNT(*) AS n FROM dbo.resumen\", engine)\n"
+  ],
+  "traceability": {
+    "sas_construct": "PROC SQL passthrough (CONNECT TO / EXECUTE BY)",
+    "business_rule": "Borra el periodo en la BD y verifica el conteo restante"
+  },
+  "confidence": "medium",
+  "warnings": [
+    "El SQL passthrough original ya era nativo; se conserva casi literal"
+  ]
+}

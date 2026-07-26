@@ -11,6 +11,48 @@
 | **2 — Parser SAS v2 + placement** | ✅ Completada | Tokenizador + parsers dirigidos + placement con evidencia. **113 tests.** |
 | **2.5 — Resolución PREGUNTAS Q1-Q3** | ✅ Completada | Vista v2 única (lineage calificado), DB_ENGINES general+config, placement `utility`. **125 tests.** |
 | **3 — Human-in-the-loop + MCP** | ✅ Completada | Entrevistas como `interrupt()` con payloads tipados, CLI interactiva, servidor MCP, 5 ADRs. **173 tests.** |
+| **4 — Nodos LLM + ensamblador** | ✅ Completada | LLM real en fases 2/3/6 con retry→needs_human, ensamblador determinista, audit placement-aware, eval set. **~225 tests.** |
+
+## Etapa 4 — qué se hizo
+
+- **`llm/`** (ADR-0006): `StructuredCaller` con structured outputs y retry
+  acotado (≤3, correctivos) → `NeedsHuman`; refusal → `NeedsHuman`; transporte
+  propaga. `AnthropicCaller` (anthropic lazy — CI no instala el extra;
+  modelo pineado `claude-opus-5` por config `llm:`; prompt caching en el
+  system estable), `FakeCaller` (valida contra el output_model) y
+  `runtime.get_caller/set_caller` (inyección sin pasar por el checkpointer).
+- **needs_human**: `state/needs_human.yaml` + bloqueo de gates 2/3/6 por item
+  sin resolver — nunca silencio; la traducción fallida además aparece como
+  missing_mapping en la auditoría (doble señal).
+- **Contratos**: `NodeTranslation` {imports, cells, traceability, confidence,
+  warnings} (también output_model del LLM) y `SasPythonMapping` tipado con
+  schema + validación en gate 6.
+- **Ensamblador determinista** (`core/assembly`): único escritor de
+  notebooks; cell_index/cell_count por construcción; chequeos estáticos antes
+  de escribir (ast, imports resolubles, to_parquet/duckdb/f-string-SQL,
+  strategy_mismatch) — fallo = nodo fuera + needs_human, nunca notebook roto.
+  El stub emite NodeTranslation y usa el MISMO ensamblador (CI/golden lo
+  cubren). Convención única de rutas `output/...` (fix del bug de cwd en
+  generation_status); `gen_run_all` cableado a la fase 6 y exigido por gate.
+- **planning por placement**: strategy derivada del placement efectivo
+  (clasificador + overrides B4b); utility→python; ambiguous→pandas con
+  supuesto visible por nodo.
+- **Nodos LLM reales** (rama stub_mode en 2/3/6): análisis map-reduce por PFD
+  (reviews únicas + descripciones + fichas M-xxx proposed), matching
+  archivo↔nodo (fallback honesto needs_confirmation), traducción por nodo con
+  las DOS tablas de patrones (SAS→pandas / SAS SQL→T-SQL) en UN prefijo
+  system cacheado.
+- **Auditoría placement-aware**: pushdown sin full-table-read+pandas pesado
+  (high), pandas sin SQL dinámico (high), hybrid con WHERE (medium), utility
+  sin I/O (low). Categoría nueva `placement`; `sql_from_markers` entró a
+  AuditConfig.
+- **Eval set** (`tests/evals/`): 6 casos SAS→propiedades esperadas; modo
+  recorded SIEMPRE en CI (harness + estáticos + ensamblador, sin fingir
+  modelo) y modo live con `ANTHROPIC_API_KEY`.
+- **Fase 7 mínima honesta**: rama no-stub que stage-a referencias SAS
+  (`references_staged`); la cascada contra la BD real es Etapa 5.
+- Diferido a Etapa 5: cascada de validación vs SQL Server, paso 4 de B4b
+  (verify_tables), docs LLM (fase 8 sigue template).
 
 ## Etapa 3 — qué se hizo
 

@@ -39,6 +39,7 @@ class AuditConfig(BaseModel):
 
     domain_markers: list[str] = Field(default_factory=list)
     sql_engine_markers: list[str] = Field(default_factory=list)
+    sql_from_markers: list[str] = Field(default_factory=list)
     env_secret_markers: list[str] = Field(
         default_factory=lambda: ["os.environ", "dotenv"]
     )

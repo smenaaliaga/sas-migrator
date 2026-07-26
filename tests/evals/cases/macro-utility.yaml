@@ -1,0 +1,13 @@
+id: macro-utility
+strategy: python
+placement: utility
+node_label: Parámetros de periodo
+sas_code: |
+  %let periodo = 202601;
+  %macro ultimo_dia(anio, mes);
+    %sysfunc(day(%sysfunc(intnx(month, %sysfunc(mdy(&mes,1,&anio)), 0, e))))
+  %mend ultimo_dia;
+expect:
+  cells_regex_all: ["periodo", "def |="]
+  forbid: ["to_parquet", "duckdb", "read_sql", "read_csv", "read_excel", "to_sql"]
+  min_cells: 1

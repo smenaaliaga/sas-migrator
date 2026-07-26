@@ -104,6 +104,7 @@ class NodeTranslationIssueCategory(str, Enum):
     SEMANTIC = "semantic"
     SECURITY = "security"
     RUNTIME = "runtime"
+    PLACEMENT = "placement"  # Etapa 4: la traducción respeta dónde corre el cómputo
 
 
 class NodeTranslationAuditIssue(BaseModel):

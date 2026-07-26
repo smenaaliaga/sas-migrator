@@ -1,0 +1,16 @@
+id: passthrough
+strategy: sql_passthrough
+placement: sql_passthrough
+node_label: Limpieza en BD
+sas_code: |
+  proc sql;
+    connect to odbc as plat (datasrc="DWH");
+    execute (delete from dbo.resumen where periodo = 202601) by plat;
+    create table work.chk as
+    select * from connection to plat (select count(*) as n from dbo.resumen);
+    disconnect from plat;
+  quit;
+expect:
+  cells_regex_all: ["(?i)delete from", "read_sql|exec_driver_sql|execute"]
+  forbid: ["to_parquet", "duckdb"]
+  min_cells: 1

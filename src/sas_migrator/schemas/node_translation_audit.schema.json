@@ -88,7 +88,8 @@
         "traceability",
         "semantic",
         "security",
-        "runtime"
+        "runtime",
+        "placement"
       ],
       "title": "NodeTranslationIssueCategory",
       "type": "string"

@@ -1,0 +1,14 @@
+id: data-step-merge
+strategy: pandas
+placement: pandas
+node_label: Cruza clientes y ventas
+sas_code: |
+  data work.cruce;
+    merge work.clientes(in=a) work.ventas(in=b);
+    by id_cliente;
+    if a and b;
+  run;
+expect:
+  cells_regex_all: ["\\.merge\\(", "id_cliente", "inner|_merge"]
+  forbid: ["to_parquet", "duckdb", "read_sql"]
+  min_cells: 1

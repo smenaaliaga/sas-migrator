@@ -1,0 +1,15 @@
+{
+  "node_id": "macro-utility",
+  "node_label": "Parámetros de periodo",
+  "strategy": "python",
+  "imports": ["import calendar"],
+  "cells": [
+    "periodo = 202601  # parámetro (%let periodo)\n\ndef ultimo_dia(anio: int, mes: int) -> int:\n    return calendar.monthrange(anio, mes)[1]\n"
+  ],
+  "traceability": {
+    "sas_construct": "%LET + %MACRO utilitaria de fechas",
+    "business_rule": "Declara el periodo de proceso y el último día de un mes"
+  },
+  "confidence": "high",
+  "warnings": []
+}

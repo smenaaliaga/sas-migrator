@@ -1,0 +1,15 @@
+{
+  "node_id": "proc-sort",
+  "node_label": "Ordena por total",
+  "strategy": "pandas",
+  "imports": [],
+  "cells": [
+    "ventas_ord = ventas.sort_values([\"total\", \"id_cliente\"], ascending=[False, True]).reset_index(drop=True)\n"
+  ],
+  "traceability": {
+    "sas_construct": "PROC SORT BY DESCENDING",
+    "business_rule": "Ordena las ventas de mayor a menor total"
+  },
+  "confidence": "high",
+  "warnings": []
+}

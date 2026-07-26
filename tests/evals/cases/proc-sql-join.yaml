@@ -1,0 +1,17 @@
+id: proc-sql-join
+strategy: sql_pushdown
+placement: sql_pushdown
+node_label: Resumen por región
+sas_code: |
+  proc sql;
+    create table gob.resumen as
+    select a.id, b.region, sum(a.monto) as total
+    from gob.ventas a
+    inner join gob.sucursales b on a.suc = b.suc
+    where a.periodo = &periodo
+    group by a.id, b.region;
+  quit;
+expect:
+  cells_regex_all: ["read_sql|exec_driver_sql|execute", "(?i)where", "(?i)join"]
+  forbid: ["to_parquet", "duckdb"]
+  min_cells: 1

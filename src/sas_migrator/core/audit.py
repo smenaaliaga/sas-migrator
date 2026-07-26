@@ -203,6 +203,62 @@ def main() -> int:
     return run_audit((root / args.state_dir).resolve(), (root / args.output_dir).resolve())
 
 
+# ── Reglas placement-aware (Etapa 4) ────────────────────────────────────────
+
+_DATA_IO_TOKENS = ("read_sql", "read_csv", "read_excel", "to_sql")
+
+
+def _placement_issues(
+    placement: str | None, nid: str, node_label: str, nb_rel: str, mapped_text: str
+) -> list[Issue]:
+    """La traducción debe respetar DÓNDE corre el cómputo (placement).
+
+    Heurísticas sobre la(s) celda(s) mapeadas del nodo:
+    - sql_pushdown: full-table read (read_sql sin WHERE) + pandas pesado = high;
+    - pandas: SQL dinámico (f-string/.format) dentro de read_sql = high;
+    - hybrid: el extract debe filtrar en el WHERE = medium;
+    - utility: no debería tener I/O de datos = low.
+    """
+    text = mapped_text or ""
+    low = text.lower()
+    if not placement or not text:
+        return []
+
+    def issue(severity: str, detail: str) -> Issue:
+        return Issue(severity, "placement", nid, node_label, nb_rel, detail)
+
+    has_read_sql = "read_sql" in low
+    has_where = "where" in low
+    if placement == "sql_pushdown":
+        if has_read_sql and not has_where and (".groupby(" in text or ".merge(" in text):
+            return [issue(
+                "high",
+                "sql_pushdown: full-table read (read_sql sin WHERE) con groupby/merge "
+                "pesado en pandas — el cómputo debe ir en el SQL",
+            )]
+    elif placement == "pandas":
+        if has_read_sql and ('f"' in text or "f'" in text or ".format(" in text):
+            return [issue(
+                "high",
+                "pandas: SQL dinámico (f-string/.format) en read_sql — un nodo pandas "
+                "no arma SQL dinámico",
+            )]
+    elif placement == "hybrid":
+        if has_read_sql and not has_where:
+            return [issue(
+                "medium",
+                "hybrid: read_sql sin WHERE — el extract debe filtrar al mínimo en el SQL",
+            )]
+    elif placement == "utility":
+        if any(tok in low for tok in _DATA_IO_TOKENS):
+            return [issue(
+                "low",
+                "utility: nodo utilitario con I/O de datos — revisar si el placement "
+                "es correcto",
+            )]
+    return []
+
+
 def run_audit(state_dir: Path, output_dir: Path) -> int:
     """Corre la auditoría in-process (invocable desde check_gate sin subprocess)."""
     state_dir = Path(state_dir).resolve()
@@ -214,6 +270,11 @@ def run_audit(state_dir: Path, output_dir: Path) -> int:
     mapping_doc = load_json(state_dir / "sas_python_mapping.json")
     heuristics = load_heuristics(state_dir)
     ignored = load_ignored_nodes(state_dir)
+
+    # Placement efectivo (clasificador + overrides de la entrevista B4b).
+    from sas_migrator.core.planning import load_placement_overrides
+
+    placement_overrides = load_placement_overrides(state_dir)
 
     nodes = nodes_index.get("nodes", [])
     mappings = mapping_doc.get("mappings", mapping_doc if isinstance(mapping_doc, list) else [])
@@ -337,6 +398,11 @@ def run_audit(state_dir: Path, output_dir: Path) -> int:
                     detail="Node label/homolog marker not found in notebook markdown",
                 )
             )
+
+        placement = placement_overrides.get(nid) or (
+            node.get("placement") if node else None
+        )
+        issues.extend(_placement_issues(placement, nid, node_label, nb_rel, mapped_text))
 
         node_file = state_dir / "nodes" / f"{nid}.json"
         if not node_file.exists():

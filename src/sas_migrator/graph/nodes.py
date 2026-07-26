@@ -193,12 +193,39 @@ def phase6_generation(state: MigrationGraphState) -> dict:
     return {"current_phase": 6, "notes": [note]}
 
 
-# ── Fase 7: validación (modo sin insumos en stub) ────────────────────────────
+# ── Fase 7: validación (stub | referencias staged; cascada vs BD = Etapa 5) ──
 
 def phase7_validation(state: MigrationGraphState) -> dict:
-    _, st, _ = _paths(state)
-    stubs.stub_validation_report(st)
-    return {"current_phase": 7, "notes": ["fase 7: validación not_applicable (stub)"]}
+    ws, st, _ = _paths(state)
+    if state.get("stub_mode", True):
+        stubs.stub_validation_report(st)
+        return {"current_phase": 7, "notes": ["fase 7: validación not_applicable (stub)"]}
+
+    from sas_migrator.core.validation.references import stage_references
+
+    staged = stage_references(st, ws / "input" / "data", st / "reference_outputs")
+    if staged:
+        report = {
+            "mode": "references_staged",
+            "overall_status": "PASS",
+            "results": [],
+            "references": staged,
+            "notes": [
+                f"{len(staged)} referencia(s) SAS staged en state/reference_outputs/",
+                "la cascada de comparación contra la BD real corre en la Etapa 5",
+            ],
+        }
+        note = f"fase 7: {len(staged)} referencia(s) staged (cascada vs BD = Etapa 5)"
+    else:
+        report = {
+            "mode": "not_applicable",
+            "overall_status": "PASS",
+            "results": [],
+            "notes": ["sin referencias SAS ni tablas destino; validación pendiente (Etapa 5)"],
+        }
+        note = "fase 7: validación not_applicable (sin referencias)"
+    _dump_json(st / "validation_report.json", report)
+    return {"current_phase": 7, "notes": [note]}
 
 
 # ── Fase 8: documentación (stub) ─────────────────────────────────────────────

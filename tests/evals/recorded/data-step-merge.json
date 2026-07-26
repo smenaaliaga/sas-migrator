@@ -1,0 +1,17 @@
+{
+  "node_id": "data-step-merge",
+  "node_label": "Cruza clientes y ventas",
+  "strategy": "pandas",
+  "imports": [],
+  "cells": [
+    "cruce = clientes.merge(ventas, on=\"id_cliente\", how=\"inner\")\n"
+  ],
+  "traceability": {
+    "sas_construct": "DATA step MERGE con in= (intersección)",
+    "business_rule": "Cruza clientes con sus ventas conservando solo coincidencias"
+  },
+  "confidence": "high",
+  "warnings": [
+    "MERGE BY de SAS exige orden previo; merge de pandas no lo requiere"
+  ]
+}

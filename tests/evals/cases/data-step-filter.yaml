@@ -1,0 +1,14 @@
+id: data-step-filter
+strategy: pandas
+placement: pandas
+node_label: Filtra ventas positivas
+sas_code: |
+  data work.ventas_pos;
+    set work.ventas;
+    if monto > 0;
+    monto_iva = monto * 1.19;
+  run;
+expect:
+  cells_regex_all: ["ventas\\[", "1\\.19"]
+  forbid: ["to_parquet", "duckdb", "read_sql"]
+  min_cells: 1

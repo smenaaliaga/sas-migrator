@@ -46,6 +46,34 @@ def load_target_tables(state_dir: Path) -> list[str]:
     return sorted(tables)
 
 
+def stage_references(state_dir: Path, input_dir: Path, ref_dir: Path) -> list[str]:
+    """Copia a ``ref_dir`` las referencias SAS que matchean tablas destino.
+
+    Devuelve las líneas 'origen -> destino' (vacía si no hay tablas o
+    candidatos). Vía in-process para el nodo de Fase 7.
+    """
+    targets = load_target_tables(state_dir)
+    if not targets:
+        return []
+    ref_dir.mkdir(parents=True, exist_ok=True)
+
+    candidates: dict[str, Path] = {}
+    if input_dir.exists():
+        for f in sorted(input_dir.iterdir()):
+            if f.is_file() and f.suffix.lower() in REFERENCE_SUFFIXES:
+                candidates.setdefault(f.stem.upper(), f)
+
+    staged: list[str] = []
+    for table in targets:
+        src = candidates.get(table)
+        if src is None:
+            continue
+        dest = ref_dir / f"{table}{src.suffix.lower()}"
+        shutil.copyfile(src, dest)  # byte copy: preserve original separator/encoding
+        staged.append(f"{src.name} -> {dest.name}")
+    return staged
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Stage SAS reference outputs for validation")
     parser.add_argument("--state-dir", default="state", help="State directory (default: state)")
@@ -63,27 +91,18 @@ def main() -> int:
         print("No hay tablas destino en translation_plan.json — nada que referenciar.", file=sys.stderr)
         return 0
 
-    ref_dir.mkdir(parents=True, exist_ok=True)
+    staged = stage_references(state_dir, input_dir, ref_dir)
 
-    # Index candidate reference files by uppercased stem.
-    candidates: dict[str, Path] = {}
+    candidate_stems: set[str] = set()
     if input_dir.exists():
-        for f in sorted(input_dir.iterdir()):
-            if f.is_file() and f.suffix.lower() in REFERENCE_SUFFIXES:
-                candidates.setdefault(f.stem.upper(), f)
-
-    staged: list[str] = []
-    for table in targets:
-        src = candidates.get(table)
-        if src is None:
-            continue
-        dest = ref_dir / f"{table}{src.suffix.lower()}"
-        shutil.copyfile(src, dest)  # byte copy: preserve original separator/encoding
-        staged.append(f"{src.name} -> {dest.name}")
-
+        candidate_stems = {
+            f.stem.upper()
+            for f in input_dir.iterdir()
+            if f.is_file() and f.suffix.lower() in REFERENCE_SUFFIXES
+        }
     matched_tables = {s.split(' -> ')[1].rsplit('.', 1)[0] for s in staged}
     tables_without_ref = [t for t in targets if t not in matched_tables]
-    files_unused = sorted(set(candidates) - set(matched_tables))
+    files_unused = sorted(candidate_stems - set(matched_tables))
 
     print(f"OK referencias: {len(staged)}/{len(targets)} tablas destino con referencia SAS -> {ref_dir}/")
     for line in staged:

@@ -1,0 +1,12 @@
+id: proc-sort
+strategy: pandas
+placement: pandas
+node_label: Ordena por total
+sas_code: |
+  proc sort data=work.ventas out=work.ventas_ord;
+    by descending total id_cliente;
+  run;
+expect:
+  cells_regex_all: ["sort_values\\(", "ascending"]
+  forbid: ["to_parquet", "duckdb", "read_sql"]
+  min_cells: 1
