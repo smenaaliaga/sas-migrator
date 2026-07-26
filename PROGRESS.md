@@ -13,6 +13,40 @@
 | **3 — Human-in-the-loop + MCP** | ✅ Completada | Entrevistas como `interrupt()` con payloads tipados, CLI interactiva, servidor MCP, 5 ADRs. **173 tests.** |
 | **4 — Nodos LLM + ensamblador** | ✅ Completada | LLM real en fases 2/3/6 con retry→needs_human, ensamblador determinista, audit placement-aware, eval set. **222 tests (+6 evals live con API key).** |
 | **5 — Ejecución, validación e iteración** | ✅ Completada | nbclient tras la pausa sagrada, cascada dialect-agnóstica + diagnóstico LLM, doc-writer, Fase 9 con gate. DoD e2e vs BD de prueba. **249 tests (+6 evals live, +1 LocalDB en CI).** |
+| **6 — Golden real + hardening** | ✅ Scaffold completo | Trazas LLM, scanner de secretos, fuzz del parser, evals 6→12, harness `.egp` real + nightly, README. **308 tests.** Falta solo correr el harness con el `.egp` productivo del usuario. |
+
+## Etapa 6 — qué se hizo
+
+- **Trazas LLM locales** (`llm/trace.py`): `TracingCaller` envuelve al caller
+  real y registra cada llamada en `state/llm_trace.jsonl` (task, hash del
+  prompt, modelo, outcome ok/needs_human/error, intentos, duración, tokens);
+  `summarize()` agrega por task. Sin servicios externos; "el traductor anda
+  peor" pasa de anécdota a diff de trazas.
+- **Hardening como código**:
+  - Scanner de secretos en el ensamblador (`secret_detected`): password/pwd
+    literal, `sk-ant-`, `AKIA`, bearer tokens — antes era regla de prompt.
+  - Fuzzing ligero del parser: 20 casos de SAS malformado/truncado/basura que
+    jamás deben crashear `parse_sas_code` ni `classify_placement`.
+  - Barrido `datetime.utcnow` deprecado → `datetime.now(UTC)` (15 sitios,
+    ~1000 warnings eliminados).
+  - `core/db/profile.py` dialect-agnóstico (inspector SQLAlchemy) y con tests
+    sobre sqlite — deuda de Etapa 0 saldada.
+- **Eval set 6→12 casos recorded**: PROC MEANS/CLASS, TRANSPOSE, first./last.,
+  RETAIN acumulado, pushdown de escritura (SELECT INTO), PROC EXPORT CSV.
+  Crece hacia 30-50 con bugs reales del `.egp` productivo.
+- **Harness `.egp` real** (`tests/integration/`, activado por
+  `SASMIG_REAL_EGP`): extracción+parser con backlog de desacuerdos v1-vs-v2,
+  pipeline estructural completo en stub, y traducción live nodo a nodo cuyos
+  desvíos alimentan el backlog (regla anti-drift: desvío ⇒ verificación
+  nueva, nunca más prompt).
+- **Nightly** (`.github/workflows/nightly.yml`): suite completa + evals live
+  (secret `ANTHROPIC_API_KEY`) + harness `.egp` por `workflow_dispatch` con el
+  backlog como artifact.
+- **README.md** de operación + ADR-0008 (observabilidad y harness real).
+
+**Pendiente del DoD**: correr el harness con el `.egp` productivo real
+(`SASMIG_REAL_EGP=... pytest tests/integration -q`) y convertir el backlog en
+casos de eval / fixes. Requiere que el usuario aporte su `.egp`.
 
 ## Etapa 5 — qué se hizo
 
