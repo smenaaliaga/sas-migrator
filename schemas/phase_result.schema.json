@@ -1,0 +1,98 @@
+{
+  "$defs": {
+    "GateCheck": {
+      "description": "Result of a gate validation between phases.",
+      "properties": {
+        "phase": {
+          "$ref": "#/$defs/Phase"
+        },
+        "passed": {
+          "title": "Passed",
+          "type": "boolean"
+        },
+        "errors": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Errors",
+          "type": "array"
+        },
+        "checked_at": {
+          "format": "date-time",
+          "title": "Checked At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "phase",
+        "passed"
+      ],
+      "title": "GateCheck",
+      "type": "object"
+    },
+    "Phase": {
+      "enum": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9
+      ],
+      "title": "Phase",
+      "type": "integer"
+    }
+  },
+  "description": "Outcome of executing a single phase.",
+  "properties": {
+    "phase": {
+      "$ref": "#/$defs/Phase"
+    },
+    "started_at": {
+      "format": "date-time",
+      "title": "Started At",
+      "type": "string"
+    },
+    "completed_at": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Completed At"
+    },
+    "artifacts_produced": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Artifacts Produced",
+      "type": "array"
+    },
+    "gate": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/GateCheck"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    }
+  },
+  "required": [
+    "phase",
+    "started_at"
+  ],
+  "title": "PhaseResult",
+  "type": "object"
+}

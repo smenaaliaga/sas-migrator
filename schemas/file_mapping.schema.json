@@ -1,0 +1,48 @@
+{
+  "description": "Mapping of a data file to a SAS DAG node.",
+  "properties": {
+    "file_path": {
+      "title": "File Path",
+      "type": "string"
+    },
+    "node_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Node Id"
+    },
+    "role": {
+      "default": "",
+      "title": "Role",
+      "type": "string"
+    },
+    "confidence": {
+      "default": 0.0,
+      "title": "Confidence",
+      "type": "number"
+    },
+    "reasons": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Reasons",
+      "type": "array"
+    },
+    "needs_confirmation": {
+      "default": false,
+      "title": "Needs Confirmation",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "file_path"
+  ],
+  "title": "FileMapping",
+  "type": "object"
+}

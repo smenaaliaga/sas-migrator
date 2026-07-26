@@ -1,0 +1,61 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "sas-migrator"
+version = "2.0.0a0"
+description = "SAS EG to Python migration pipeline — LangGraph orchestration over a deterministic core"
+requires-python = ">=3.11"
+dependencies = [
+    "pandas>=2.0",
+    "pydantic>=2.5",
+    "pyyaml>=6.0",
+    "jsonschema>=4.20",
+    "openpyxl>=3.1",
+    "nbformat>=5.9",
+    "rapidfuzz>=3.0",
+]
+
+[project.optional-dependencies]
+graph = [
+    "langgraph>=0.2",
+    "langgraph-checkpoint-sqlite>=2.0",
+]
+llm = [
+    "anthropic>=0.40",
+]
+db = [
+    "sqlalchemy>=2.0",
+    "pyodbc>=5.0",
+]
+notebook = [
+    "jupytext>=1.16",
+    "nbclient>=0.10",
+    "papermill>=2.5",
+]
+cli = [
+    "typer>=0.12",
+]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=4.0",
+    "ruff>=0.6",
+]
+
+[project.scripts]
+sas-migrator = "sas_migrator.cli.main:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/sas_migrator"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["E501"]

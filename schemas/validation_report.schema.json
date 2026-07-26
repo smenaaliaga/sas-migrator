@@ -1,0 +1,269 @@
+{
+  "$defs": {
+    "MismatchCause": {
+      "enum": [
+        "encoding",
+        "rounding",
+        "null_semantics",
+        "collation",
+        "row_order",
+        "type_coercion",
+        "missing_transform",
+        "unknown"
+      ],
+      "title": "MismatchCause",
+      "type": "string"
+    },
+    "MismatchDiagnosis": {
+      "description": "Diagnosis of a test failure.",
+      "properties": {
+        "test_type": {
+          "$ref": "#/$defs/TestType"
+        },
+        "dataset": {
+          "title": "Dataset",
+          "type": "string"
+        },
+        "column": {
+          "default": "",
+          "title": "Column",
+          "type": "string"
+        },
+        "expected_value": {
+          "default": "",
+          "title": "Expected Value",
+          "type": "string"
+        },
+        "actual_value": {
+          "default": "",
+          "title": "Actual Value",
+          "type": "string"
+        },
+        "probable_cause": {
+          "$ref": "#/$defs/MismatchCause",
+          "default": "unknown"
+        },
+        "explanation": {
+          "default": "",
+          "title": "Explanation",
+          "type": "string"
+        },
+        "proposed_fix": {
+          "default": "",
+          "title": "Proposed Fix",
+          "type": "string"
+        }
+      },
+      "required": [
+        "test_type",
+        "dataset"
+      ],
+      "title": "MismatchDiagnosis",
+      "type": "object"
+    },
+    "TestResult": {
+      "description": "Result of a single validation test.",
+      "properties": {
+        "test_type": {
+          "$ref": "#/$defs/TestType"
+        },
+        "status": {
+          "$ref": "#/$defs/TestStatus"
+        },
+        "dataset": {
+          "default": "",
+          "title": "Dataset",
+          "type": "string"
+        },
+        "details": {
+          "default": "",
+          "title": "Details",
+          "type": "string"
+        },
+        "expected": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expected"
+        },
+        "actual": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Actual"
+        },
+        "tolerance_used": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tolerance Used"
+        }
+      },
+      "required": [
+        "test_type",
+        "status"
+      ],
+      "title": "TestResult",
+      "type": "object"
+    },
+    "TestStatus": {
+      "enum": [
+        "passed",
+        "failed",
+        "skipped",
+        "error"
+      ],
+      "title": "TestStatus",
+      "type": "string"
+    },
+    "TestType": {
+      "enum": [
+        "schema",
+        "row_count",
+        "aggregates",
+        "row_by_row"
+      ],
+      "title": "TestType",
+      "type": "string"
+    }
+  },
+  "additionalProperties": true,
+  "description": "Complete validation report for a migration run.",
+  "properties": {
+    "validation_mode": {
+      "default": "not_applicable",
+      "title": "Validation Mode",
+      "type": "string"
+    },
+    "tests": {
+      "items": {
+        "$ref": "#/$defs/TestResult"
+      },
+      "title": "Tests",
+      "type": "array"
+    },
+    "diagnoses": {
+      "items": {
+        "$ref": "#/$defs/MismatchDiagnosis"
+      },
+      "title": "Diagnoses",
+      "type": "array"
+    },
+    "overall_passed": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Overall Passed"
+    },
+    "user_accepted_deviations": {
+      "items": {
+        "type": "string"
+      },
+      "title": "User Accepted Deviations",
+      "type": "array"
+    },
+    "total_files": {
+      "default": 0,
+      "title": "Total Files",
+      "type": "integer"
+    },
+    "passed": {
+      "default": 0,
+      "title": "Passed",
+      "type": "integer"
+    },
+    "failed": {
+      "default": 0,
+      "title": "Failed",
+      "type": "integer"
+    },
+    "errors": {
+      "default": 0,
+      "title": "Errors",
+      "type": "integer"
+    },
+    "pass_rate": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Pass Rate"
+    },
+    "unmatched_reference": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Unmatched Reference",
+      "type": "array"
+    },
+    "unmatched_generated": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Unmatched Generated",
+      "type": "array"
+    },
+    "results": {
+      "items": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "title": "Results",
+      "type": "array"
+    },
+    "notebooks": {
+      "items": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "title": "Notebooks",
+      "type": "array"
+    },
+    "summary": {
+      "additionalProperties": true,
+      "title": "Summary",
+      "type": "object"
+    },
+    "note": {
+      "default": "",
+      "title": "Note",
+      "type": "string"
+    },
+    "run_at": {
+      "format": "date-time",
+      "title": "Run At",
+      "type": "string"
+    }
+  },
+  "title": "ValidationReport",
+  "type": "object"
+}

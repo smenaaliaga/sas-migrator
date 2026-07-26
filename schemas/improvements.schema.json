@@ -1,0 +1,95 @@
+{
+  "$defs": {
+    "ImprovementCategory": {
+      "enum": [
+        "performance",
+        "quality",
+        "maintainability",
+        "reproducibility",
+        "modernization",
+        "security",
+        "observability",
+        "architecture"
+      ],
+      "title": "ImprovementCategory",
+      "type": "string"
+    },
+    "ImprovementStatus": {
+      "enum": [
+        "proposed",
+        "approved",
+        "rejected",
+        "postponed"
+      ],
+      "title": "ImprovementStatus",
+      "type": "string"
+    }
+  },
+  "description": "A proposed improvement — presented as a card (ficha) to the user.",
+  "properties": {
+    "id": {
+      "title": "Id",
+      "type": "string"
+    },
+    "category": {
+      "$ref": "#/$defs/ImprovementCategory"
+    },
+    "title": {
+      "title": "Title",
+      "type": "string"
+    },
+    "description": {
+      "title": "Description",
+      "type": "string"
+    },
+    "justification": {
+      "title": "Justification",
+      "type": "string"
+    },
+    "impact": {
+      "title": "Impact",
+      "type": "string"
+    },
+    "effort": {
+      "title": "Effort",
+      "type": "string"
+    },
+    "risk": {
+      "title": "Risk",
+      "type": "string"
+    },
+    "recommendation": {
+      "title": "Recommendation",
+      "type": "string"
+    },
+    "affected_nodes": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Affected Nodes",
+      "type": "array"
+    },
+    "status": {
+      "$ref": "#/$defs/ImprovementStatus",
+      "default": "proposed"
+    },
+    "user_comment": {
+      "default": "",
+      "title": "User Comment",
+      "type": "string"
+    }
+  },
+  "required": [
+    "id",
+    "category",
+    "title",
+    "description",
+    "justification",
+    "impact",
+    "effort",
+    "risk",
+    "recommendation"
+  ],
+  "title": "Improvement",
+  "type": "object"
+}

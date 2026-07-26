@@ -1,0 +1,54 @@
+{
+  "$defs": {
+    "SmellSeverity": {
+      "enum": [
+        "info",
+        "warning",
+        "error"
+      ],
+      "title": "SmellSeverity",
+      "type": "string"
+    }
+  },
+  "description": "A problematic pattern detected in SAS code.",
+  "properties": {
+    "id": {
+      "title": "Id",
+      "type": "string"
+    },
+    "node_id": {
+      "title": "Node Id",
+      "type": "string"
+    },
+    "category": {
+      "title": "Category",
+      "type": "string"
+    },
+    "description": {
+      "title": "Description",
+      "type": "string"
+    },
+    "severity": {
+      "$ref": "#/$defs/SmellSeverity",
+      "default": "warning"
+    },
+    "line_hint": {
+      "default": "",
+      "title": "Line Hint",
+      "type": "string"
+    },
+    "recommendation": {
+      "default": "",
+      "title": "Recommendation",
+      "type": "string"
+    }
+  },
+  "required": [
+    "id",
+    "node_id",
+    "category",
+    "description"
+  ],
+  "title": "CodeSmell",
+  "type": "object"
+}

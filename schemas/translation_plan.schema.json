@@ -1,0 +1,196 @@
+{
+  "$defs": {
+    "OutputStrategy": {
+      "enum": [
+        "notebook-flow",
+        "single",
+        "hybrid"
+      ],
+      "title": "OutputStrategy",
+      "type": "string"
+    },
+    "TranslationTarget": {
+      "description": "Plan de traduccion para un nodo del DAG o grupo de notebook.",
+      "properties": {
+        "node_id": {
+          "title": "Node Id",
+          "type": "string"
+        },
+        "node_label": {
+          "default": "",
+          "title": "Node Label",
+          "type": "string"
+        },
+        "node_type": {
+          "default": "",
+          "title": "Node Type",
+          "type": "string"
+        },
+        "strategy": {
+          "default": "pandas",
+          "title": "Strategy",
+          "type": "string"
+        },
+        "notebook_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Notebook Path"
+        },
+        "input_datasets": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Input Datasets",
+          "type": "array"
+        },
+        "output_datasets": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Output Datasets",
+          "type": "array"
+        },
+        "input_dir": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Input Dir"
+        },
+        "input_files": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Input Files",
+          "type": "array"
+        },
+        "output_files": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Output Files",
+          "type": "array"
+        },
+        "output_tables": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Output Tables",
+          "type": "array"
+        },
+        "reference_csv": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reference Csv"
+        },
+        "approved_improvements": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Approved Improvements",
+          "type": "array"
+        },
+        "preprocess_steps": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Preprocess Steps",
+          "type": "array"
+        },
+        "dependencies": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Dependencies",
+          "type": "array"
+        },
+        "notes": {
+          "default": "",
+          "title": "Notes",
+          "type": "string"
+        }
+      },
+      "required": [
+        "node_id"
+      ],
+      "title": "TranslationTarget",
+      "type": "object"
+    }
+  },
+  "description": "Plan aprobado de Fase 5 consumido por el agente translator.",
+  "properties": {
+    "project_name": {
+      "default": "",
+      "title": "Project Name",
+      "type": "string"
+    },
+    "egp_file": {
+      "default": "",
+      "title": "Egp File",
+      "type": "string"
+    },
+    "output_strategy": {
+      "$ref": "#/$defs/OutputStrategy",
+      "default": "notebook-flow"
+    },
+    "generated_at": {
+      "format": "date-time",
+      "title": "Generated At",
+      "type": "string"
+    },
+    "targets": {
+      "items": {
+        "$ref": "#/$defs/TranslationTarget"
+      },
+      "title": "Targets",
+      "type": "array"
+    },
+    "ignored_nodes": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Ignored Nodes",
+      "type": "array"
+    },
+    "global_improvements": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Global Improvements",
+      "type": "array"
+    },
+    "assumptions": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Assumptions",
+      "type": "array"
+    },
+    "user_approved": {
+      "default": false,
+      "title": "User Approved",
+      "type": "boolean"
+    }
+  },
+  "title": "TranslationPlan",
+  "type": "object"
+}

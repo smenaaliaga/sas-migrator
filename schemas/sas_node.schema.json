@@ -1,0 +1,98 @@
+{
+  "$defs": {
+    "NodeType": {
+      "enum": [
+        "DATA_STEP",
+        "PROC_SQL",
+        "PROC_SORT",
+        "PROC_FREQ",
+        "PROC_MEANS",
+        "PROC_TRANSPOSE",
+        "PROC_OTHER",
+        "MACRO",
+        "QUERY",
+        "IMPORT",
+        "EXPORT",
+        "OTHER"
+      ],
+      "title": "NodeType",
+      "type": "string"
+    }
+  },
+  "description": "A single node in the SAS EG process flow.",
+  "properties": {
+    "id": {
+      "title": "Id",
+      "type": "string"
+    },
+    "label": {
+      "default": "",
+      "title": "Label",
+      "type": "string"
+    },
+    "node_type": {
+      "$ref": "#/$defs/NodeType",
+      "default": "OTHER"
+    },
+    "code": {
+      "default": "",
+      "title": "Code",
+      "type": "string"
+    },
+    "pfd_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Pfd Id"
+    },
+    "pfd_label": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Pfd Label"
+    },
+    "inputs": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Inputs",
+      "type": "array"
+    },
+    "outputs": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Outputs",
+      "type": "array"
+    },
+    "libraries": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Libraries",
+      "type": "array"
+    },
+    "metadata": {
+      "additionalProperties": true,
+      "title": "Metadata",
+      "type": "object"
+    }
+  },
+  "required": [
+    "id"
+  ],
+  "title": "SASNode",
+  "type": "object"
+}

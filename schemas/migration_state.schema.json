@@ -1,0 +1,405 @@
+{
+  "$defs": {
+    "Decision": {
+      "description": "A decision made during the migration.",
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "description": {
+          "title": "Description",
+          "type": "string"
+        },
+        "decided_at": {
+          "format": "date-time",
+          "title": "Decided At",
+          "type": "string"
+        },
+        "context": {
+          "default": "",
+          "title": "Context",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "description"
+      ],
+      "title": "Decision",
+      "type": "object"
+    },
+    "GateCheck": {
+      "description": "Result of a gate validation between phases.",
+      "properties": {
+        "phase": {
+          "$ref": "#/$defs/Phase"
+        },
+        "passed": {
+          "title": "Passed",
+          "type": "boolean"
+        },
+        "errors": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Errors",
+          "type": "array"
+        },
+        "checked_at": {
+          "format": "date-time",
+          "title": "Checked At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "phase",
+        "passed"
+      ],
+      "title": "GateCheck",
+      "type": "object"
+    },
+    "IterationEntry": {
+      "description": "A single post-migration iteration request and its outcome.",
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "cycle": {
+          "title": "Cycle",
+          "type": "integer"
+        },
+        "request_type": {
+          "title": "Request Type",
+          "type": "string"
+        },
+        "description": {
+          "title": "Description",
+          "type": "string"
+        },
+        "affected_notebooks": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Affected Notebooks",
+          "type": "array"
+        },
+        "affected_nodes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Affected Nodes",
+          "type": "array"
+        },
+        "related_improvement": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Related Improvement"
+        },
+        "context_questions": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Context Questions",
+          "type": "array"
+        },
+        "context_answers": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Context Answers",
+          "type": "array"
+        },
+        "changes_made": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Changes Made",
+          "type": "array"
+        },
+        "validation_result": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Validation Result"
+        },
+        "status": {
+          "default": "open",
+          "title": "Status",
+          "type": "string"
+        },
+        "created_at": {
+          "format": "date-time",
+          "title": "Created At",
+          "type": "string"
+        },
+        "completed_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Completed At"
+        }
+      },
+      "required": [
+        "id",
+        "cycle",
+        "request_type",
+        "description"
+      ],
+      "title": "IterationEntry",
+      "type": "object"
+    },
+    "OpenQuestion": {
+      "description": "A question pending resolution.",
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "question": {
+          "title": "Question",
+          "type": "string"
+        },
+        "source_agent": {
+          "title": "Source Agent",
+          "type": "string"
+        },
+        "phase": {
+          "$ref": "#/$defs/Phase"
+        },
+        "resolved": {
+          "default": false,
+          "title": "Resolved",
+          "type": "boolean"
+        },
+        "answer": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Answer"
+        }
+      },
+      "required": [
+        "id",
+        "question",
+        "source_agent",
+        "phase"
+      ],
+      "title": "OpenQuestion",
+      "type": "object"
+    },
+    "Phase": {
+      "enum": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9
+      ],
+      "title": "Phase",
+      "type": "integer"
+    },
+    "PhaseResult": {
+      "description": "Outcome of executing a single phase.",
+      "properties": {
+        "phase": {
+          "$ref": "#/$defs/Phase"
+        },
+        "started_at": {
+          "format": "date-time",
+          "title": "Started At",
+          "type": "string"
+        },
+        "completed_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Completed At"
+        },
+        "artifacts_produced": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Artifacts Produced",
+          "type": "array"
+        },
+        "gate": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GateCheck"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "phase",
+        "started_at"
+      ],
+      "title": "PhaseResult",
+      "type": "object"
+    }
+  },
+  "description": "Root state object — persisted as state/migration_state.json.",
+  "properties": {
+    "project_name": {
+      "default": "",
+      "title": "Project Name",
+      "type": "string"
+    },
+    "egp_file": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Egp File"
+    },
+    "framework_mode": {
+      "default": "generic",
+      "title": "Framework Mode",
+      "type": "string"
+    },
+    "current_phase": {
+      "$ref": "#/$defs/Phase",
+      "default": 0
+    },
+    "output_strategy": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": "notebook-flow",
+      "title": "Output Strategy"
+    },
+    "phases_completed": {
+      "items": {
+        "$ref": "#/$defs/PhaseResult"
+      },
+      "title": "Phases Completed",
+      "type": "array"
+    },
+    "artifacts": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "title": "Artifacts",
+      "type": "object"
+    },
+    "decisions": {
+      "items": {
+        "$ref": "#/$defs/Decision"
+      },
+      "title": "Decisions",
+      "type": "array"
+    },
+    "open_questions": {
+      "items": {
+        "$ref": "#/$defs/OpenQuestion"
+      },
+      "title": "Open Questions",
+      "type": "array"
+    },
+    "improvements_proposed": {
+      "default": 0,
+      "title": "Improvements Proposed",
+      "type": "integer"
+    },
+    "improvements_approved": {
+      "default": 0,
+      "title": "Improvements Approved",
+      "type": "integer"
+    },
+    "improvements_rejected": {
+      "default": 0,
+      "title": "Improvements Rejected",
+      "type": "integer"
+    },
+    "improvements_postponed": {
+      "default": 0,
+      "title": "Improvements Postponed",
+      "type": "integer"
+    },
+    "iteration_cycle": {
+      "default": 0,
+      "title": "Iteration Cycle",
+      "type": "integer"
+    },
+    "iteration_log": {
+      "items": {
+        "$ref": "#/$defs/IterationEntry"
+      },
+      "title": "Iteration Log",
+      "type": "array"
+    },
+    "tokens_consumed": {
+      "additionalProperties": {
+        "type": "integer"
+      },
+      "title": "Tokens Consumed",
+      "type": "object"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "updated_at": {
+      "format": "date-time",
+      "title": "Updated At",
+      "type": "string"
+    }
+  },
+  "title": "MigrationState",
+  "type": "object"
+}

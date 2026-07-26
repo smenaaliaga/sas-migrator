@@ -1,0 +1,150 @@
+{
+  "$defs": {
+    "DroppedEdge": {
+      "description": "Arista del project.xml descartada al construir el DAG.",
+      "properties": {
+        "source": {
+          "title": "Source",
+          "type": "string"
+        },
+        "target": {
+          "title": "Target",
+          "type": "string"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "target",
+        "reason"
+      ],
+      "title": "DroppedEdge",
+      "type": "object"
+    },
+    "ResidueElement": {
+      "description": "Elemento del project.xml que no se materializó como nodo del DAG.",
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "type": {
+          "default": "",
+          "title": "Type",
+          "type": "string"
+        },
+        "label": {
+          "default": "",
+          "title": "Label",
+          "type": "string"
+        },
+        "container": {
+          "default": "",
+          "title": "Container",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "title": "ResidueElement",
+      "type": "object"
+    }
+  },
+  "description": "Cuadratura .egp ↔ extracción: qué quedó fuera del DAG y por qué.\n\nPersistido como ``state/extraction_residue.json`` en Fase 2. El campo\n``unexplained_count`` es el criterio del gate: cuenta solo lo que implica\nposible código SAS o topología perdidos (code.sas huérfanos, aristas hacia\nIDs desconocidos, errores de lectura, TASK sin materializar). Lo demás\n(contenedores, TASK sin código materializados con ``requires_manual_review``)\nse reporta pero no bloquea.",
+  "properties": {
+    "egp_path": {
+      "default": "",
+      "title": "Egp Path",
+      "type": "string"
+    },
+    "generated_at": {
+      "format": "date-time",
+      "title": "Generated At",
+      "type": "string"
+    },
+    "total_elements": {
+      "default": 0,
+      "title": "Total Elements",
+      "type": "integer"
+    },
+    "materialized_nodes": {
+      "default": 0,
+      "title": "Materialized Nodes",
+      "type": "integer"
+    },
+    "element_type_counts": {
+      "additionalProperties": {
+        "type": "integer"
+      },
+      "title": "Element Type Counts",
+      "type": "object"
+    },
+    "expected_non_nodes": {
+      "items": {
+        "$ref": "#/$defs/ResidueElement"
+      },
+      "title": "Expected Non Nodes",
+      "type": "array"
+    },
+    "unmaterialized_tasks": {
+      "items": {
+        "$ref": "#/$defs/ResidueElement"
+      },
+      "title": "Unmaterialized Tasks",
+      "type": "array"
+    },
+    "orphan_code_entries": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Orphan Code Entries",
+      "type": "array"
+    },
+    "snapshot_code_entries": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Snapshot Code Entries",
+      "type": "array"
+    },
+    "tasks_without_code": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Tasks Without Code",
+      "type": "array"
+    },
+    "queries_without_payload": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Queries Without Payload",
+      "type": "array"
+    },
+    "dropped_edges": {
+      "items": {
+        "$ref": "#/$defs/DroppedEdge"
+      },
+      "title": "Dropped Edges",
+      "type": "array"
+    },
+    "warnings": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Warnings",
+      "type": "array"
+    },
+    "unexplained_count": {
+      "default": 0,
+      "title": "Unexplained Count",
+      "type": "integer"
+    }
+  },
+  "title": "ExtractionResidue",
+  "type": "object"
+}

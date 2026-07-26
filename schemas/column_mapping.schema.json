@@ -1,0 +1,29 @@
+{
+  "description": "Mapping of a file column to an expected schema column.",
+  "properties": {
+    "file_column": {
+      "title": "File Column",
+      "type": "string"
+    },
+    "schema_column": {
+      "title": "Schema Column",
+      "type": "string"
+    },
+    "match_score": {
+      "default": 0.0,
+      "title": "Match Score",
+      "type": "number"
+    },
+    "match_method": {
+      "default": "",
+      "title": "Match Method",
+      "type": "string"
+    }
+  },
+  "required": [
+    "file_column",
+    "schema_column"
+  ],
+  "title": "ColumnMapping",
+  "type": "object"
+}

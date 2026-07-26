@@ -1,0 +1,132 @@
+{
+  "$defs": {
+    "FlowInfo": {
+      "description": "Resumen determinista de un Process Flow (PFD) del proyecto SAS EG.\n\nUn Process Flow es la unidad de agrupación natural de SAS Enterprise Guide y es\nel candidato por defecto a convertirse en UN notebook bajo la estrategia\n``notebook-flow``. La sección estructural (conteos, tipos, entradas/salidas) la\ngenera el extractor de forma determinista; el campo ``description`` lo completa\nel agente code-analyst en lenguaje de negocio.",
+      "properties": {
+        "pfd_id": {
+          "title": "Pfd Id",
+          "type": "string"
+        },
+        "pfd_label": {
+          "default": "",
+          "title": "Pfd Label",
+          "type": "string"
+        },
+        "container_type": {
+          "default": "PFD",
+          "title": "Container Type",
+          "type": "string"
+        },
+        "migratable_candidate": {
+          "default": true,
+          "title": "Migratable Candidate",
+          "type": "boolean"
+        },
+        "node_count": {
+          "default": 0,
+          "title": "Node Count",
+          "type": "integer"
+        },
+        "node_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Node Ids",
+          "type": "array"
+        },
+        "node_types": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "title": "Node Types",
+          "type": "object"
+        },
+        "input_datasets": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Input Datasets",
+          "type": "array"
+        },
+        "output_datasets": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Output Datasets",
+          "type": "array"
+        },
+        "libraries": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Libraries",
+          "type": "array"
+        },
+        "notebook_slug": {
+          "default": "",
+          "title": "Notebook Slug",
+          "type": "string"
+        },
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        }
+      },
+      "required": [
+        "pfd_id"
+      ],
+      "title": "FlowInfo",
+      "type": "object"
+    }
+  },
+  "description": "Inventario de Process Flows detectados en el .egp.\n\nPersistido como ``state/flow_summary.json`` en Fase 2. Es la base para:\n- presentar al usuario los flujos detectados tras analizar el .egp,\n- seleccionar qué flujos migrar en la entrevista de Fase 4,\n- mapear un notebook por flujo en la estrategia ``notebook-flow``.",
+  "properties": {
+    "project_name": {
+      "default": "",
+      "title": "Project Name",
+      "type": "string"
+    },
+    "egp_path": {
+      "default": "",
+      "title": "Egp Path",
+      "type": "string"
+    },
+    "generated_at": {
+      "format": "date-time",
+      "title": "Generated At",
+      "type": "string"
+    },
+    "total_flows": {
+      "default": 0,
+      "title": "Total Flows",
+      "type": "integer"
+    },
+    "migratable_flows": {
+      "default": 0,
+      "title": "Migratable Flows",
+      "type": "integer"
+    },
+    "total_nodes": {
+      "default": 0,
+      "title": "Total Nodes",
+      "type": "integer"
+    },
+    "flows": {
+      "items": {
+        "$ref": "#/$defs/FlowInfo"
+      },
+      "title": "Flows",
+      "type": "array"
+    },
+    "unassigned_nodes": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Unassigned Nodes",
+      "type": "array"
+    }
+  },
+  "title": "FlowSummary",
+  "type": "object"
+}

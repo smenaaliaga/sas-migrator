@@ -1,0 +1,84 @@
+{
+  "$defs": {
+    "FileCatalogEntry": {
+      "description": "Archivo detectado durante la fase de intake.",
+      "properties": {
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "size_bytes": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Size Bytes",
+          "type": "integer"
+        },
+        "type": {
+          "default": "",
+          "title": "Type",
+          "type": "string"
+        },
+        "metadata": {
+          "additionalProperties": true,
+          "title": "Metadata",
+          "type": "object"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "title": "FileCatalogEntry",
+      "type": "object"
+    }
+  },
+  "description": "Catalogo de archivos del workspace producido en Fase 0.",
+  "properties": {
+    "egp_files": {
+      "items": {
+        "$ref": "#/$defs/FileCatalogEntry"
+      },
+      "title": "Egp Files",
+      "type": "array"
+    },
+    "data_files": {
+      "items": {
+        "$ref": "#/$defs/FileCatalogEntry"
+      },
+      "title": "Data Files",
+      "type": "array"
+    },
+    "doc_files": {
+      "items": {
+        "$ref": "#/$defs/FileCatalogEntry"
+      },
+      "title": "Doc Files",
+      "type": "array"
+    },
+    "selected_egp": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Selected Egp"
+    },
+    "scanned_at": {
+      "format": "date-time",
+      "title": "Scanned At",
+      "type": "string"
+    },
+    "notes": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Notes",
+      "type": "array"
+    }
+  },
+  "title": "IntakeCatalog",
+  "type": "object"
+}

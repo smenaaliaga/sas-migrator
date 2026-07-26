@@ -1,0 +1,95 @@
+{
+  "$defs": {
+    "AuthMethod": {
+      "enum": [
+        "active_directory_integrated",
+        "windows_auth"
+      ],
+      "title": "AuthMethod",
+      "type": "string"
+    },
+    "ConnectionRole": {
+      "enum": [
+        "source",
+        "target",
+        "both"
+      ],
+      "title": "ConnectionRole",
+      "type": "string"
+    },
+    "DatabaseConnection": {
+      "description": "Conexión a una base de datos MSSQL para lectura y/o escritura de datos.",
+      "properties": {
+        "alias": {
+          "description": "Nombre corto para identificar la conexión (ej: PLATDAT)",
+          "title": "Alias",
+          "type": "string"
+        },
+        "server": {
+          "default": "srvplatdat.bcch.local",
+          "description": "Hostname o IP del servidor SQL Server",
+          "title": "Server",
+          "type": "string"
+        },
+        "port": {
+          "default": 1433,
+          "maximum": 65535,
+          "minimum": 1,
+          "title": "Port",
+          "type": "integer"
+        },
+        "database": {
+          "description": "Nombre de la base de datos (ej: PYDCNI)",
+          "title": "Database",
+          "type": "string"
+        },
+        "schema_name": {
+          "default": "dbo",
+          "description": "Esquema por defecto para las tablas",
+          "title": "Schema Name",
+          "type": "string"
+        },
+        "auth_method": {
+          "$ref": "#/$defs/AuthMethod",
+          "default": "active_directory_integrated"
+        },
+        "driver": {
+          "default": "ODBC Driver 17 for SQL Server",
+          "title": "Driver",
+          "type": "string"
+        },
+        "role": {
+          "$ref": "#/$defs/ConnectionRole",
+          "default": "source",
+          "description": "Rol de la conexión: source (lectura), target (escritura) o both"
+        },
+        "tables": {
+          "description": "Tablas asociadas a esta conexión",
+          "items": {
+            "type": "string"
+          },
+          "title": "Tables",
+          "type": "array"
+        }
+      },
+      "required": [
+        "alias",
+        "database"
+      ],
+      "title": "DatabaseConnection",
+      "type": "object"
+    }
+  },
+  "description": "Coleccion de conexiones MSSQL declaradas para una migracion.",
+  "properties": {
+    "connections": {
+      "items": {
+        "$ref": "#/$defs/DatabaseConnection"
+      },
+      "title": "Connections",
+      "type": "array"
+    }
+  },
+  "title": "DatabaseConnections",
+  "type": "object"
+}

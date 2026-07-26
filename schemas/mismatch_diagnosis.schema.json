@@ -1,0 +1,73 @@
+{
+  "$defs": {
+    "MismatchCause": {
+      "enum": [
+        "encoding",
+        "rounding",
+        "null_semantics",
+        "collation",
+        "row_order",
+        "type_coercion",
+        "missing_transform",
+        "unknown"
+      ],
+      "title": "MismatchCause",
+      "type": "string"
+    },
+    "TestType": {
+      "enum": [
+        "schema",
+        "row_count",
+        "aggregates",
+        "row_by_row"
+      ],
+      "title": "TestType",
+      "type": "string"
+    }
+  },
+  "description": "Diagnosis of a test failure.",
+  "properties": {
+    "test_type": {
+      "$ref": "#/$defs/TestType"
+    },
+    "dataset": {
+      "title": "Dataset",
+      "type": "string"
+    },
+    "column": {
+      "default": "",
+      "title": "Column",
+      "type": "string"
+    },
+    "expected_value": {
+      "default": "",
+      "title": "Expected Value",
+      "type": "string"
+    },
+    "actual_value": {
+      "default": "",
+      "title": "Actual Value",
+      "type": "string"
+    },
+    "probable_cause": {
+      "$ref": "#/$defs/MismatchCause",
+      "default": "unknown"
+    },
+    "explanation": {
+      "default": "",
+      "title": "Explanation",
+      "type": "string"
+    },
+    "proposed_fix": {
+      "default": "",
+      "title": "Proposed Fix",
+      "type": "string"
+    }
+  },
+  "required": [
+    "test_type",
+    "dataset"
+  ],
+  "title": "MismatchDiagnosis",
+  "type": "object"
+}

@@ -1,0 +1,151 @@
+{
+  "$defs": {
+    "NodeTranslationAuditIssue": {
+      "description": "Single issue found by the SAS->Python node translation audit.",
+      "properties": {
+        "severity": {
+          "$ref": "#/$defs/NodeTranslationSeverity"
+        },
+        "category": {
+          "$ref": "#/$defs/NodeTranslationIssueCategory"
+        },
+        "node_id": {
+          "title": "Node Id",
+          "type": "string"
+        },
+        "node_label": {
+          "default": "",
+          "title": "Node Label",
+          "type": "string"
+        },
+        "notebook_path": {
+          "default": "",
+          "title": "Notebook Path",
+          "type": "string"
+        },
+        "detail": {
+          "title": "Detail",
+          "type": "string"
+        }
+      },
+      "required": [
+        "severity",
+        "category",
+        "node_id",
+        "detail"
+      ],
+      "title": "NodeTranslationAuditIssue",
+      "type": "object"
+    },
+    "NodeTranslationAuditSummary": {
+      "description": "Summary section for node translation audit output.",
+      "properties": {
+        "nodes_total": {
+          "default": 0,
+          "title": "Nodes Total",
+          "type": "integer"
+        },
+        "nodes_in_scope": {
+          "default": 0,
+          "title": "Nodes In Scope",
+          "type": "integer"
+        },
+        "ignored_count": {
+          "default": 0,
+          "title": "Ignored Count",
+          "type": "integer"
+        },
+        "mappings_total": {
+          "default": 0,
+          "title": "Mappings Total",
+          "type": "integer"
+        },
+        "missing_mapping_count": {
+          "default": 0,
+          "title": "Missing Mapping Count",
+          "type": "integer"
+        },
+        "extra_mapping_count": {
+          "default": 0,
+          "title": "Extra Mapping Count",
+          "type": "integer"
+        },
+        "issues_total": {
+          "default": 0,
+          "title": "Issues Total",
+          "type": "integer"
+        },
+        "issues_by_severity": {
+          "$ref": "#/$defs/NodeTranslationSeveritySummary"
+        }
+      },
+      "title": "NodeTranslationAuditSummary",
+      "type": "object"
+    },
+    "NodeTranslationIssueCategory": {
+      "enum": [
+        "coverage",
+        "traceability",
+        "semantic",
+        "security",
+        "runtime"
+      ],
+      "title": "NodeTranslationIssueCategory",
+      "type": "string"
+    },
+    "NodeTranslationSeverity": {
+      "enum": [
+        "high",
+        "medium",
+        "low"
+      ],
+      "title": "NodeTranslationSeverity",
+      "type": "string"
+    },
+    "NodeTranslationSeveritySummary": {
+      "description": "Count of issues by severity.",
+      "properties": {
+        "high": {
+          "default": 0,
+          "title": "High",
+          "type": "integer"
+        },
+        "medium": {
+          "default": 0,
+          "title": "Medium",
+          "type": "integer"
+        },
+        "low": {
+          "default": 0,
+          "title": "Low",
+          "type": "integer"
+        }
+      },
+      "title": "NodeTranslationSeveritySummary",
+      "type": "object"
+    }
+  },
+  "description": "Complete node translation semantic audit report.",
+  "properties": {
+    "generated_at": {
+      "format": "date-time",
+      "title": "Generated At",
+      "type": "string"
+    },
+    "summary": {
+      "$ref": "#/$defs/NodeTranslationAuditSummary"
+    },
+    "issues": {
+      "items": {
+        "$ref": "#/$defs/NodeTranslationAuditIssue"
+      },
+      "title": "Issues",
+      "type": "array"
+    }
+  },
+  "required": [
+    "summary"
+  ],
+  "title": "NodeTranslationAuditReport",
+  "type": "object"
+}

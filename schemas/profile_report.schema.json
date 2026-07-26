@@ -1,0 +1,188 @@
+{
+  "$defs": {
+    "ArtifactType": {
+      "enum": [
+        "multiple_sheets",
+        "merged_cells",
+        "formulas",
+        "pivoted_layout",
+        "shifted_headers",
+        "sentinel_values",
+        "mixed_types",
+        "other"
+      ],
+      "title": "ArtifactType",
+      "type": "string"
+    },
+    "ColumnProfile": {
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "dtype": {
+          "title": "Dtype",
+          "type": "string"
+        },
+        "null_count": {
+          "default": 0,
+          "title": "Null Count",
+          "type": "integer"
+        },
+        "null_pct": {
+          "default": 0.0,
+          "title": "Null Pct",
+          "type": "number"
+        },
+        "unique_count": {
+          "default": 0,
+          "title": "Unique Count",
+          "type": "integer"
+        },
+        "sample_values": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 5,
+          "title": "Sample Values",
+          "type": "array"
+        },
+        "min_val": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Min Val"
+        },
+        "max_val": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Val"
+        },
+        "mean_val": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Mean Val"
+        }
+      },
+      "required": [
+        "name",
+        "dtype"
+      ],
+      "title": "ColumnProfile",
+      "type": "object"
+    },
+    "HumanArtifact": {
+      "description": "A human-introduced artifact detected in a data file.",
+      "properties": {
+        "artifact_type": {
+          "$ref": "#/$defs/ArtifactType"
+        },
+        "description": {
+          "title": "Description",
+          "type": "string"
+        },
+        "location": {
+          "default": "",
+          "title": "Location",
+          "type": "string"
+        },
+        "recommendation": {
+          "default": "",
+          "title": "Recommendation",
+          "type": "string"
+        }
+      },
+      "required": [
+        "artifact_type",
+        "description"
+      ],
+      "title": "HumanArtifact",
+      "type": "object"
+    }
+  },
+  "description": "Profile of a tabular data file.",
+  "properties": {
+    "file_path": {
+      "title": "File Path",
+      "type": "string"
+    },
+    "file_type": {
+      "title": "File Type",
+      "type": "string"
+    },
+    "row_count": {
+      "default": 0,
+      "title": "Row Count",
+      "type": "integer"
+    },
+    "column_count": {
+      "default": 0,
+      "title": "Column Count",
+      "type": "integer"
+    },
+    "columns": {
+      "items": {
+        "$ref": "#/$defs/ColumnProfile"
+      },
+      "title": "Columns",
+      "type": "array"
+    },
+    "sheets": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Sheets",
+      "type": "array"
+    },
+    "encoding": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Encoding"
+    },
+    "artifacts": {
+      "items": {
+        "$ref": "#/$defs/HumanArtifact"
+      },
+      "title": "Artifacts",
+      "type": "array"
+    },
+    "metadata": {
+      "additionalProperties": true,
+      "title": "Metadata",
+      "type": "object"
+    }
+  },
+  "required": [
+    "file_path",
+    "file_type"
+  ],
+  "title": "DataProfile",
+  "type": "object"
+}

@@ -1,0 +1,34 @@
+{
+  "description": "Classification result for a single SAS node.",
+  "properties": {
+    "node_id": {
+      "title": "Node Id",
+      "type": "string"
+    },
+    "node_type": {
+      "title": "Node Type",
+      "type": "string"
+    },
+    "sub_type": {
+      "default": "",
+      "title": "Sub Type",
+      "type": "string"
+    },
+    "summary": {
+      "default": "",
+      "title": "Summary",
+      "type": "string"
+    },
+    "complexity": {
+      "default": "low",
+      "title": "Complexity",
+      "type": "string"
+    }
+  },
+  "required": [
+    "node_id",
+    "node_type"
+  ],
+  "title": "NodeClassification",
+  "type": "object"
+}

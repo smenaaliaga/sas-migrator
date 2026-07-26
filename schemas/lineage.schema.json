@@ -1,0 +1,39 @@
+{
+  "description": "Column-level lineage: how a column flows through a node.",
+  "properties": {
+    "node_id": {
+      "title": "Node Id",
+      "type": "string"
+    },
+    "source_dataset": {
+      "title": "Source Dataset",
+      "type": "string"
+    },
+    "source_column": {
+      "title": "Source Column",
+      "type": "string"
+    },
+    "target_dataset": {
+      "title": "Target Dataset",
+      "type": "string"
+    },
+    "target_column": {
+      "title": "Target Column",
+      "type": "string"
+    },
+    "transformation": {
+      "default": "",
+      "title": "Transformation",
+      "type": "string"
+    }
+  },
+  "required": [
+    "node_id",
+    "source_dataset",
+    "source_column",
+    "target_dataset",
+    "target_column"
+  ],
+  "title": "LineageEntry",
+  "type": "object"
+}
