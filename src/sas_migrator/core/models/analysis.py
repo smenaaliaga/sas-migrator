@@ -33,18 +33,6 @@ class AnalysisProgress(BaseModel):
     nodes: list[NodeReview] = Field(default_factory=list)
 
 
-# ── Classification ──────────────────────────────────────────────────────────
-
-class NodeClassification(BaseModel):
-    """Classification result for a single SAS node."""
-
-    node_id: str
-    node_type: str  # matches NodeType values
-    sub_type: str = ""  # e.g. "PROC REPORT", "DATA step with MERGE"
-    summary: str = ""  # one-line description of what the node does
-    complexity: str = "low"  # low | medium | high
-
-
 # ── Lineage ─────────────────────────────────────────────────────────────────
 
 class LineageEntry(BaseModel):

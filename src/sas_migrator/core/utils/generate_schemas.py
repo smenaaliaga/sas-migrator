@@ -3,6 +3,11 @@
 
 Usage:
     python generate_schemas.py [--output-dir schemas/]
+
+Solo se generan los schemas que `check_gate` consulta (GATE_REQUIREMENTS):
+los gates validan artefactos que pudieron ser editados a mano. Todo lo demás
+lo escribe y relee el runtime vía Pydantic — un JSON Schema aparte sería una
+segunda copia del mismo contrato sin consumidor.
 """
 
 from __future__ import annotations
@@ -12,78 +17,42 @@ import sys
 from pathlib import Path
 
 from sas_migrator.core.models.analysis import (
-    AnalysisProgress,
     CodeSmell,
     Improvement,
     LineageEntry,
-    NodeClassification,
-    PlacementDecisions,
 )
 from sas_migrator.core.models.artifacts import IntakeCatalog
 from sas_migrator.core.models.data import (
-    ColumnMapping,
-    DatabaseConnection,
-    DatabaseConnections,
     DataProfile,
     FileMapping,
-    PreprocessCandidate,
 )
-from sas_migrator.core.models.graph import ExtractionResidue, FlowGraph, FlowSummary, SASNode
-from sas_migrator.core.models.interview import (
-    CardAnswers,
-    InterviewCard,
-    InterviewQA,
-    QuestionBlock,
-)
-from sas_migrator.core.models.state import GateCheck, IterationEntry, MigrationState, PhaseResult
+from sas_migrator.core.models.graph import ExtractionResidue, FlowGraph, FlowSummary
+from sas_migrator.core.models.interview import InterviewQA
 from sas_migrator.core.models.translation import (
-    NodeTranslation,
     SasPythonMapping,
     TranslationPlan,
 )
 from sas_migrator.core.models.validation import (
-    MismatchDiagnosis,
     NodeTranslationAuditReport,
-    TestResult,
     ValidationReport,
 )
 
-# Map schema_name → Pydantic model
+# Map schema_name → Pydantic model (1:1 con los nombres de GATE_REQUIREMENTS)
 SCHEMA_MAP: dict[str, type] = {
-    "migration_state": MigrationState,
-    "gate_check": GateCheck,
-    "phase_result": PhaseResult,
+    "intake": IntakeCatalog,
+    "interview": InterviewQA,
     "flow_graph": FlowGraph,
     "flow_summary": FlowSummary,
-    "sas_node": SASNode,
     "extraction_residue": ExtractionResidue,
-    "node_classification": NodeClassification,
-    "analysis_progress": AnalysisProgress,
     "lineage": LineageEntry,
     "code_smells": CodeSmell,
     "improvements": Improvement,
-    "data_profile": DataProfile,
-    "file_mapping": FileMapping,
-    "column_mapping": ColumnMapping,
-    "preprocess_candidate": PreprocessCandidate,
-    "db_connection": DatabaseConnection,
-    "db_connections": DatabaseConnections,
-    "interview": InterviewQA,
-    "question_block": QuestionBlock,
-    "interview_card": InterviewCard,
-    "card_answers": CardAnswers,
-    "placement_decisions": PlacementDecisions,
-    "validation_report": ValidationReport,
-    "test_result": TestResult,
-    "mismatch_diagnosis": MismatchDiagnosis,
-    "node_translation_audit": NodeTranslationAuditReport,
-    "iteration_entry": IterationEntry,
-    # Aggregate schemas (arrays) used by gate validation
     "profile_report": DataProfile,
-    "intake": IntakeCatalog,
+    "file_mapping": FileMapping,
     "translation_plan": TranslationPlan,
-    "node_translation": NodeTranslation,
     "sas_python_mapping": SasPythonMapping,
+    "validation_report": ValidationReport,
+    "node_translation_audit": NodeTranslationAuditReport,
 }
 
 

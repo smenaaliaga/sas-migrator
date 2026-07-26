@@ -70,43 +70,6 @@ class FileMapping(BaseModel):
     needs_confirmation: bool = False
 
 
-# ── Column Reconciliation ──────────────────────────────────────────────────
-
-class ColumnMapping(BaseModel):
-    """Mapping of a file column to an expected schema column."""
-
-    file_column: str
-    schema_column: str
-    match_score: float = 0.0
-    match_method: str = ""  # exact | fuzzy | synonym | manual
-
-
-# ── Preprocess Candidates ──────────────────────────────────────────────────
-
-class PreprocessType(str, Enum):
-    UNPIVOT = "unpivot"
-    SPLIT = "split"
-    LOOKUP = "lookup"
-    NORMALIZE = "normalize"
-    RECODE = "recode"
-    SCALE = "scale"
-    BUCKET = "bucket"
-    HEADER_FIX = "header_fix"
-    SHEET_EXTRACT = "sheet_extract"
-    OTHER = "other"
-
-
-class PreprocessCandidate(BaseModel):
-    """A manual preprocessing step detected as candidate for automation."""
-
-    id: str  # PP-001, PP-002, ...
-    preprocess_type: PreprocessType
-    description: str
-    file_path: str
-    confirmed: bool | None = None  # None = pending, True = confirmed, False = discarded
-    user_comment: str = ""
-
-
 # ── Database Connections (MSSQL) ────────────────────────────────────────────
 
 class AuthMethod(str, Enum):

@@ -6,18 +6,15 @@ from sas_migrator.core.models.analysis import (
     ImprovementCategory,
     ImprovementStatus,
     LineageEntry,
-    NodeClassification,
     SmellSeverity,
 )
 from sas_migrator.core.models.artifacts import FileCatalogEntry, IntakeCatalog
 from sas_migrator.core.models.data import (
-    ColumnMapping,
     DatabaseConnection,
     DatabaseConnections,
     DataProfile,
     FileMapping,
     HumanArtifact,
-    PreprocessCandidate,
 )
 from sas_migrator.core.models.graph import Edge, FlowGraph, SASNode
 from sas_migrator.core.models.interview import Answer, InterviewQA, Question, QuestionBlock
@@ -37,9 +34,9 @@ __all__ = [
     "FlowGraph", "SASNode", "Edge",
     "FileCatalogEntry", "IntakeCatalog",
     "OutputStrategy", "TranslationPlan", "TranslationTarget",
-    "NodeClassification", "LineageEntry", "CodeSmell", "Improvement",
+    "LineageEntry", "CodeSmell", "Improvement",
     "ImprovementStatus", "ImprovementCategory", "SmellSeverity",
-    "DataProfile", "FileMapping", "ColumnMapping", "PreprocessCandidate", "HumanArtifact",
+    "DataProfile", "FileMapping", "HumanArtifact",
     "DatabaseConnection", "DatabaseConnections",
     "InterviewQA", "QuestionBlock", "Question", "Answer",
     "ValidationReport", "TestResult", "MismatchDiagnosis",

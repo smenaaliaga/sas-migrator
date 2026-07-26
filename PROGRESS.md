@@ -44,6 +44,14 @@
   backlog como artifact.
 - **README.md** de operación + ADR-0008 (observabilidad y harness real).
 
+- **Poda post-cierre**: schemas JSON 33→14 (solo los que `check_gate`
+  consulta; el resto era doble copia del contrato Pydantic sin consumidor);
+  modelos muertos fuera (`NodeClassification`, `ColumnMapping`,
+  `PreprocessCandidate` — la clasificación vive como metadata dict en
+  `analyze.py`); módulos v1 sin consumidor eliminados
+  (`extractors/summarize_flows.py`, `generation_status.py` — la reanudación
+  v2 es por checkpointer a granularidad de nodo del grafo, no por script).
+
 **Pendiente del DoD**: correr el harness con el `.egp` productivo real
 (`SASMIG_REAL_EGP=... pytest tests/integration -q`) y convertir el backlog en
 casos de eval / fixes. Requiere que el usuario aporte su `.egp`.

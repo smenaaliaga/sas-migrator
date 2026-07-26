@@ -46,11 +46,9 @@ def validate_artifact(data: dict | list, schema_name: str) -> list[str]:
     # Algunos artefactos se guardan como wrappers YAML/JSON sobre listas de items.
     collection_keys_by_schema = {
         "code_smells": ("smells", "code_smells", "items"),
-        "column_mapping": ("mappings", "columns", "items"),
         "file_mapping": ("mappings", "files", "items"),
         "improvements": ("improvements", "approved", "items"),
         "lineage": ("lineage", "entries", "items"),
-        "preprocess_candidate": ("candidates", "items"),
         "profile_report": ("profiles", "items"),
     }
     for key in collection_keys_by_schema.get(schema_name, ()):
