@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -30,9 +30,9 @@ class TestResult(BaseModel):
     status: TestStatus
     dataset: str = ""
     details: str = ""
-    expected: Optional[str] = None
-    actual: Optional[str] = None
-    tolerance_used: Optional[float] = None
+    expected: str | None = None
+    actual: str | None = None
+    tolerance_used: float | None = None
 
 
 class MismatchCause(str, Enum):
@@ -67,13 +67,13 @@ class ValidationReport(BaseModel):
     validation_mode: str = "not_applicable"
     tests: list[TestResult] = Field(default_factory=list)
     diagnoses: list[MismatchDiagnosis] = Field(default_factory=list)
-    overall_passed: Optional[bool] = None
+    overall_passed: bool | None = None
     user_accepted_deviations: list[str] = Field(default_factory=list)
     total_files: int = 0
     passed: int = 0
     failed: int = 0
     errors: int = 0
-    pass_rate_value: Optional[float] = Field(default=None, alias="pass_rate")
+    pass_rate_value: float | None = Field(default=None, alias="pass_rate")
     unmatched_reference: list[str] = Field(default_factory=list)
     unmatched_generated: list[str] = Field(default_factory=list)
     results: list[dict[str, Any]] = Field(default_factory=list)

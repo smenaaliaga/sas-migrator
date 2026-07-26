@@ -15,7 +15,6 @@ from sas_migrator.core.config import ProjectConfig, load_project_config
 from sas_migrator.core.db.engine import connection_string, resolve_server
 from sas_migrator.core.reset import reset_workspace
 
-
 # ── project_config ───────────────────────────────────────────────────────────
 
 def test_config_defaults_are_neutral() -> None:

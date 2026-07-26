@@ -50,9 +50,11 @@ def profile_table_from_db(conn_cfg: dict, table_name: str) -> dict:
     """
     from sqlalchemy import text
 
-    from sas_migrator.core.db.engine import build_engine
+    from sas_migrator.core.db.engine import build_engine, resolve_server
 
     schema = conn_cfg.get("schema_name", "dbo")
+    database = conn_cfg.get("database", "")
+    server = resolve_server(conn_cfg)
 
     try:
         engine = build_engine(conn_cfg)

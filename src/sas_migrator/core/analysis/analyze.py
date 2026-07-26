@@ -19,9 +19,12 @@ Uso: python .github/skills/sas-code-analysis/scripts/generate_analysis.py
      (ejecutar desde la raíz del workspace)
 """
 from __future__ import annotations
-import json, re, sys
+
+import json
+import re
+import sys
 from collections import Counter, defaultdict
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 # Consolas Windows cp1252 no soportan "✓" — forzar UTF-8 en stdout.
@@ -30,7 +33,7 @@ if hasattr(sys.stdout, "reconfigure"):
 
 # Default histórico; main() acepta state_dir explícito (fix del hardcode v1).
 DEFAULT_STATE = Path("state")
-NOW = datetime.now(timezone.utc).isoformat()
+NOW = datetime.now(UTC).isoformat()
 
 FILE_EXTENSIONS = {"XLSX", "XLS", "CSV", "TXT", "PDF", "HTML", "SAS7BDAT"}
 # Debe coincidir con DB_ENGINES de build_indexes.py.

@@ -26,10 +26,8 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-
-import numpy as np
 import pandas as pd
 import yaml
 
@@ -44,7 +42,7 @@ _CSV_SEP: str = ";"
 from sas_migrator.core.db.engine import build_engine  # noqa: E402
 
 
-def load_reference(path: Path) -> Optional[pd.DataFrame]:
+def load_reference(path: Path) -> pd.DataFrame | None:
     """Load a reference file (SAS output) into a DataFrame."""
     ext = path.suffix.lower()
     try:
@@ -87,7 +85,7 @@ def load_target_tables(state_dir: Path) -> list[str]:
 
 
 
-def resolve_connection(table: str, connections: list[dict]) -> Optional[dict]:
+def resolve_connection(table: str, connections: list[dict]) -> dict | None:
     """Find the connection that owns a table (by tables list, then by role)."""
     for conn in connections:
         if table.upper() in {t.upper() for t in conn.get("tables", [])}:
@@ -101,8 +99,8 @@ def resolve_connection(table: str, connections: list[dict]) -> Optional[dict]:
 def read_target_table(
     table: str,
     conn_cfg: dict,
-    where: Optional[str],
-    params: Dict[str, Any],
+    where: str | None,
+    params: dict[str, Any],
 ) -> pd.DataFrame:
     """Read a target table from SQL Server, with an optional parameterized filter."""
     from sqlalchemy import text
@@ -132,7 +130,7 @@ def _normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def compare_schemas(ref: pd.DataFrame, gen: pd.DataFrame) -> Dict[str, Any]:
+def compare_schemas(ref: pd.DataFrame, gen: pd.DataFrame) -> dict[str, Any]:
     """Level 1: Check column presence and dtype compatibility."""
     ref = _normalize_columns(ref)
     gen = _normalize_columns(gen)
@@ -149,7 +147,7 @@ def compare_schemas(ref: pd.DataFrame, gen: pd.DataFrame) -> Dict[str, Any]:
     }
 
 
-def compare_row_count(ref: pd.DataFrame, gen: pd.DataFrame, tolerance_pct: float = 0.0) -> Dict[str, Any]:
+def compare_row_count(ref: pd.DataFrame, gen: pd.DataFrame, tolerance_pct: float = 0.0) -> dict[str, Any]:
     """Level 2: Check row counts match."""
     ref_count = len(ref)
     gen_count = len(gen)
@@ -165,7 +163,7 @@ def compare_row_count(ref: pd.DataFrame, gen: pd.DataFrame, tolerance_pct: float
     }
 
 
-def compare_values(ref: pd.DataFrame, gen: pd.DataFrame, tolerance: float = 1e-6) -> Dict[str, Any]:
+def compare_values(ref: pd.DataFrame, gen: pd.DataFrame, tolerance: float = 1e-6) -> dict[str, Any]:
     """Level 4: Cell-by-cell value comparison for shared columns.
 
     Both DataFrames are type-normalized and sorted by all shared columns
@@ -254,7 +252,7 @@ def compare_values(ref: pd.DataFrame, gen: pd.DataFrame, tolerance: float = 1e-6
     }
 
 
-def compare_aggregates(ref: pd.DataFrame, gen: pd.DataFrame, tolerance: float = 1e-6) -> Dict[str, Any]:
+def compare_aggregates(ref: pd.DataFrame, gen: pd.DataFrame, tolerance: float = 1e-6) -> dict[str, Any]:
     """Level 5: Compare aggregate statistics."""
     ref = _normalize_columns(ref)
     gen = _normalize_columns(gen)
@@ -292,15 +290,15 @@ def validate_table(
     table: str,
     ref_path: Path,
     conn_cfg: dict,
-    where: Optional[str],
-    params: Dict[str, Any],
+    where: str | None,
+    params: dict[str, Any],
     value_tolerance: float,
     row_tolerance: float,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Validate one target table against its reference file."""
     schema = conn_cfg.get("schema_name", "dbo")
     database = conn_cfg.get("database", "")
-    result: Dict[str, Any] = {
+    result: dict[str, Any] = {
         "reference_file": str(ref_path),
         "target_table": f"{database}.{schema}.{table}",
         "tests": [],
@@ -366,7 +364,7 @@ def main() -> None:
     ref_dir = Path(args.reference_dir)
     os.makedirs(Path(args.output).parent, exist_ok=True)
 
-    params: Dict[str, Any] = {}
+    params: dict[str, Any] = {}
     for p in args.param:
         name, _, value = p.partition("=")
         try:
@@ -415,7 +413,7 @@ def main() -> None:
     unmatched_targets = sorted(set(targets) - set(matched))
     unmatched_refs = sorted(set(ref_files) - set(targets))
 
-    results: List[Dict[str, Any]] = []
+    results: list[dict[str, Any]] = []
     for table in matched:
         conn_cfg = resolve_connection(table, connections)
         print(f"Validating: {table} (vs {ref_files[table].name})")

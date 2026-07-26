@@ -30,7 +30,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 try:
@@ -238,7 +238,7 @@ def build(state: Path) -> dict:
         "project_name": (migration_state or {}).get("project_name", ""),
         "egp_file": (migration_state or {}).get("egp_file", ""),
         "output_strategy": output_strategy,
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": datetime.now(UTC).isoformat(),
         "targets": targets,
         "ignored_nodes": sorted(ignored),
         "global_improvements": global_improvements,

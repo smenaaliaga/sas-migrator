@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -31,8 +31,8 @@ class SASNode(BaseModel):
     label: str = ""
     node_type: NodeType = NodeType.OTHER
     code: str = ""
-    pfd_id: Optional[str] = None  # Process Flow Diagram it belongs to
-    pfd_label: Optional[str] = None
+    pfd_id: str | None = None  # Process Flow Diagram it belongs to
+    pfd_label: str | None = None
     inputs: list[str] = Field(default_factory=list)   # dataset names consumed
     outputs: list[str] = Field(default_factory=list)  # dataset names produced
     libraries: list[str] = Field(default_factory=list)  # LIBNAME references
@@ -57,7 +57,7 @@ class FlowGraph(BaseModel):
     pfds: dict[str, str] = Field(default_factory=dict)  # pfd_id → label
     metadata: dict[str, Any] = Field(default_factory=dict)
 
-    def node_by_id(self, node_id: str) -> Optional[SASNode]:
+    def node_by_id(self, node_id: str) -> SASNode | None:
         return next((n for n in self.nodes if n.id == node_id), None)
 
     @property

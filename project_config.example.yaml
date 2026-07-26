@@ -1,0 +1,24 @@
+# Configuración de proyecto — copiar como project_config.yaml en la raíz del
+# workspace de migración y completar. Todo lo específico del cliente/entorno
+# vive aquí; el código del migrador no trae ningún default de infraestructura.
+
+db:
+  # Servidor SQL Server usado cuando una conexión de db_connections.yaml no
+  # declara el suyo. Sin este valor y sin server en la conexión, conectar
+  # falla con error explícito.
+  default_server: ""
+  default_port: 1433
+  default_driver: "ODBC Driver 17 for SQL Server"
+  # Confiar en el certificado del servidor sin validarlo (opt-in consciente).
+  trust_server_certificate: false
+
+audit:
+  # Marcadores de dominio para la auditoría de traducción (opcionales).
+  # Ejemplo: dominios de APIs que el flujo SAS consulta vía PROC HTTP.
+  domain_markers: []
+  # Nombres de engines SQL esperados en el código generado.
+  sql_engine_markers: []
+  # Marcadores de manejo de secretos aceptados.
+  env_secret_markers: ["os.environ", "dotenv"]
+  # DataFrames cuya inicialización debe verificarse en runtime.
+  runtime_df_checks: []

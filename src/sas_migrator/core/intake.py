@@ -22,7 +22,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 DATA_SUFFIXES = {".csv", ".xlsx", ".xls", ".parquet"}
@@ -34,7 +34,7 @@ def scan(input_dir: Path) -> dict:
         "egp_files": [],
         "data_files": [],
         "doc_files": [],
-        "scanned_at": datetime.now(timezone.utc).isoformat(),
+        "scanned_at": datetime.now(UTC).isoformat(),
     }
 
     egp_dir = input_dir / "egp"

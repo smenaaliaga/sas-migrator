@@ -4,10 +4,8 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from typing import Optional
 
 from pydantic import BaseModel, Field
-
 
 # ── Analysis progress ledger ────────────────────────────────────────────────
 
@@ -18,7 +16,7 @@ class NodeReview(BaseModel):
     batch: str = ""  # pfd_id del Process Flow (lote de invocación)
     status: str = "pending"  # pending | reviewed
     note: str = ""  # 1 línea del code-analyst: propósito + riesgo de traducción
-    reviewed_at: Optional[datetime] = None
+    reviewed_at: datetime | None = None
 
 
 class AnalysisProgress(BaseModel):

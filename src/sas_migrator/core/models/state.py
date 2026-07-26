@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import IntEnum
-from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
@@ -36,9 +35,9 @@ class PhaseResult(BaseModel):
 
     phase: Phase
     started_at: datetime
-    completed_at: Optional[datetime] = None
+    completed_at: datetime | None = None
     artifacts_produced: list[str] = Field(default_factory=list)
-    gate: Optional[GateCheck] = None
+    gate: GateCheck | None = None
 
 
 class Decision(BaseModel):
@@ -58,7 +57,7 @@ class OpenQuestion(BaseModel):
     source_agent: str
     phase: Phase
     resolved: bool = False
-    answer: Optional[str] = None
+    answer: str | None = None
 
 
 class IterationEntry(BaseModel):
@@ -70,24 +69,24 @@ class IterationEntry(BaseModel):
     description: str
     affected_notebooks: list[str] = Field(default_factory=list)
     affected_nodes: list[str] = Field(default_factory=list)
-    related_improvement: Optional[str] = None  # M-xxx if applies
+    related_improvement: str | None = None  # M-xxx if applies
     context_questions: list[str] = Field(default_factory=list)  # questions asked to user
     context_answers: list[str] = Field(default_factory=list)  # user answers
     changes_made: list[str] = Field(default_factory=list)  # files modified
-    validation_result: Optional[str] = None  # "PASS" | "WARN" | "FAIL" | None
+    validation_result: str | None = None  # "PASS" | "WARN" | "FAIL" | None
     status: str = "open"  # "open" | "in_progress" | "completed" | "deferred"
     created_at: datetime = Field(default_factory=datetime.utcnow)
-    completed_at: Optional[datetime] = None
+    completed_at: datetime | None = None
 
 
 class MigrationState(BaseModel):
     """Root state object — persisted as state/migration_state.json."""
 
     project_name: str = ""
-    egp_file: Optional[str] = None
+    egp_file: str | None = None
     framework_mode: str = "generic"
     current_phase: Phase = Phase.INTAKE
-    output_strategy: Optional[str] = "notebook-flow"  # "notebook-flow" | "single" | "hybrid"
+    output_strategy: str | None = "notebook-flow"  # "notebook-flow" | "single" | "hybrid"
     phases_completed: list[PhaseResult] = Field(default_factory=list)
     artifacts: dict[str, str] = Field(default_factory=dict)  # artifact_name → file path
     decisions: list[Decision] = Field(default_factory=list)

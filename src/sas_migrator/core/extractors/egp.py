@@ -13,11 +13,11 @@ import json
 import os
 import re
 import unicodedata
-import zipfile
 import xml.etree.ElementTree as ET
+import zipfile
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from sas_migrator.core.models.graph import (
     DroppedEdge,
@@ -30,7 +30,6 @@ from sas_migrator.core.models.graph import (
     ResidueElement,
     SASNode,
 )
-
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -290,7 +289,7 @@ def _merge_flow_descriptions(summary_dict: dict, summary_path: Path) -> dict:
 
 # ── Main extractor ──────────────────────────────────────────────────────────
 
-def extract_egp(egp_path: "str | Path", output_dir: "Optional[str | Path]" = None) -> FlowGraph:
+def extract_egp(egp_path: str | Path, output_dir: str | Path | None = None) -> FlowGraph:
     """Extract a FlowGraph from a SAS Enterprise Guide .egp file.
 
     Args:
@@ -369,7 +368,7 @@ def extract_egp(egp_path: "str | Path", output_dir: "Optional[str | Path]" = Non
             if n.endswith("/code.sas") or n.endswith(".sql")
         ]
 
-        def _read_code_entry(entry: str) -> Optional[str]:
+        def _read_code_entry(entry: str) -> str | None:
             try:
                 raw_code = zf.read(entry)
                 try:

@@ -18,7 +18,6 @@ import json
 import sys
 from pathlib import Path
 
-
 from sas_migrator.core.extractors.egp import build_flow_summary
 from sas_migrator.core.models.graph import FlowGraph
 

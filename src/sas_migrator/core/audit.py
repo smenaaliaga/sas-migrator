@@ -23,7 +23,7 @@ import argparse
 import json
 import re
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -462,7 +462,7 @@ def main() -> int:
         sev_counts[i.severity] = sev_counts.get(i.severity, 0) + 1
 
     report = {
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": datetime.now(UTC).isoformat(),
         "summary": {
             "nodes_total": len(node_by_id),
             "nodes_in_scope": len(node_by_id) - len(ignored_present),

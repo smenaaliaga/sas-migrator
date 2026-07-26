@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field
-
 
 # ── Human Artifacts ─────────────────────────────────────────────────────────
 
@@ -39,9 +38,9 @@ class ColumnProfile(BaseModel):
     null_pct: float = 0.0
     unique_count: int = 0
     sample_values: list[str] = Field(default_factory=list, max_length=5)
-    min_val: Optional[str] = None
-    max_val: Optional[str] = None
-    mean_val: Optional[float] = None
+    min_val: str | None = None
+    max_val: str | None = None
+    mean_val: float | None = None
 
 
 class DataProfile(BaseModel):
@@ -53,7 +52,7 @@ class DataProfile(BaseModel):
     column_count: int = 0
     columns: list[ColumnProfile] = Field(default_factory=list)
     sheets: list[str] = Field(default_factory=list)  # for Excel files
-    encoding: Optional[str] = None
+    encoding: str | None = None
     artifacts: list[HumanArtifact] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
@@ -64,7 +63,7 @@ class FileMapping(BaseModel):
     """Mapping of a data file to a SAS DAG node."""
 
     file_path: str
-    node_id: Optional[str] = None
+    node_id: str | None = None
     role: str = ""  # input | output | intermediate | unknown
     confidence: float = 0.0  # 0.0 – 1.0
     reasons: list[str] = Field(default_factory=list)
@@ -104,7 +103,7 @@ class PreprocessCandidate(BaseModel):
     preprocess_type: PreprocessType
     description: str
     file_path: str
-    confirmed: Optional[bool] = None  # None = pending, True = confirmed, False = discarded
+    confirmed: bool | None = None  # None = pending, True = confirmed, False = discarded
     user_comment: str = ""
 
 

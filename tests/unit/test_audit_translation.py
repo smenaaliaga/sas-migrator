@@ -10,7 +10,6 @@ from pathlib import Path
 import sas_migrator.core.audit as audit
 
 
-
 def _write_state(tmp_path: Path, *, ignored: list[str]) -> None:
     state = tmp_path / "state"
     (state / "nodes").mkdir(parents=True)

@@ -1,9 +1,9 @@
+from sas_migrator.core.extractors.egp import build_flow_summary
 from sas_migrator.core.models.artifacts import IntakeCatalog
 from sas_migrator.core.models.data import AuthMethod, DatabaseConnection, DatabaseConnections
+from sas_migrator.core.models.graph import FlowGraph, FlowSummary, NodeType, SASNode
 from sas_migrator.core.models.state import MigrationState
 from sas_migrator.core.models.translation import OutputStrategy, TranslationPlan, TranslationTarget
-from sas_migrator.core.models.graph import FlowGraph, FlowSummary, SASNode, Edge, NodeType
-from sas_migrator.core.extractors.egp import build_flow_summary
 
 
 def test_default_output_strategy_is_notebook_flow() -> None:

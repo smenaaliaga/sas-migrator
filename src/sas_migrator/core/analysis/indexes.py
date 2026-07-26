@@ -21,7 +21,7 @@ import json
 import re
 import sys
 from collections import defaultdict, deque
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 # Consolas Windows cp1252 no soportan "✓" — forzar UTF-8 en stdout.
@@ -125,7 +125,7 @@ def main() -> None:
 
     flow_graph = json.loads((state / "flow_graph.json").read_text(encoding="utf-8"))
     order = topo_order([n["id"] for n in nodes], flow_graph.get("edges", []))
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(UTC).isoformat()
 
     # Librerías declaradas en el inventario de flujos (señal adicional a LIBNAME)
     summary_libs: set[str] = set()

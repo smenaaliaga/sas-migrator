@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from typing import Optional
 
 from pydantic import BaseModel, Field
 
@@ -59,8 +58,8 @@ class InterviewQA(BaseModel):
     interview_type: str  # "initial" | "post_analysis"
     phase: int  # 1 or 4
     blocks: list[QuestionBlock] = Field(default_factory=list)
-    started_at: Optional[datetime] = None
-    completed_at: Optional[datetime] = None
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
 
     @property
     def is_complete(self) -> bool:

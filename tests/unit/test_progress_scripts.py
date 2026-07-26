@@ -8,8 +8,6 @@ from pathlib import Path
 import sas_migrator.core.analysis.ledger as ledger
 import sas_migrator.core.generation_status as genstat
 
-
-
 # ── analysis_ledger ──────────────────────────────────────────────────────────
 
 def _state_with_index(tmp_path: Path) -> Path:

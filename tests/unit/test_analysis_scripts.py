@@ -7,16 +7,12 @@ from __future__ import annotations
 
 import json
 import sys
-from pathlib import Path
 
 import pandas as pd
-import pytest
 
 import sas_migrator.core.analysis.analyze as ga
 import sas_migrator.core.analysis.indexes as bi
 import sas_migrator.core.validation.cascade as rv
-
-
 
 # ── generate_analysis: detección de librefs ─────────────────────────────────
 

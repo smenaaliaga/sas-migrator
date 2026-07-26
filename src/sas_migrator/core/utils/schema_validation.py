@@ -11,7 +11,6 @@ from typing import Any
 import jsonschema
 import yaml
 
-
 SCHEMAS_DIR = Path(__file__).resolve().parents[2] / "schemas"
 
 
@@ -63,7 +62,7 @@ def validate_artifact(data: dict | list, schema_name: str) -> list[str]:
     return [e.message for e in validator.iter_errors(data)]
 
 
-def validate_artifact_file(artifact_path: "str | Path", schema_name: str) -> list[str]:
+def validate_artifact_file(artifact_path: str | Path, schema_name: str) -> list[str]:
     """Validate a JSON or YAML file on disk against a named JSON Schema."""
     path = Path(artifact_path)
     if not path.exists():
@@ -621,7 +620,7 @@ def _phase7_semantic_regression_errors(state_path: Path) -> list[str]:
     return []
 
 
-def check_gate(phase: int, state_dir: "str | Path") -> tuple[bool, list[str]]:
+def check_gate(phase: int, state_dir: str | Path) -> tuple[bool, list[str]]:
     """Check if all required artifacts for a phase gate are valid.
     
     Returns (passed, error_messages).

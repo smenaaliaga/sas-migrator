@@ -17,13 +17,10 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import yaml
-
-
-
 
 from sas_migrator.core.db.engine import build_engine  # noqa: E402
 
@@ -70,7 +67,7 @@ def main() -> None:
         except Exception as e:
             print(f"✗ Sin acceso a {conn_cfg.get('server', '?')}/{database}: {e}")
             report = {
-                "checked_at": datetime.now(timezone.utc).isoformat(),
+                "checked_at": datetime.now(UTC).isoformat(),
                 "status": "blocked",
                 "note": f"Sin acceso de red: {e}",
                 "exists": [], "missing_targets": [], "missing_sources": [],
@@ -83,7 +80,7 @@ def main() -> None:
     missing_sources = [m for m in missing if m["role"] == "source"]
 
     report = {
-        "checked_at": datetime.now(timezone.utc).isoformat(),
+        "checked_at": datetime.now(UTC).isoformat(),
         "status": "blocked_missing_targets" if missing_targets else ("ok" if not missing else "missing_sources"),
         "exists": exists,
         "missing_targets": missing_targets,

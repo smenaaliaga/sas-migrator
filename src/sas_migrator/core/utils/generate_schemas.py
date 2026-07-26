@@ -11,28 +11,32 @@ import json
 import sys
 from pathlib import Path
 
-# Consolas Windows cp1252 no soportan flechas/checks - forzar UTF-8.
-if hasattr(sys.stdout, "reconfigure"):
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-
-# Asegurar que src/ sea importable desde la raiz del repositorio.
-REPO_ROOT = Path(__file__).resolve().parents[4]
-
-from sas_migrator.core.models.artifacts import IntakeCatalog
-from sas_migrator.core.models.state import MigrationState, GateCheck, PhaseResult, IterationEntry
-from sas_migrator.core.models.graph import ExtractionResidue, FlowGraph, FlowSummary, SASNode
-from sas_migrator.core.models.translation import TranslationPlan
 from sas_migrator.core.models.analysis import (
-    NodeClassification, LineageEntry, CodeSmell, Improvement, AnalysisProgress,
+    AnalysisProgress,
+    CodeSmell,
+    Improvement,
+    LineageEntry,
+    NodeClassification,
 )
+from sas_migrator.core.models.artifacts import IntakeCatalog
 from sas_migrator.core.models.data import (
-    DataProfile, FileMapping, ColumnMapping, PreprocessCandidate, DatabaseConnection,
+    ColumnMapping,
+    DatabaseConnection,
     DatabaseConnections,
+    DataProfile,
+    FileMapping,
+    PreprocessCandidate,
 )
+from sas_migrator.core.models.graph import ExtractionResidue, FlowGraph, FlowSummary, SASNode
 from sas_migrator.core.models.interview import InterviewQA, QuestionBlock
-from sas_migrator.core.models.validation import ValidationReport, TestResult, MismatchDiagnosis
-from sas_migrator.core.models.validation import NodeTranslationAuditReport
-
+from sas_migrator.core.models.state import GateCheck, IterationEntry, MigrationState, PhaseResult
+from sas_migrator.core.models.translation import TranslationPlan
+from sas_migrator.core.models.validation import (
+    MismatchDiagnosis,
+    NodeTranslationAuditReport,
+    TestResult,
+    ValidationReport,
+)
 
 # Map schema_name → Pydantic model
 SCHEMA_MAP: dict[str, type] = {
