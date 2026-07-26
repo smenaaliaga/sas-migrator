@@ -45,6 +45,19 @@ class AuditConfig(BaseModel):
     runtime_df_checks: list[str] = Field(default_factory=list)
 
 
+class LlmConfig(BaseModel):
+    """Configuración de los nodos LLM (Etapa 4).
+
+    ``model`` va pineado (ID fijo, sin sufijo de fecha). Sin parámetros de
+    sampling: los modelos actuales los removieron del API; el determinismo se
+    persigue con structured outputs y prompts, no con temperature.
+    """
+
+    model: str = "claude-opus-5"
+    max_tokens: int = 16000
+    max_validation_retries: int = 3
+
+
 class ParserConfig(BaseModel):
     """Ajustes del parser SAS para el proyecto.
 
@@ -64,6 +77,7 @@ class ProjectConfig(BaseModel):
     db: DBConfig = Field(default_factory=DBConfig)
     audit: AuditConfig = Field(default_factory=AuditConfig)
     parser: ParserConfig = Field(default_factory=ParserConfig)
+    llm: LlmConfig = Field(default_factory=LlmConfig)
 
 
 def load_project_config(workspace: Path | str | None = None) -> ProjectConfig:
