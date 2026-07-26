@@ -24,7 +24,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from sas_migrator.core.parser.statements import DB_ENGINES, NodeParse
+from sas_migrator.core.parser.statements import DEFAULT_DB_ENGINES, NodeParse
 
 PLACEMENTS = ("sql_passthrough", "sql_pushdown", "pandas", "hybrid", "ambiguous")
 
@@ -48,15 +48,20 @@ def _origin(libref: str, db_librefs: set[str]) -> str:
 def classify_placement(
     parse: NodeParse,
     db_librefs: set[str] | None = None,
+    db_engines: frozenset[str] | set[str] | None = None,
 ) -> PlacementDecision:
     """Clasifica un nodo parseado.
 
     ``db_librefs``: librefs confirmados como BD a nivel proyecto (LIBNAME con
     engine de BD en cualquier nodo + confirmaciones de la entrevista B4b).
     Los LIBNAME del propio nodo se agregan automáticamente.
+
+    ``db_engines``: set de engines de BD a reconocer (default: los de SAS/ACCESS;
+    los proyectos con engines custom lo resuelven vía ``resolve_db_engines``).
     """
+    engines = db_engines if db_engines is not None else DEFAULT_DB_ENGINES
     db_libs = {lr.upper() for lr in (db_librefs or set())}
-    db_libs |= {lr for lr, eng in parse.librefs_declared.items() if eng in DB_ENGINES}
+    db_libs |= {lr for lr, eng in parse.librefs_declared.items() if eng in engines}
 
     in_origins = {_origin(r.libref, db_libs) for r in parse.inputs}
     out_origins = {_origin(r.libref, db_libs) for r in parse.outputs}
@@ -120,9 +125,13 @@ def classify_placement(
     return decision("pandas", "sin referencias a datos; utilitario — traduce a Python plano")
 
 
-def project_db_librefs(parses: dict[str, NodeParse]) -> set[str]:
+def project_db_librefs(
+    parses: dict[str, NodeParse],
+    db_engines: frozenset[str] | set[str] | None = None,
+) -> set[str]:
     """Librefs de BD a nivel proyecto: LIBNAME con engine BD en cualquier nodo."""
+    engines = db_engines if db_engines is not None else DEFAULT_DB_ENGINES
     libs: set[str] = set()
     for parse in parses.values():
-        libs |= {lr for lr, eng in parse.librefs_declared.items() if eng in DB_ENGINES}
+        libs |= {lr for lr, eng in parse.librefs_declared.items() if eng in engines}
     return libs

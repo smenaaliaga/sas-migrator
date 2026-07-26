@@ -7,7 +7,11 @@ del parsing por regex del v1 (documentado en el diagnóstico de la migración).
 from __future__ import annotations
 
 from sas_migrator.core.parser.placement import classify_placement, project_db_librefs
-from sas_migrator.core.parser.statements import parse_sas_code
+from sas_migrator.core.parser.statements import (
+    DEFAULT_DB_ENGINES,
+    parse_sas_code,
+    resolve_db_engines,
+)
 from sas_migrator.core.parser.tokenizer import code_statements, split_statements
 
 
@@ -177,3 +181,54 @@ def test_placement_default_replicates_sas_locality() -> None:
         "acumulado + monto; run;"
     )
     assert classify_placement(parse).placement == "hybrid"
+
+
+# ── Engines de BD (set default + config del proyecto) ────────────────────────
+
+def test_default_db_engines_cover_common_sas_access_engines() -> None:
+    # El migrador es genérico: cualquier engine SAS/ACCESS habitual debe
+    # clasificar como BD sin configuración extra.
+    for engine in ("ODBC", "ORACLE", "TERADATA", "DB2", "SNOW", "REDSHIFT",
+                   "SAPHANA", "MYSQL", "BIGQUERY", "SQLSVR", "SQLSRV"):
+        assert engine in DEFAULT_DB_ENGINES, engine
+
+
+def test_expanded_engine_classifies_as_db_without_config() -> None:
+    parse = parse_sas_code(
+        "libname dwh teradata; proc sql; create table dwh.agg as "
+        "select * from dwh.base; quit;"
+    )
+    assert classify_placement(parse).placement == "sql_pushdown"
+    parse2 = parse_sas_code(
+        "libname sf snow; proc sql; create table sf.agg as select * from sf.base; quit;"
+    )
+    assert classify_placement(parse2).placement == "sql_pushdown"
+
+
+def test_resolve_db_engines_reads_project_config(tmp_path) -> None:
+    (tmp_path / "project_config.yaml").write_text(
+        "parser:\n  extra_db_engines: [miengine]\n  ignore_db_engines: [ODBC]\n",
+        encoding="utf-8",
+    )
+    engines = resolve_db_engines(tmp_path)
+    assert "MIENGINE" in engines
+    assert "ODBC" not in engines
+    assert "ORACLE" in engines  # el resto del default sobrevive
+
+
+def test_resolve_db_engines_without_config_is_default(tmp_path) -> None:
+    assert resolve_db_engines(tmp_path) == DEFAULT_DB_ENGINES
+    assert resolve_db_engines(None) == DEFAULT_DB_ENGINES
+
+
+def test_custom_engine_via_config_reaches_placement(tmp_path) -> None:
+    engines = resolve_db_engines(None) | {"MIENGINE"}
+    parse = parse_sas_code(
+        "libname cli miengine server=x; proc sql; "
+        "create table cli.r as select * from cli.v; quit;"
+    )
+    # sin el engine custom: libref sin confirmar → ambiguous (va a B4b)
+    assert classify_placement(parse).placement == "ambiguous"
+    # con el set resuelto por config: BD confirmada → pushdown
+    assert classify_placement(parse, db_engines=engines).placement == "sql_pushdown"
+    assert project_db_librefs({"n": parse}, engines) == {"CLI"}

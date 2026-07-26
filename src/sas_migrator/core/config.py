@@ -45,11 +45,25 @@ class AuditConfig(BaseModel):
     runtime_df_checks: list[str] = Field(default_factory=list)
 
 
+class ParserConfig(BaseModel):
+    """Ajustes del parser SAS para el proyecto.
+
+    ``extra_db_engines``: engines de BD del cliente que no están en la lista
+    default de SAS/ACCESS (alias custom, engines exóticos). ``ignore_db_engines``
+    los remueve del set (p. ej. un engine que el cliente usa para archivos).
+    La resolución vive en ``core.parser.statements.resolve_db_engines``.
+    """
+
+    extra_db_engines: list[str] = Field(default_factory=list)
+    ignore_db_engines: list[str] = Field(default_factory=list)
+
+
 class ProjectConfig(BaseModel):
     """Raíz de project_config.yaml."""
 
     db: DBConfig = Field(default_factory=DBConfig)
     audit: AuditConfig = Field(default_factory=AuditConfig)
+    parser: ParserConfig = Field(default_factory=ParserConfig)
 
 
 def load_project_config(workspace: Path | str | None = None) -> ProjectConfig:

@@ -18,11 +18,46 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from pathlib import Path
 
+from sas_migrator.core.config import load_project_config
 from sas_migrator.core.parser.tokenizer import code_statements, words
 
-# Engines de BD reconocidos en LIBNAME (única definición para todo v2).
-DB_ENGINES = {"ODBC", "OLEDB", "SQLSVR", "ORACLE", "TERADATA", "POSTGRES"}
+# Engines de BD reconocidos en LIBNAME — única definición del proyecto
+# (analysis/indexes.py y analysis/analyze.py importan de aquí). Cubre los
+# nombres de engine reales de SAS/ACCESS; el migrador es genérico, así que la
+# lista es amplia y además extensible por project_config.yaml
+# (parser.extra_db_engines / parser.ignore_db_engines → resolve_db_engines).
+DEFAULT_DB_ENGINES = frozenset({
+    # genéricos / puentes
+    "ODBC", "OLEDB", "JDBC",
+    # relacionales comerciales
+    "ORACLE", "DB2", "TERADATA", "SQLSVR", "SYBASE", "SAPASE", "SAPIQ",
+    "SAPHANA", "INFORMIX",
+    # open source
+    "MYSQL", "POSTGRES",
+    # MPP / analíticas
+    "NETEZZA", "GREENPLM", "VERTICA", "ASTER", "HAWQ", "YBRICK",
+    # cloud / big data
+    "REDSHIFT", "SNOW", "BIGQUERY", "SPARK", "HADOOP", "IMPALA",
+    "SINGLESTORE",
+    # NoSQL / SaaS
+    "MONGO", "SFORCE",
+    # alias frecuentes en código real (no oficiales pero inequívocos)
+    "SQLSRV", "MSSQL",
+})
+
+
+def resolve_db_engines(workspace: Path | str | None = None) -> frozenset[str]:
+    """Set efectivo de engines de BD para un workspace.
+
+    Defaults + ``parser.extra_db_engines`` − ``parser.ignore_db_engines`` de
+    project_config.yaml. Sin workspace (o sin config) aplican los defaults.
+    """
+    cfg = load_project_config(workspace)
+    extra = {e.upper() for e in cfg.parser.extra_db_engines}
+    ignore = {e.upper() for e in cfg.parser.ignore_db_engines}
+    return frozenset((set(DEFAULT_DB_ENGINES) | extra) - ignore)
 
 _DS_OPTS = re.compile(r"\(([^()]|\([^()]*\))*\)")  # opciones (keep=...) con 1 nivel de anidación
 _IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)?$")
@@ -218,9 +253,12 @@ def parse_sas_code(code: str) -> NodeParse:
             continue
 
         if head == "libname" and len(toks) > 1:
+            # El parser registra el engine tal cual (hecho sintáctico); decidir
+            # si es un engine de BD es del clasificador, con el set resuelto
+            # por config (placement.classify_placement / resolve_db_engines).
             libref = toks[1].upper()
             engine = toks[2].upper() if len(toks) > 2 and _IDENT.match(toks[2]) else ""
-            parse.librefs_declared[libref] = engine if engine in DB_ENGINES else (engine or "PATH")
+            parse.librefs_declared[libref] = engine or "PATH"
             continue
 
         if head == "data":

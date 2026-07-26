@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from sas_migrator.core.parser.enrich import enrich_state
 from sas_migrator.graph.builder import build_graph, initial_state
 from sas_migrator.testing.egp_builder import build_egp
 
@@ -45,6 +46,34 @@ def test_parser_v2_recovers_create_table_output(tmp_path: Path) -> None:
         "la comparativa debe registrar lo que v1 perdía"
     )
     assert report["summary"]["nodes_with_recovered_io"] >= 1
+
+
+def test_enrich_uses_custom_db_engines_from_project_config(tmp_path: Path) -> None:
+    """Un engine custom declarado en project_config.yaml (parser.extra_db_engines)
+    debe confirmar el libref como BD sin tocar código del migrador."""
+    ws = tmp_path / "ws"
+    state = ws / "state"
+    (state / "nodes").mkdir(parents=True)
+    node = {
+        "id": "CodeTask-9",
+        "label": "Carga",
+        "code": (
+            "libname cli miengine server=x; proc sql; "
+            "create table cli.r as select * from cli.v; quit;"
+        ),
+    }
+    (state / "nodes" / "CodeTask-9.json").write_text(json.dumps(node), encoding="utf-8")
+    (state / "nodes_index.json").write_text(
+        json.dumps({"nodes": [{"id": "CodeTask-9"}]}), encoding="utf-8"
+    )
+    (ws / "project_config.yaml").write_text(
+        "parser:\n  extra_db_engines: [miengine]\n", encoding="utf-8"
+    )
+
+    enrich_state(state)
+
+    idx = json.loads((state / "nodes_index.json").read_text(encoding="utf-8"))
+    assert idx["nodes"][0]["placement"] == "sql_pushdown"
 
 
 def test_synthetic_placements_route_unconfirmed_librefs_to_interview(tmp_path: Path) -> None:

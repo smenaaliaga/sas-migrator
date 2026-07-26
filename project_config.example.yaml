@@ -22,3 +22,12 @@ audit:
   env_secret_markers: ["os.environ", "dotenv"]
   # DataFrames cuya inicialización debe verificarse en runtime.
   runtime_df_checks: []
+
+parser:
+  # Engines de BD adicionales a reconocer en LIBNAME (alias custom del
+  # cliente que no están en la lista default de SAS/ACCESS).
+  # Ejemplo: ["ODBCLOAD", "MIENGINE"]
+  extra_db_engines: []
+  # Engines a excluir del set default (p. ej. uno que el cliente usa para
+  # rutas de archivos y no debe clasificar como BD).
+  ignore_db_engines: []

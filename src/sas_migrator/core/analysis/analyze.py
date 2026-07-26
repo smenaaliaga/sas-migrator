@@ -27,6 +27,8 @@ from collections import Counter, defaultdict
 from datetime import UTC, datetime
 from pathlib import Path
 
+from sas_migrator.core.parser.statements import DEFAULT_DB_ENGINES, resolve_db_engines
+
 # Consolas Windows cp1252 no soportan "✓" — forzar UTF-8 en stdout.
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -36,8 +38,6 @@ DEFAULT_STATE = Path("state")
 NOW = datetime.now(UTC).isoformat()
 
 FILE_EXTENSIONS = {"XLSX", "XLS", "CSV", "TXT", "PDF", "HTML", "SAS7BDAT"}
-# Debe coincidir con DB_ENGINES de build_indexes.py.
-DB_ENGINES = {"ODBC", "OLEDB", "SQLSVR", "ORACLE", "TERADATA", "POSTGRES"}
 
 
 # ─────────────────────────────────────────────────────────────
@@ -89,19 +89,21 @@ def db_librefs_in_code(code: str) -> set[str]:
     return refs
 
 
-def declared_db_engines(nodes: dict) -> dict[str, str]:
+def declared_db_engines(nodes: dict, db_engines: frozenset[str] | None = None) -> dict[str, str]:
     """Librefs con un LIBNAME de engine de BD → engine.
 
     Debe coincidir con `declared_libnames` de build_indexes.py: es la misma
     pregunta ("¿este libref es realmente una base de datos?") y dos respuestas
     distintas dejarían a code-analyst e interviewer con inventarios divergentes.
+    Ambos usan el mismo set (parser.statements + config del proyecto).
     """
+    engines = db_engines if db_engines is not None else DEFAULT_DB_ENGINES
     declared: dict[str, str] = {}
     for node in nodes.values():
         upper = node.get("code", "").upper()
         for m in re.finditer(r"\bLIBNAME\s+([A-Z][A-Z0-9_]{0,7})\s+(\w+)?", upper):
             libref, engine = m.group(1), (m.group(2) or "")
-            if engine in DB_ENGINES:
+            if engine in engines:
                 declared[libref] = engine
     return declared
 
@@ -382,7 +384,8 @@ def find_repeated_expressions(nodes: dict, min_nodes: int = 5) -> list[dict]:
 
 
 def build_evidence(nodes: dict, all_smells: list[dict],
-                   magic_numbers: dict[str, list[str]]) -> dict:
+                   magic_numbers: dict[str, list[str]],
+                   db_engines: frozenset[str] | None = None) -> dict:
     # Macro variables por frecuencia
     mv_nodes: dict[str, set[str]] = defaultdict(set)
     for nid, node in nodes.items():
@@ -399,7 +402,7 @@ def build_evidence(nodes: dict, all_smells: list[dict],
     # con engine de BD. El resto son prefijos sin confirmar, y así deben
     # presentarse — db_evidence.json hace la misma distinción, y si aquí se
     # omitiera, el code-analyst vería 21 librefs de BD donde el interviewer ve 10.
-    declared_db_librefs = declared_db_engines(nodes)
+    declared_db_librefs = declared_db_engines(nodes, db_engines)
     libref_tables: dict[str, dict[str, set[str]]] = defaultdict(lambda: defaultdict(set))
     for nid, node in nodes.items():
         for ref in db_librefs_in_code(node.get("code", "")):
@@ -475,6 +478,8 @@ def main(state_dir: Path | None = None):
     _smell_counter = 0
     state = Path(state_dir) if state_dir is not None else DEFAULT_STATE
     nodes_dir = state / "nodes"
+    # project_config.yaml vive en el workspace (padre de state/).
+    db_engines = resolve_db_engines(state.resolve().parent)
     print("Cargando flow_graph.json ...")
     flow_graph = json.loads((state / "flow_graph.json").read_text(encoding="utf-8"))
 
@@ -524,7 +529,7 @@ def main(state_dir: Path | None = None):
 
     # ── 3. Evidencia para fichas M-xxx ─────────────────────────
     print("Construyendo evidencia de análisis ...")
-    evidence = build_evidence(nodes, all_smells, magic_numbers)
+    evidence = build_evidence(nodes, all_smells, magic_numbers, db_engines)
     (state / "analysis_evidence.json").write_text(
         json.dumps(evidence, indent=2, ensure_ascii=False), encoding="utf-8"
     )

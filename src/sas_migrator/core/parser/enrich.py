@@ -15,7 +15,11 @@ from pathlib import Path
 
 from sas_migrator.core.extractors.egp import _extract_datasets_legacy
 from sas_migrator.core.parser.placement import classify_placement, project_db_librefs
-from sas_migrator.core.parser.statements import NodeParse, parse_sas_code
+from sas_migrator.core.parser.statements import (
+    NodeParse,
+    parse_sas_code,
+    resolve_db_engines,
+)
 
 
 def _load_json(path: Path):
@@ -36,6 +40,9 @@ def enrich_state(state_dir: Path) -> dict:
     nodes_dir = state_dir / "nodes"
     index_path = state_dir / "nodes_index.json"
     index = _load_json(index_path)
+    # El workspace es el padre de state/: de ahí sale project_config.yaml
+    # (mismo patrón que core.audit).
+    db_engines = resolve_db_engines(state_dir.parent)
 
     parses: dict[str, NodeParse] = {}
     codes: dict[str, str] = {}
@@ -44,7 +51,7 @@ def enrich_state(state_dir: Path) -> dict:
         codes[node["id"]] = node.get("code") or ""
         parses[node["id"]] = parse_sas_code(codes[node["id"]])
 
-    db_libs = project_db_librefs(parses)
+    db_libs = project_db_librefs(parses, db_engines)
     # Sumar librefs ya detectados como BD por db_evidence (LIBNAME en metadata,
     # referencias calificadas confirmadas).
     db_evidence_path = state_dir / "db_evidence.json"
@@ -65,7 +72,7 @@ def enrich_state(state_dir: Path) -> dict:
         parse = parses.get(nid)
         if parse is None:
             continue
-        decision = classify_placement(parse, db_libs)
+        decision = classify_placement(parse, db_libs, db_engines)
         entry["placement"] = decision.placement
         entry["placement_reasons"] = decision.reasons
         entry["macro_refs"] = parse.macro_refs

@@ -24,12 +24,13 @@ from collections import defaultdict, deque
 from datetime import UTC, datetime
 from pathlib import Path
 
+from sas_migrator.core.parser.statements import resolve_db_engines
+
 # Consolas Windows cp1252 no soportan "✓" — forzar UTF-8 en stdout.
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 FILE_EXTENSIONS = {"XLSX", "XLS", "CSV", "TXT", "PDF", "HTML", "SAS7BDAT"}
-DB_ENGINES = {"ODBC", "OLEDB", "SQLSVR", "ORACLE", "TERADATA", "POSTGRES"}
 SQL_KEYWORDS = {"ON", "WHERE", "GROUP", "ORDER", "LEFT", "RIGHT", "INNER",
                 "OUTER", "FULL", "JOIN", "AS", "USING"}
 
@@ -85,12 +86,12 @@ def sql_aliases(code_upper: str) -> set[str]:
     return aliases
 
 
-def declared_libnames(code_upper: str) -> dict[str, str]:
+def declared_libnames(code_upper: str, db_engines: frozenset[str]) -> dict[str, str]:
     """LIBNAME statements: libref → engine ('' si es de ruta/archivo)."""
     libs = {}
     for m in re.finditer(r"\bLIBNAME\s+([A-Z][A-Z0-9_]{0,7})\s+(\w+)?", code_upper):
         libref, engine = m.group(1), (m.group(2) or "")
-        libs[libref] = engine if engine in DB_ENGINES else ""
+        libs[libref] = engine if engine in db_engines else ""
     return libs
 
 
@@ -122,6 +123,7 @@ def main() -> None:
     nodes = load_nodes(state / "nodes")
     if not nodes:
         raise SystemExit(f"No hay nodos en {state / 'nodes'}")
+    db_engines = resolve_db_engines(state.resolve().parent)
 
     flow_graph = json.loads((state / "flow_graph.json").read_text(encoding="utf-8"))
     order = topo_order([n["id"] for n in nodes], flow_graph.get("edges", []))
@@ -138,7 +140,7 @@ def main() -> None:
     # ── nodes_index.json ────────────────────────────────────────
     declared_db: dict[str, str] = {}   # libref → engine (de todos los LIBNAME del proyecto)
     for n in nodes:
-        for libref, engine in declared_libnames(n.get("code", "").upper()).items():
+        for libref, engine in declared_libnames(n.get("code", "").upper(), db_engines).items():
             if engine:
                 declared_db[libref] = engine
 
