@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -24,5 +24,5 @@ class IntakeCatalog(BaseModel):
     data_files: list[FileCatalogEntry] = Field(default_factory=list)
     doc_files: list[FileCatalogEntry] = Field(default_factory=list)
     selected_egp: str | None = None
-    scanned_at: datetime = Field(default_factory=datetime.utcnow)
+    scanned_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     notes: list[str] = Field(default_factory=list)

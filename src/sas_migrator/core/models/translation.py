@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 
 from pydantic import BaseModel, Field
@@ -43,7 +43,7 @@ class TranslationPlan(BaseModel):
     project_name: str = ""
     egp_file: str = ""
     output_strategy: OutputStrategy = OutputStrategy.NOTEBOOK_FLOW
-    generated_at: datetime = Field(default_factory=datetime.utcnow)
+    generated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     targets: list[TranslationTarget] = Field(default_factory=list)
     ignored_nodes: list[str] = Field(default_factory=list)
     global_improvements: list[str] = Field(default_factory=list)

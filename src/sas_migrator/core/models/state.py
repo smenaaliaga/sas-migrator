@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import IntEnum
 
 from pydantic import BaseModel, Field
@@ -27,7 +27,7 @@ class GateCheck(BaseModel):
     phase: Phase
     passed: bool
     errors: list[str] = Field(default_factory=list)
-    checked_at: datetime = Field(default_factory=datetime.utcnow)
+    checked_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class PhaseResult(BaseModel):
@@ -57,7 +57,7 @@ class NeedsHumanItem(BaseModel):
     reason: str  # "validation_retries_exhausted" | "refusal" | "static_check_failed"
     detail: str = ""
     attempts: int = 0
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     resolved: bool = False
     resolution: str = ""
 
@@ -73,7 +73,7 @@ class Decision(BaseModel):
 
     id: str
     description: str
-    decided_at: datetime = Field(default_factory=datetime.utcnow)
+    decided_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     context: str = ""
 
 
@@ -103,7 +103,7 @@ class IterationEntry(BaseModel):
     changes_made: list[str] = Field(default_factory=list)  # files modified
     validation_result: str | None = None  # "PASS" | "WARN" | "FAIL" | None
     status: str = "open"  # "open" | "in_progress" | "completed" | "deferred"
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     completed_at: datetime | None = None
 
 
@@ -126,5 +126,5 @@ class MigrationState(BaseModel):
     iteration_cycle: int = 0  # current post-migration iteration cycle
     iteration_log: list[IterationEntry] = Field(default_factory=list)
     tokens_consumed: dict[str, int] = Field(default_factory=dict)  # phase → tokens
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))

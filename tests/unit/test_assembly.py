@@ -126,3 +126,27 @@ def test_strategy_mismatch_reported(tmp_path: Path) -> None:
     translations = {"A": _nt("A", ["x = 1\n"], strategy="sql_pushdown")}
     _, failures = assemble_notebooks(_plan("A"), translations, tmp_path / "output")
     assert failures and failures[0].reason == "strategy_mismatch"
+
+
+# ── Scanner de secretos (hardening Etapa 6) ─────────────────────────────────
+
+def test_secret_password_literal_fails() -> None:
+    failure = check_node_translation(_nt("A", ["password = 'hunter22'\nx = 1\n"]))
+    assert failure.reason == "secret_detected"
+
+
+def test_secret_api_key_and_token_fail() -> None:
+    assert check_node_translation(
+        _nt("A", ["KEY = 'sk-ant-abc123XYZ_9'\n"])
+    ).reason == "secret_detected"
+    assert check_node_translation(
+        _nt("A", ["h = {'Authorization': 'Bearer abcdef0123456789TOKEN'}\n"])
+    ).reason == "secret_detected"
+    assert check_node_translation(
+        _nt("A", ["aws = 'AKIAIOSFODNN7EXAMPLE'\n"])
+    ).reason == "secret_detected"
+
+
+def test_secret_env_lookup_is_fine() -> None:
+    ok = _nt("A", ["import os\npwd = os.environ.get('DB_PASSWORD')\nx = 1\n"])
+    assert check_node_translation(ok) is None

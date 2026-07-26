@@ -15,7 +15,7 @@ import re
 import unicodedata
 import xml.etree.ElementTree as ET
 import zipfile
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -233,7 +233,7 @@ def build_flow_summary(graph: FlowGraph) -> FlowSummary:
     return FlowSummary(
         project_name=graph.project_name,
         egp_path=graph.egp_path,
-        generated_at=datetime.utcnow(),
+        generated_at=datetime.now(UTC),
         total_flows=len(flows),
         migratable_flows=sum(1 for f in flows if f.migratable_candidate),
         total_nodes=len(graph.nodes),

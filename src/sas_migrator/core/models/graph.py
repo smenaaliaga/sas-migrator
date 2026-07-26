@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 
@@ -100,7 +100,7 @@ class ExtractionResidue(BaseModel):
     """
 
     egp_path: str = ""
-    generated_at: datetime = Field(default_factory=datetime.utcnow)
+    generated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     total_elements: int = 0
     materialized_nodes: int = 0
     element_type_counts: dict[str, int] = Field(default_factory=dict)
@@ -153,7 +153,7 @@ class FlowSummary(BaseModel):
 
     project_name: str = ""
     egp_path: str = ""
-    generated_at: datetime = Field(default_factory=datetime.utcnow)
+    generated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     total_flows: int = 0
     migratable_flows: int = 0
     total_nodes: int = 0

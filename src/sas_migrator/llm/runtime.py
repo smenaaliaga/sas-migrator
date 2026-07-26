@@ -25,5 +25,7 @@ def get_caller(workspace: Path | str) -> StructuredCaller:
         return _override
     from sas_migrator.core.config import load_project_config
     from sas_migrator.llm.client import AnthropicCaller
+    from sas_migrator.llm.trace import TracingCaller
 
-    return AnthropicCaller(load_project_config(workspace).llm)
+    caller = AnthropicCaller(load_project_config(workspace).llm)
+    return TracingCaller(caller, Path(workspace) / "state")

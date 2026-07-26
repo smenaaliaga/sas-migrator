@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 
 from pydantic import BaseModel, Field
@@ -38,7 +38,7 @@ class Answer(BaseModel):
 
     question_id: str
     value: str
-    answered_at: datetime = Field(default_factory=datetime.utcnow)
+    answered_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class QuestionBlock(BaseModel):

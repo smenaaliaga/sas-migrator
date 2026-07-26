@@ -43,63 +43,52 @@ def load_connections(state_dir: Path) -> list[dict]:
     return data.get("connections", [])
 
 
-def profile_table_from_db(conn_cfg: dict, table_name: str) -> dict:
-    """Perfila una tabla conectándose a la BD MSSQL.
+def profile_table_from_db(conn_cfg: dict, table_name: str, config=None) -> dict:
+    """Perfila una tabla de la BD (dialect-agnóstico vía SQLAlchemy inspector).
 
     Lanza ConnectionError si no hay acceso al servidor.
     """
-    from sqlalchemy import text
+    from sqlalchemy import inspect, text
 
-    from sas_migrator.core.db.engine import build_engine, resolve_server
+    from sas_migrator.core.db.engine import build_engine, qualified_table, resolve_server
 
     schema = conn_cfg.get("schema_name", "dbo")
     database = conn_cfg.get("database", "")
-    server = resolve_server(conn_cfg)
+    try:
+        server = resolve_server(conn_cfg, config)
+    except ValueError:
+        server = "(connection_url)"  # BD de prueba vía db.connection_url
 
     try:
-        engine = build_engine(conn_cfg)
+        engine = build_engine(conn_cfg, config)
+        prep = engine.dialect.identifier_preparer
+        qt = qualified_table(engine, conn_cfg, table_name)
+        use_schema = schema if (schema and engine.dialect.name != "sqlite") else None
+        columns_meta = inspect(engine).get_columns(table_name, schema=use_schema)
+
         with engine.connect() as conn:
-            # Conteo de filas
-            row_count = conn.execute(
-                text(f"SELECT COUNT(*) FROM [{schema}].[{table_name}]")
-            ).scalar()
+            row_count = conn.execute(text(f"SELECT COUNT(*) FROM {qt}")).scalar()
 
-            # Metadata de columnas
-            col_query = text(
-                "SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE "
-                "FROM INFORMATION_SCHEMA.COLUMNS "
-                "WHERE TABLE_SCHEMA = :schema AND TABLE_NAME = :table "
-                "ORDER BY ORDINAL_POSITION"
-            )
-            columns_meta = conn.execute(
-                col_query, {"schema": schema, "table": table_name}
-            ).fetchall()
-
-            # Perfilar cada columna
             columns = []
-            for col_name, dtype, nullable in columns_meta:
-                stats_query = text(
-                    f"SELECT "
-                    f"COUNT(*) AS total, "
-                    f"COUNT([{col_name}]) AS non_null, "
-                    f"COUNT(DISTINCT [{col_name}]) AS uniq "
-                    f"FROM [{schema}].[{table_name}]"
-                )
-                total, non_null, uniq = conn.execute(stats_query).fetchone()
-
-                sample_query = text(
-                    f"SELECT DISTINCT TOP 5 CAST([{col_name}] AS NVARCHAR(200)) "
-                    f"FROM [{schema}].[{table_name}] "
-                    f"WHERE [{col_name}] IS NOT NULL"
-                )
-                samples = [str(r[0]) for r in conn.execute(sample_query).fetchall()]
+            for col in columns_meta:
+                col_name = str(col["name"])
+                qcol = prep.quote(col_name)
+                total, non_null, uniq = conn.execute(text(
+                    f"SELECT COUNT(*), COUNT({qcol}), COUNT(DISTINCT {qcol}) FROM {qt}"
+                )).fetchone()
+                samples = [
+                    str(r[0])
+                    for r in conn.execute(text(
+                        f"SELECT DISTINCT {qcol} FROM {qt} WHERE {qcol} IS NOT NULL"
+                    )).fetchmany(5)
+                ]
 
                 null_count = total - non_null
                 null_pct = round(null_count / total, 4) if total > 0 else 0.0
 
                 columns.append({
                     "name": col_name,
-                    "dtype": dtype,
+                    "dtype": str(col.get("type", "")),
                     "null_count": null_count,
                     "null_pct": null_pct,
                     "unique_count": uniq,
@@ -142,6 +131,10 @@ def main():
     if not connections:
         sys.exit(1)
 
+    from sas_migrator.core.config import load_project_config
+
+    config = load_project_config(state_dir.parent)
+
     # Cargar profile_report existente si hay
     report_path = state_dir / "profile_report.json"
     if report_path.exists():
@@ -169,7 +162,7 @@ def main():
         for table in tables:
             print(f"  → {table}...", end=" ")
             try:
-                profile = profile_table_from_db(conn, table)
+                profile = profile_table_from_db(conn, table, config)
             except ConnectionError as e:
                 print(f"\n✗ {e}")
                 print("Sin acceso a la BD — el profiling de tablas queda PENDIENTE.")

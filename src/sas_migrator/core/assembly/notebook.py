@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import ast
 import importlib.util
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -38,11 +39,20 @@ BASELINE_IMPORTS = ("import pandas as pd", "import numpy as np")
 FORBIDDEN_SUBSTRINGS = ("to_parquet", "duckdb")
 _SQL_WORDS = ("select ", "insert ", "update ", "delete ")
 
+# Scanner de secretos (hardening Etapa 6): antes era una regla de prompt —
+# ahora es código. Un secreto literal en una celda es fallo de ensamblado.
+_SECRET_PATTERNS = (
+    re.compile(r"(?i)\b(password|passwd|pwd)\s*=\s*['\"][^'\"]{3,}['\"]"),
+    re.compile(r"sk-ant-[A-Za-z0-9_-]{8,}"),
+    re.compile(r"AKIA[0-9A-Z]{16}"),
+    re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._\-]{16,}"),
+)
+
 
 @dataclass
 class NodeAssemblyFailure:
     node_id: str
-    reason: str  # syntax_error | unresolvable_import | forbidden_pattern | strategy_mismatch | empty_translation
+    reason: str  # syntax_error | unresolvable_import | forbidden_pattern | strategy_mismatch | empty_translation | secret_detected
     detail: str
 
 
@@ -85,6 +95,14 @@ def check_node_translation(nt: NodeTranslation) -> NodeAssemblyFailure | None:
             if token in lowered:
                 return NodeAssemblyFailure(
                     nt.node_id, "forbidden_pattern", f"patrón prohibido '{token}'"
+                )
+        for pattern in _SECRET_PATTERNS:
+            m = pattern.search(src)
+            if m:
+                return NodeAssemblyFailure(
+                    nt.node_id, "secret_detected",
+                    f"posible credencial literal en el código: '{m.group(0)[:30]}…' — "
+                    "usar variables de entorno",
                 )
 
     trees: list[ast.AST] = []

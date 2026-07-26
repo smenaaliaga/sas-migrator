@@ -98,6 +98,16 @@ class AnthropicCaller:
                 messages.append(self._correction(last_error))
                 continue
 
+            usage = getattr(response, "usage", None)
+            if usage is not None:
+                self.last_usage = {
+                    "input_tokens": getattr(usage, "input_tokens", None),
+                    "output_tokens": getattr(usage, "output_tokens", None),
+                    "cache_read_input_tokens": getattr(
+                        usage, "cache_read_input_tokens", None
+                    ),
+                }
+
             if getattr(response, "stop_reason", None) == "refusal":
                 raise NeedsHuman(
                     task=task,

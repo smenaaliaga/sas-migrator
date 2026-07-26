@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 
@@ -80,7 +80,7 @@ class ValidationReport(BaseModel):
     notebooks: list[dict[str, Any]] = Field(default_factory=list)
     summary: dict[str, Any] = Field(default_factory=dict)
     note: str = ""
-    run_at: datetime = Field(default_factory=datetime.utcnow)
+    run_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     @property
     def pass_rate(self) -> float:
@@ -144,6 +144,6 @@ class NodeTranslationAuditSummary(BaseModel):
 class NodeTranslationAuditReport(BaseModel):
     """Complete node translation semantic audit report."""
 
-    generated_at: datetime = Field(default_factory=datetime.utcnow)
+    generated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     summary: NodeTranslationAuditSummary
     issues: list[NodeTranslationAuditIssue] = Field(default_factory=list)
