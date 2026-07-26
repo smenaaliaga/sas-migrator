@@ -80,14 +80,20 @@ def test_iterate_is_honest_noop_and_authorize_errors_when_not_pending(
     """iterate sigue not_available (Etapa 5 pendiente de iteración); Etapa 5:
     authorize_execution ya es real y da error tipado si la tarjeta pendiente
     no es execution_approval. Ninguna escribe nada en ese camino."""
-    before = sorted(p.name for p in tmp_path.rglob("*"))
+    def _artifacts() -> list[str]:
+        # el checkpointer sqlite se crea lazy al abrir la sesión — no es un
+        # artefacto de migración; se excluye del assert
+        return sorted(
+            p.name for p in tmp_path.rglob("*") if "checkpoint" not in p.name
+        )
+
+    before = _artifacts()
     result = tools["iterate"]("haz algo")
     assert result["status"] == "not_available"
     result = tools["authorize_execution"]()
     assert result["status"] == "error"
     assert "execution" in result["message"] or "ninguna" in result["message"]
-    after = sorted(p.name for p in tmp_path.rglob("*"))
-    assert before == after, "sin efectos en disco"
+    assert before == _artifacts(), "sin artefactos de migración escritos"
 
 
 def test_build_server_registers_all_seven_tools(tmp_path: Path) -> None:
