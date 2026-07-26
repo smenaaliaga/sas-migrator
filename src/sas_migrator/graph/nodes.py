@@ -54,12 +54,17 @@ def phase0_intake(state: MigrationGraphState) -> dict:
     return {"current_phase": 0, "notes": ["fase 0: intake.json generado"]}
 
 
-# ── Fase 1: entrevista inicial (stub → interrupt en Etapa 3) ────────────────
+# ── Fase 1: entrevista inicial (stub | interrupt) ───────────────────────────
 
 def phase1_initial_interview(state: MigrationGraphState) -> dict:
     _, st, _ = _paths(state)
-    stubs.stub_initial_interview(st)
-    return {"current_phase": 1, "notes": ["fase 1: entrevista inicial (stub)"]}
+    if state.get("stub_mode", True):
+        stubs.stub_initial_interview(st)
+        return {"current_phase": 1, "notes": ["fase 1: entrevista inicial (stub)"]}
+    from sas_migrator.graph.interviews import run_initial_interview
+
+    run_initial_interview(st)
+    return {"current_phase": 1, "notes": ["fase 1: entrevista inicial (usuario)"]}
 
 
 # ── Fase 2: extracción + análisis determinista + criterio (stub) ────────────
@@ -107,22 +112,46 @@ def phase3_profiling(state: MigrationGraphState) -> dict:
     return {"current_phase": 3, "notes": [f"fase 3: {len(profiles)} perfil(es) + matching (stub)"]}
 
 
-# ── Fase 4: entrevista post-análisis (stub → interrupts en Etapa 3) ─────────
+# ── Fase 4: entrevista post-análisis (stub | interrupts) ────────────────────
 
 def phase4_post_interview(state: MigrationGraphState) -> dict:
     _, st, _ = _paths(state)
-    stubs.stub_post_analysis_interview(st)
-    return {"current_phase": 4, "notes": ["fase 4: entrevista post-análisis (stub)"]}
+    if state.get("stub_mode", True):
+        stubs.stub_post_analysis_interview(st)
+        return {"current_phase": 4, "notes": ["fase 4: entrevista post-análisis (stub)"]}
+    from sas_migrator.graph.interviews import run_post_analysis_interview
+
+    counts = run_post_analysis_interview(st)
+    return {
+        "current_phase": 4,
+        "notes": [
+            "fase 4: entrevista post-análisis (usuario) — "
+            f"{counts.get('excluded', 0)} exclusiones, "
+            f"{counts.get('improvements', 0)} mejoras aprobadas, "
+            f"{counts.get('placements_resolved', 0)} placements resueltos"
+        ],
+    }
 
 
-# ── Fase 5: plan de traducción (determinista) + aprobación (stub) ───────────
+# ── Fase 5: plan de traducción (determinista) + aprobación (stub | interrupt) ─
 
 def phase5_plan(state: MigrationGraphState) -> dict:
     _, st, _ = _paths(state)
-    plan = core_planning.build(st)
-    _dump_json(st / "translation_plan.json", plan)
-    stubs.stub_approve_plan(st)
-    return {"current_phase": 5, "notes": ["fase 5: plan construido y aprobado (stub)"]}
+    if state.get("stub_mode", True):
+        plan = core_planning.build(st)
+        _dump_json(st / "translation_plan.json", plan)
+        stubs.stub_approve_plan(st)
+        return {"current_phase": 5, "notes": ["fase 5: plan construido y aprobado (stub)"]}
+
+    # Escritura previa al interrupt: solo si el plan aún no existe — el nodo se
+    # re-ejecuta al reanudar y no debe pisar el archivo en cada replay.
+    if not (st / "translation_plan.json").exists():
+        _dump_json(st / "translation_plan.json", core_planning.build(st))
+    from sas_migrator.graph.interviews import run_plan_approval
+
+    approved = run_plan_approval(st)
+    note = "aprobado por el usuario" if approved else "RECHAZADO por el usuario (gate 5 bloquea)"
+    return {"current_phase": 5, "notes": [f"fase 5: plan construido; {note}"]}
 
 
 # ── Fase 6: generación (stub = embrión del ensamblador) ─────────────────────

@@ -9,7 +9,7 @@ LangGraph vía checkpointer; ningún nodo (ni menos un LLM) lo redacta a mano.
 from __future__ import annotations
 
 import operator
-from typing import Annotated, Any, TypedDict
+from typing import Annotated, TypedDict
 
 
 class GateRecord(TypedDict):
@@ -40,6 +40,7 @@ class MigrationGraphState(TypedDict, total=False):
     # Espacio para que los nodos dejen notas de ejecución (no decisiones).
     notes: Annotated[list[str], operator.add]
 
-    # Reservado para fases con human-in-the-loop (Etapa 3): payload de la
-    # pregunta pendiente y respuestas ya entregadas.
-    pending_interrupt: dict[str, Any] | None
+    # La pregunta de entrevista pendiente NO vive aquí: interrupt() levanta
+    # excepción (el nodo no retorna) y LangGraph ya expone el payload activo
+    # vía graph.get_state(config).tasks[*].interrupts — un espejo en el estado
+    # sería inevitablemente stale (decisión de la Etapa 3).

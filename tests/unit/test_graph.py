@@ -173,7 +173,17 @@ def test_interrupt_and_resume_with_checkpointer(tmp_path: Path) -> None:
 
 # ── 5. Frontera de arquitectura ──────────────────────────────────────────────
 
-FORBIDDEN_IN_CORE = ("langgraph", "anthropic", "sas_migrator.graph", "sas_migrator.llm")
+FORBIDDEN_IN_CORE = (
+    "langgraph",
+    "anthropic",
+    "sas_migrator.graph",
+    "sas_migrator.llm",
+    # Etapa 3: la construcción de entrevistas es core y no puede depender del
+    # transporte — ni MCP ni la capa de servicio/sesión.
+    "mcp",
+    "sas_migrator.mcp_server",
+    "sas_migrator.service",
+)
 
 
 def test_core_does_not_import_llm_or_graph() -> None:

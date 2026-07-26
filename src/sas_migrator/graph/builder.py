@@ -116,5 +116,4 @@ def initial_state(workspace: Path, egp_file: Path, *, stub_mode: bool = True) ->
         "gate_history": [],
         "stub_mode": stub_mode,
         "notes": [],
-        "pending_interrupt": None,
     }

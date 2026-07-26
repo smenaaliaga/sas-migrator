@@ -526,11 +526,28 @@ def build_db_connection_card(state_dir: Path) -> InterviewCard:
     )
 
 
-def build_db_mapping_card(state_dir: Path) -> InterviewCard | None:
-    """Paso 3 de B4b: mapeo libref → base. Los nombres de tabla nunca cambian."""
+def build_db_mapping_card(
+    state_dir: Path, confirmed_prefixes: list[str] | None = None
+) -> InterviewCard | None:
+    """Paso 3 de B4b: mapeo libref → base. Los nombres de tabla nunca cambian.
+
+    ``confirmed_prefixes``: prefijos que la resolución de placement confirmó
+    como BD en esta misma entrevista — también entran al mapeo.
+    """
     ev = _db_evidence(state_dir)
-    librefs = ev.get("librefs", [])
-    if not librefs:
+    confirmed = set(confirmed_prefixes or [])
+    entries: list[tuple[str, int]] = [
+        (str(lr.get("libref")), int(lr.get("table_count", 0)))
+        for lr in ev.get("librefs", [])
+        if lr.get("source") == "libname_statement" or str(lr.get("libref")) in confirmed
+    ]
+    entries.extend(
+        (str(c["prefix"]), len(c["tables"]))
+        for c in unconfirmed_prefixes(state_dir)
+        if str(c["prefix"]) in confirmed
+    )
+    entries = sorted(set(entries))
+    if not entries:
         return None
     return _card(
         "B4b:step3",
@@ -547,9 +564,8 @@ def build_db_mapping_card(state_dir: Path) -> InterviewCard | None:
                 options=list(DB_MAPPING_OPTIONS),
                 recommended_default="Mantener todos los nombres",
                 evidence=[
-                    f"{lr.get('libref')}.TABLA → {lr.get('libref')}.dbo.TABLA "
-                    f"({lr.get('table_count', 0)} tabla(s))"
-                    for lr in librefs
+                    f"{libref}.TABLA → {libref}.dbo.TABLA ({count} tabla(s))"
+                    for libref, count in entries
                 ],
             )
         ],
