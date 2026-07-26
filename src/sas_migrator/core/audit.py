@@ -200,8 +200,15 @@ def main() -> int:
     args = parser.parse_args()
 
     root = Path.cwd()
-    state_dir = (root / args.state_dir).resolve()
-    _output_dir = (root / args.output_dir).resolve()
+    return run_audit((root / args.state_dir).resolve(), (root / args.output_dir).resolve())
+
+
+def run_audit(state_dir: Path, output_dir: Path) -> int:
+    """Corre la auditoría in-process (invocable desde check_gate sin subprocess)."""
+    state_dir = Path(state_dir).resolve()
+    _output_dir = Path(output_dir).resolve()
+    # Los notebook_path del mapping son relativos a la raíz del workspace.
+    root = state_dir.parent
 
     nodes_index = load_json(state_dir / "nodes_index.json")
     mapping_doc = load_json(state_dir / "sas_python_mapping.json")

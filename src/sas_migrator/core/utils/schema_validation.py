@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import json
-import subprocess
-import sys
 from pathlib import Path
 from typing import Any
 
@@ -506,30 +504,18 @@ def _phase6_generation_errors(state_path: Path) -> list[str]:
 
 
 def _run_node_translation_audit(state_path: Path) -> tuple[dict[str, Any] | None, list[str]]:
-    """Run the semantic audit script and validate its output artifact."""
+    """Run the semantic audit in-process and validate its output artifact.
+
+    v1 lanzaba el script por subprocess desde una ruta fija bajo .github/;
+    en v2 la auditoría es un módulo del paquete y se invoca directo.
+    """
     repo_root = state_path.parent
-    script_path = repo_root / ".github" / "skills" / "sas-code-analysis" / "scripts" / "audit_node_translation.py"
+    try:
+        from sas_migrator.core.audit import run_audit
 
-    if not script_path.exists():
-        return None, [f"Missing semantic audit script: {script_path}"]
-
-    cmd = [
-        sys.executable,
-        str(script_path),
-        "--state-dir",
-        str(state_path),
-        "--output-dir",
-        str(repo_root / "output"),
-    ]
-    result = subprocess.run(
-        cmd,
-        cwd=repo_root,
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        err = result.stderr.strip() or result.stdout.strip() or "unknown error"
-        return None, [f"Semantic audit execution failed: {err}"]
+        run_audit(state_path, repo_root / "output")
+    except Exception as exc:
+        return None, [f"Semantic audit execution failed: {exc}"]
 
     audit_path = state_path / "node_translation_audit.json"
     if not audit_path.exists():
