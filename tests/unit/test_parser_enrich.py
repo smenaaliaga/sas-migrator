@@ -28,7 +28,7 @@ def test_every_index_node_has_placement_with_evidence(tmp_path: Path) -> None:
     index = json.loads((ws / "state" / "nodes_index.json").read_text(encoding="utf-8"))
     for node in index["nodes"]:
         assert node.get("placement") in (
-            "sql_passthrough", "sql_pushdown", "pandas", "hybrid", "ambiguous",
+            "sql_passthrough", "sql_pushdown", "pandas", "hybrid", "ambiguous", "utility",
         ), f"nodo {node['id']} sin placement"
         assert node.get("placement_reasons"), f"nodo {node['id']} sin evidencia"
 

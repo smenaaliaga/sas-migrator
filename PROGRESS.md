@@ -9,6 +9,22 @@
 | **0 — Fundaciones** | ✅ Completada | Port del núcleo + fixes + config + CI. **84 tests en verde, ruff limpio.** |
 | **1 — Grafo esqueleto** | ✅ Completada | Pipeline 0-8 end-to-end con gates forzados por topología. **90 tests.** |
 | **2 — Parser SAS v2 + placement** | ✅ Completada | Tokenizador + parsers dirigidos + placement con evidencia. **113 tests.** |
+| **2.5 — Resolución PREGUNTAS Q1-Q3** | ✅ Completada | Vista v2 única (lineage calificado), DB_ENGINES general+config, placement `utility`. **125 tests.** |
+
+## Etapa 2.5 — qué se hizo (respuestas de Seba a PREGUNTAS.md)
+
+- **Q1**: `SASNode.inputs/outputs/libraries` ahora salen de `parse_sas_code`
+  (LIB.TABLA calificado); `build_lineage` matchea por nombre calificado con
+  fallback corto y tiene tests de contenido (antes solo existencia); el regex
+  v1 quedó como `_extract_datasets_legacy` solo para el chequeo cruzado
+  (`parser_upgrade_report.json` gana `lost_inputs/lost_outputs` +
+  `nodes_with_lost_io` como flag de desacuerdo); `inputs_v2/outputs_v2`
+  eliminados del índice (redundantes).
+- **Q2**: `DEFAULT_DB_ENGINES` único en `core/parser/statements.py` (~30
+  engines SAS/ACCESS + alias) + `resolve_db_engines(workspace)` con
+  `parser.extra_db_engines/ignore_db_engines` de project_config.yaml.
+- **Q3**: placement `utility` para nodos sin referencias a datos; macro-refs
+  sin datos siguen `ambiguous` (B4b).
 
 ## Etapa 2 — qué se hizo
 

@@ -183,6 +183,26 @@ def test_placement_default_replicates_sas_locality() -> None:
     assert classify_placement(parse).placement == "hybrid"
 
 
+def test_placement_utility_for_pure_macro_node() -> None:
+    """Nodo 100% %let/%macro sin referencias a datos → utility (Q3)."""
+    parse = parse_sas_code(
+        "%let anio = 2026; %macro limpiar(ds); proc datasets lib=work nolist; "
+        "%mend limpiar; options nodate;"
+    )
+    d = classify_placement(parse)
+    assert d.placement == "utility"
+    assert any("utilitario" in r for r in d.reasons)
+
+
+def test_placement_macro_dependent_without_datasets_stays_ambiguous() -> None:
+    """Un nodo que solo referencia datos vía macro (&lib..tabla) NO es utility:
+    sí toca datos, solo que no sabemos dónde viven → entrevista B4b."""
+    parse = parse_sas_code("data &outlib..resumen; set &inlib..base; run;")
+    d = classify_placement(parse)
+    assert d.placement == "ambiguous"
+    assert any("macro" in r for r in d.reasons)
+
+
 # ── Engines de BD (set default + config del proyecto) ────────────────────────
 
 def test_default_db_engines_cover_common_sas_access_engines() -> None:

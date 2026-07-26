@@ -15,9 +15,16 @@ local. El placement se deriva de la ESTRUCTURA del código SAS:
   escritura idempotente.
 - ``ambiguous``: referencias macro-dependientes sin resolver u otra evidencia
   insuficiente → va a entrevista (bloque B4b), jamás se adivina.
+- ``utility``: nodo sin referencias a datos (definiciones ``%macro``, ``%let``,
+  options) → traduce a Python plano; no participa de la entrevista B4b.
 
 El default replica la localidad que SAS ya tenía; mover cómputo de lugar es una
 mejora M-xxx aprobada, no una decisión silenciosa del traductor.
+
+Nota de ejes: ``classification == "utility"`` (analysis/analyze.py) describe QUÉ
+es el nodo dentro del pipeline ETL; ``placement == "utility"`` describe DÓNDE
+corre su traducción (en ningún motor de datos). Un nodo puede ser
+``classification=macro`` y ``placement=utility`` a la vez.
 """
 
 from __future__ import annotations
@@ -26,7 +33,7 @@ from dataclasses import dataclass, field
 
 from sas_migrator.core.parser.statements import DEFAULT_DB_ENGINES, NodeParse
 
-PLACEMENTS = ("sql_passthrough", "sql_pushdown", "pandas", "hybrid", "ambiguous")
+PLACEMENTS = ("sql_passthrough", "sql_pushdown", "pandas", "hybrid", "ambiguous", "utility")
 
 
 @dataclass
@@ -122,7 +129,7 @@ def classify_placement(
     # 7. Nodo sin referencias a datos (macros utilitarias, %let, etc.).
     if parse.macro_refs:
         return decision("ambiguous", f"referencias macro-dependientes: {parse.macro_refs[:5]}")
-    return decision("pandas", "sin referencias a datos; utilitario — traduce a Python plano")
+    return decision("utility", "sin referencias a datos; utilitario — traduce a Python plano")
 
 
 def project_db_librefs(
