@@ -40,6 +40,19 @@ proc sql;
 quit;
 """
 
+# CodeTask-3 (opcional, flag db_write_task): escribe a una tabla de BD real —
+# habilita el e2e contra una BD de prueba (verify + ejecución + cascada).
+CODE_TASK_3_SAS = """
+libname gob odbc dsn=dwh;
+
+proc sql;
+  create table gob.resumen_regional as
+  select region, sum(monto_ajustado) as monto
+  from work.ventas
+  group by region;
+quit;
+"""
+
 
 def _element(el_id: str, el_type: str, label: str, container: str = "") -> str:
     return (
@@ -70,6 +83,7 @@ def build_egp(
     orphan_code_entry: bool = False,
     codetask_without_file: bool = False,
     unknown_dependency: bool = False,
+    db_write_task: bool = False,
 ) -> Path:
     """Construye un .egp sintético (ZIP + project.xml UTF-16) y devuelve su ruta.
 
@@ -89,6 +103,8 @@ def build_egp(
     ]
     if codetask_without_file:
         elements.append(_element("CodeTask-3", "TASK", "Sin codigo", "PFD-1"))
+    if db_write_task:
+        elements.append(_element("CodeTask-9", "TASK", "Carga a BD", "PFD-1"))
 
     codetask2_deps = ["CodeTask-1"]
     if unknown_dependency:
@@ -99,6 +115,8 @@ def build_egp(
         _process("Query-1", ["CodeTask-2"]),
         _process("ImportTask-1", ["Query-1"]),
     ]
+    if db_write_task:
+        processes.append(_process("CodeTask-9", ["CodeTask-1"]))
 
     xml_text = (
         '<?xml version="1.0" encoding="utf-16"?>'
@@ -119,6 +137,8 @@ def build_egp(
         zf.writestr("CodeTask-2/code.sas", CODE_TASK_2_SAS)
         if include_query_payload:
             zf.writestr("Query-1/code.sas", QUERY_1_SAS)
+        if db_write_task:
+            zf.writestr("CodeTask-9/code.sas", CODE_TASK_3_SAS)
         if orphan_code_entry:
             zf.writestr("CodeTask-99/code.sas", "data work.huerfano; x=1; run;")
     return dest

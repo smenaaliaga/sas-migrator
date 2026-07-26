@@ -12,6 +12,36 @@
 | **2.5 — Resolución PREGUNTAS Q1-Q3** | ✅ Completada | Vista v2 única (lineage calificado), DB_ENGINES general+config, placement `utility`. **125 tests.** |
 | **3 — Human-in-the-loop + MCP** | ✅ Completada | Entrevistas como `interrupt()` con payloads tipados, CLI interactiva, servidor MCP, 5 ADRs. **173 tests.** |
 | **4 — Nodos LLM + ensamblador** | ✅ Completada | LLM real en fases 2/3/6 con retry→needs_human, ensamblador determinista, audit placement-aware, eval set. **222 tests (+6 evals live con API key).** |
+| **5 — Ejecución, validación e iteración** | ✅ Completada | nbclient tras la pausa sagrada, cascada dialect-agnóstica + diagnóstico LLM, doc-writer, Fase 9 con gate. DoD e2e vs BD de prueba. **249 tests (+6 evals live, +1 LocalDB en CI).** |
+
+## Etapa 5 — qué se hizo
+
+- **Capa DB dialect-agnóstica** (ADR-0007): `db.connection_url` (SQLAlchemy)
+  reemplaza la construcción mssql para BD de prueba (sqlite/LocalDB);
+  `verify_tables.verify()` in-process con inspector (paso 4 de B4b: tablas
+  DESTINO faltantes bloquean — el sistema no crea tablas);
+  `cascade.run_cascade()` in-process preservando modos y exits
+  (not_applicable=0 / blocked=3 / full=0|1).
+- **Ejecución nbclient tras el interrupt `execution_approval`** — la pausa
+  sagrada, default recomendado NO ejecutar; `authorize_execution` (MCP) la
+  responde; URL de BD por `SASMIG_DB_URL` (bootstrap del ensamblador);
+  notebook FAIL bloquea gate 7; notebooks ejecutados conservan outputs.
+- **Fase 7 completa**: verify → referencias staged → autorización →
+  ejecución → cascada; FAIL/ERROR dispara el **diagnóstico LLM de
+  mismatches** (8 patrones `MismatchCause` → `MismatchDiagnosis` en
+  `validation_report.diagnoses`). Gate 7 con sustancia (full FAIL bloquea,
+  blocked bloquea). `planning` puebla `output_tables` reales (salidas v2
+  no-WORK) — la cascada dejó de ser vacua.
+- **doc-writer (fase 8)**: `DocsOut` con los 5 documentos en prosa;
+  NeedsHuman → template + gate bloqueado.
+- **Fase 9 iteración como sub-grafo con gate**: `IterationEntry` obligatoria
+  en `iteration_log.json`, re-traducción parcial (traducciones persistidas
+  en `state/translations/`), re-audit + validación RE-CORRIDA como condición
+  de cierre (WARN honesto sin insumos). `iterate` real en MCP/CLI/sesión.
+- **DoD**: e2e completo contra BD de prueba sqlite (B4b confirma BD → verify
+  ok → ejecución autorizada escribe → cascada full PASS → iteración cierra
+  PASS) + test LocalDB/SQL Server real que corre en CI windows-latest.
+- needs_human cubre fases 2/3/6/7/8/9. CI instala extras db y notebook.
 
 ## Etapa 4 — qué se hizo
 
