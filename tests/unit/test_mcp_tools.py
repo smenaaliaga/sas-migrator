@@ -84,7 +84,9 @@ def test_iterate_is_honest_noop_and_authorize_errors_when_not_pending(
         # el checkpointer sqlite se crea lazy al abrir la sesión — no es un
         # artefacto de migración; se excluye del assert
         return sorted(
-            p.name for p in tmp_path.rglob("*") if "checkpoint" not in p.name
+            p.name
+            for p in tmp_path.rglob("*")
+            if p.is_file() and "checkpoint" not in p.name
         )
 
     before = _artifacts()
