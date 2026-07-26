@@ -231,12 +231,9 @@ def test_full_pipeline_llm_fake_and_interviews(tmp_path: Path) -> None:
     (ws / "input" / "docs").mkdir()
     egp = build_egp(ws / "input" / "egp" / "demo.egp")
 
-    runtime.set_caller(FakeCaller({
-        "analysis_reviews": _reviews_fake,
-        "improvements": _improvements_fake,
-        "matching": FileMappingBatch(mappings=[]),
-        "translation": _translation_fake,
-    }))
+    from sas_migrator.testing.fake_llm import default_fake_caller
+
+    runtime.set_caller(default_fake_caller())
 
     graph = build_graph(checkpointer=InMemorySaver())
     config = {"configurable": {"thread_id": "llm-e2e"}}
