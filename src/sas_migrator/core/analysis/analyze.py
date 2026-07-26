@@ -448,6 +448,10 @@ def build_evidence(nodes: dict, all_smells: list[dict],
 # Main
 # ─────────────────────────────────────────────────────────────
 def main(state_dir: Path | None = None):
+    # Contador global de CS-xxxx: resetear por corrida — dos ejecuciones en el
+    # mismo proceso deben producir IDs idénticos (garantía de determinismo).
+    global _smell_counter
+    _smell_counter = 0
     state = Path(state_dir) if state_dir is not None else DEFAULT_STATE
     nodes_dir = state / "nodes"
     print("Cargando flow_graph.json ...")

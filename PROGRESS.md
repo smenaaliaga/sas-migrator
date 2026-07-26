@@ -7,8 +7,19 @@
 | Etapa | Estado | Detalle |
 |---|---|---|
 | **0 — Fundaciones** | ✅ Completada | Port del núcleo + fixes + config + CI. **84 tests en verde, ruff limpio.** |
-| **1 — Grafo esqueleto** | 🔨 En curso | LangGraph con gates como edges, stubs LLM, checkpointer. |
-| **2 — Parser SAS v2 + placement** | ⏳ Pendiente | Si alcanza el margen de esta corrida. |
+| **1 — Grafo esqueleto** | ✅ Completada | Pipeline 0-8 end-to-end con gates forzados por topología. **90 tests.** |
+| **2 — Parser SAS v2 + placement** | 🔨 En curso | Tokenizador + parsers dirigidos + clasificador de placement. |
+
+## Etapa 1 — qué se hizo
+
+- **Grafo LangGraph** (`graph/builder.py`): las 10 fases encadenadas con un nodo de gate entre cada par; `check_gate()` (el del v1, con sus chequeos de sustancia) es el router de los edges condicionales — **avanzar sin pasar el gate es imposible por topología**, ya no una instrucción. Test que lo prueba: sabotear la fase 1 y verificar que la fase 2 jamás corre.
+- **`migration_state.json` lo escribe el runtime** (proyección tipada vía modelo Pydantic en cada gate) — en v1 lo redactaba el LLM a mano y era el único artefacto central sin validar.
+- **Stubs LLM deterministas** (`graph/stubs.py`): el pipeline completo corre sin API key. El stub de generación es el embrión del ensamblador: notebooks reales vía nbformat con `cell_index` calculado al ensamblar (el contrato clave de v2) y cell ids fijos por posición.
+- **Golden de determinismo**: dos corridas sobre el mismo workspace (con `reset_workspace` entre medio) producen artefactos idénticos módulo timestamps. Cazó 3 fuentes reales de no-determinismo el primer día: contador global de IDs de smells, cell ids aleatorios de nbformat, timestamp en el .md de auditoría.
+- **Reanudación**: checkpointer SqliteSaver; test interrumpe antes de la fase 5 y reanuda con `invoke(None)` — continúa sin repetir ni saltar gates.
+- **Frontera de arquitectura como test**: `core/` no puede importar langgraph/anthropic/graph/llm.
+- **Gate 6 in-process**: la auditoría semántica dejó de ser un subprocess a una ruta de .github/ (rota en v2) y es una llamada de módulo (`core.audit.run_audit`).
+- **CLI**: `sas-migrator run|resume|status` (typer) — probada end-to-end sobre workspace real.
 
 ## Etapa 0 — qué se hizo
 

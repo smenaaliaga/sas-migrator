@@ -1,0 +1,45 @@
+"""Estado del grafo de migración.
+
+El contenido de los artefactos vive en disco (``state/``), igual que en v1 —
+eso es lo auditable. El estado del grafo es control de flujo: dónde vamos,
+qué dijeron los gates, y bajo qué modo corre. Lo escribe el runtime de
+LangGraph vía checkpointer; ningún nodo (ni menos un LLM) lo redacta a mano.
+"""
+
+from __future__ import annotations
+
+import operator
+from typing import Annotated, Any, TypedDict
+
+
+class GateRecord(TypedDict):
+    phase: int
+    passed: bool
+    errors: list[str]
+
+
+class MigrationGraphState(TypedDict, total=False):
+    # Identidad de la corrida
+    workspace: str  # raíz con input/, state/, output/
+    egp_file: str  # ruta al .egp dentro de input/egp/
+
+    # Control de flujo
+    current_phase: int
+    done: bool
+
+    # Resultado del último gate evaluado (se sobreescribe en cada frontera)
+    last_gate: GateRecord | None
+    # Historial completo de gates (append-only vía reducer)
+    gate_history: Annotated[list[GateRecord], operator.add]
+
+    # Etapa 1: los nodos LLM son stubs deterministas. Cuando existan nodos LLM
+    # reales, este flag permite seguir corriendo el pipeline completo sin API
+    # key (tests, golden runs, CI).
+    stub_mode: bool
+
+    # Espacio para que los nodos dejen notas de ejecución (no decisiones).
+    notes: Annotated[list[str], operator.add]
+
+    # Reservado para fases con human-in-the-loop (Etapa 3): payload de la
+    # pregunta pendiente y respuestas ya entregadas.
+    pending_interrupt: dict[str, Any] | None

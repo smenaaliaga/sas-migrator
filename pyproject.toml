@@ -60,3 +60,7 @@ target-version = "py311"
 select = ["E", "F", "I", "UP", "B"]
 # E701/E702/E731/E741/UP042/B007: estilo legado del port v1 — endurecer al tocar cada módulo.
 ignore = ["E501", "E701", "E702", "E731", "E741", "UP042", "B007"]
+
+[tool.ruff.lint.per-file-ignores]
+# B008 (llamadas en defaults) es el patrón idiomático de typer.Option.
+"src/sas_migrator/cli/*" = ["B008"]
