@@ -30,6 +30,7 @@ from sas_migrator.core.models.graph import (
     ResidueElement,
     SASNode,
 )
+from sas_migrator.core.parser.statements import parse_sas_code
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -112,8 +113,9 @@ _DS_PATTERN = re.compile(
 )
 
 
-def _extract_datasets(code: str) -> tuple[list[str], list[str], list[str]]:
-    """Extract input datasets, output datasets, and LIBNAME references from SAS code."""
+def _extract_datasets_legacy(code: str) -> tuple[list[str], list[str], list[str]]:
+    """Extractor v1 por regex. Ya no alimenta los nodos: sobrevive solo como
+    chequeo cruzado contra el parser v2 (desacuerdos → parser_upgrade_report)."""
     inputs: list[str] = []
     outputs: list[str] = []
     libraries: list[str] = []
@@ -136,6 +138,21 @@ def _extract_datasets(code: str) -> tuple[list[str], list[str], list[str]]:
         sorted(set(inputs)),
         sorted(set(outputs)),
         sorted(set(libraries)),
+    )
+
+
+def _extract_datasets(code: str) -> tuple[list[str], list[str], list[str]]:
+    """Inputs/outputs/librerías de un nodo, vía el parser v2 (statement-dirigido).
+
+    Formato: ``LIB.TABLA`` en mayúsculas, con WORK explícito para los no
+    calificados. Las referencias macro-dependientes (``&lib..tabla``) no entran
+    aquí — quedan en ``NodeParse.macro_refs`` y las resuelve la entrevista B4b.
+    """
+    parse = parse_sas_code(code)
+    return (
+        sorted({f"{r.libref}.{r.table}" for r in parse.inputs}),
+        sorted({f"{r.libref}.{r.table}" for r in parse.outputs}),
+        sorted(parse.librefs_declared),
     )
 
 

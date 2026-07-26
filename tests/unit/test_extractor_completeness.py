@@ -34,7 +34,7 @@ def test_query_node_gets_code_from_payload(synthetic_egp):
     node = _node(graph, "Query-1")
     assert node.node_type == NodeType.QUERY
     assert "src.clientes" in node.code
-    assert "src.clientes" in node.inputs
+    assert "SRC.CLIENTES" in node.inputs
 
 
 def test_edges_to_native_tasks_survive(synthetic_egp):

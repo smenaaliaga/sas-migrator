@@ -159,8 +159,12 @@ def classify_node(node: dict, sinks: set[str]) -> dict:
 
     complexity = "high" if score >= 5 else ("medium" if score >= 2 else "low")
 
-    # Migration priority — derivada del DAG y de dependencias de BD
-    has_db_dep = bool(db_librefs_in_code(code)) or any("." in x for x in inputs)
+    # Migration priority — derivada del DAG y de dependencias de BD. Con la
+    # vista v2 todo input viene calificado (WORK explícito), así que "tiene
+    # punto" ya no significa "no-WORK": hay que excluir WORK. del criterio.
+    has_db_dep = bool(db_librefs_in_code(code)) or any(
+        "." in x and not x.upper().startswith("WORK.") for x in inputs
+    )
     writes_db = any("." in x and not x.upper().startswith("WORK.") for x in outputs) or bool(
         re.search(r"\b(CREATE\s+TABLE|INSERT\s+INTO|APPEND\s+BASE=)\s*[A-Z][A-Z0-9_]*\.", code, re.I)
     )
@@ -278,7 +282,14 @@ def detect_smells(node: dict, magic_numbers: dict[str, list[str]]) -> list[dict]
 # Linaje básico desde DAG
 # ─────────────────────────────────────────────────────────────
 def build_lineage(nodes: dict, flow_graph: dict) -> list[dict]:
-    """Build dataset-level lineage entries from DAG edges."""
+    """Build dataset-level lineage entries from DAG edges.
+
+    Los inputs/outputs de los nodos vienen del parser v2 (``LIB.TABLA``
+    calificados), así que el match primario es por nombre calificado. El match
+    por nombre corto queda como fallback para pares donde los librefs difieren
+    (misma tabla vista con prefijos distintos) — señal débil, pero mejor que
+    perder la arista de linaje.
+    """
     entries = []
     seen = set()
     for edge in flow_graph.get("edges", []):
@@ -291,11 +302,21 @@ def build_lineage(nodes: dict, flow_graph: dict) -> list[dict]:
         src_out = src.get("outputs", [])
         tgt_in = tgt.get("inputs", [])
 
-        src_out_clean = {ds.upper().split(".")[-1]: ds for ds in src_out}
-        tgt_in_clean = {ds.upper().split(".")[-1]: ds for ds in tgt_in}
-        shared = set(src_out_clean) & set(tgt_in_clean)
+        # 1) match calificado LIB.TABLA
+        src_q = {ds.upper(): ds for ds in src_out}
+        tgt_q = {ds.upper(): ds for ds in tgt_in}
+        shared_q = set(src_q) & set(tgt_q)
+        pairs = [(src_q[q], tgt_q[q]) for q in shared_q]
 
-        if shared:
+        # 2) fallback por nombre corto, solo sobre lo no matcheado en (1)
+        def _short(ds: str) -> str:
+            return ds.upper().split(".")[-1]
+
+        src_s = {_short(ds): ds for q, ds in src_q.items() if q not in shared_q}
+        tgt_s = {_short(ds): ds for q, ds in tgt_q.items() if q not in shared_q}
+        pairs.extend((src_s[s], tgt_s[s]) for s in set(src_s) & set(tgt_s))
+
+        if pairs:
             tgt_type = tgt.get("node_type", "")
             if tgt_type == "PROC_SORT":                   ttype = "reshape"
             elif tgt_type in ("PROC_MEANS", "PROC_FREQ"): ttype = "aggregate"
@@ -304,15 +325,15 @@ def build_lineage(nodes: dict, flow_graph: dict) -> list[dict]:
             elif tgt_type == "DATA_STEP":                 ttype = "derive"
             else:                                          ttype = "pass_through"
 
-            for ds_clean in shared:
-                key = (tgt_id, src_out_clean[ds_clean])
+            for source_ds, target_ds in sorted(pairs):
+                key = (tgt_id, source_ds)
                 if key not in seen:
                     seen.add(key)
                     entries.append({
                         "node_id": tgt_id,
-                        "source_dataset": src_out_clean[ds_clean],
+                        "source_dataset": source_ds,
                         "source_column": "*",
-                        "target_dataset": tgt_in_clean[ds_clean],
+                        "target_dataset": target_ds,
                         "target_column": "*",
                         "transformation": ttype,
                     })

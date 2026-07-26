@@ -69,6 +69,57 @@ def test_evidence_is_deterministic(tmp_path):
     assert any(d["libref"] == "GOBGENER" for d in ev1["db_dependencies"])
 
 
+# ── generate_analysis: linaje (vista v2, nombres calificados) ────────────────
+
+def test_build_lineage_matches_qualified_names_with_short_fallback():
+    nodes = {
+        "a": {"id": "a", "node_type": "PROC_SQL", "code": "",
+              "inputs": [], "outputs": ["WORK.BASE", "GG.RESUMEN"]},
+        "b": {"id": "b", "node_type": "DATA_STEP", "code": "",
+              "inputs": ["WORK.BASE", "STAGE.RESUMEN"], "outputs": []},
+    }
+    fg = {"edges": [{"source": "a", "target": "b"}]}
+
+    entries = ga.build_lineage(nodes, fg)
+    by_src = {e["source_dataset"]: e for e in entries}
+
+    # match primario por nombre calificado LIB.TABLA
+    assert by_src["WORK.BASE"]["target_dataset"] == "WORK.BASE"
+    # fallback por nombre corto cuando los librefs difieren
+    assert by_src["GG.RESUMEN"]["target_dataset"] == "STAGE.RESUMEN"
+    assert all(e["node_id"] == "b" for e in entries)
+    assert all(e["transformation"] == "derive" for e in entries)
+
+
+def test_build_lineage_qualified_names_do_not_collide_by_short_name():
+    """Dos tablas distintas con el mismo nombre corto en librefs distintos NO
+    deben cruzarse si el match calificado ya explicó la arista."""
+    nodes = {
+        "a": {"id": "a", "node_type": "PROC_SQL", "code": "",
+              "inputs": [], "outputs": ["GG.VENTAS"]},
+        "b": {"id": "b", "node_type": "PROC_SQL", "code": "",
+              "inputs": ["GG.VENTAS", "WORK.VENTAS"], "outputs": []},
+    }
+    fg = {"edges": [{"source": "a", "target": "b"}]}
+
+    entries = ga.build_lineage(nodes, fg)
+
+    assert len(entries) == 1
+    assert entries[0]["source_dataset"] == "GG.VENTAS"
+    assert entries[0]["target_dataset"] == "GG.VENTAS"
+
+
+def test_build_lineage_without_shared_datasets_emits_nothing():
+    nodes = {
+        "a": {"id": "a", "node_type": "PROC_SQL", "code": "",
+              "inputs": [], "outputs": ["WORK.X"]},
+        "b": {"id": "b", "node_type": "PROC_SQL", "code": "",
+              "inputs": ["WORK.Y"], "outputs": []},
+    }
+    fg = {"edges": [{"source": "a", "target": "b"}]}
+    assert ga.build_lineage(nodes, fg) == []
+
+
 # ── build_indexes: topo_order ────────────────────────────────────────────────
 
 def test_topo_order_respects_dependencies():
