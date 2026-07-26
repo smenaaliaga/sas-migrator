@@ -1,0 +1,15 @@
+id: first-last-bygroup
+strategy: pandas
+placement: pandas
+node_label: Ultima compra por cliente
+sas_code: |
+  proc sort data=work.ventas; by id_cliente fecha; run;
+  data work.ultima_compra;
+    set work.ventas;
+    by id_cliente;
+    if last.id_cliente;
+  run;
+expect:
+  cells_regex_all: ["sort_values", "id_cliente", "drop_duplicates|last|tail"]
+  forbid: ["to_parquet", "duckdb", "read_sql"]
+  min_cells: 1

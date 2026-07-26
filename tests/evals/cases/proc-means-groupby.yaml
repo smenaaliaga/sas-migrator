@@ -1,0 +1,14 @@
+id: proc-means-groupby
+strategy: pandas
+placement: pandas
+node_label: Resumen de montos por region
+sas_code: |
+  proc means data=work.ventas noprint;
+    class region;
+    var monto;
+    output out=work.resumen sum=total_monto mean=promedio_monto;
+  run;
+expect:
+  cells_regex_all: ['groupby\(', 'region', 'sum|agg', 'mean|promedio']
+  forbid: ["to_parquet", "duckdb", "read_sql"]
+  min_cells: 1

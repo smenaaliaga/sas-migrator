@@ -1,0 +1,14 @@
+id: proc-transpose
+strategy: pandas
+placement: pandas
+node_label: Pivotea ventas por mes
+sas_code: |
+  proc transpose data=work.ventas_mes out=work.ventas_ancho prefix=mes_;
+    by id_cliente;
+    id mes;
+    var monto;
+  run;
+expect:
+  cells_regex_all: ["pivot|unstack", "id_cliente", "mes"]
+  forbid: ["to_parquet", "duckdb", "read_sql"]
+  min_cells: 1

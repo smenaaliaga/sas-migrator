@@ -1,0 +1,17 @@
+{
+  "node_id": "retain-cumsum",
+  "node_label": "Acumulado de montos por cliente",
+  "strategy": "pandas",
+  "imports": [],
+  "cells": [
+    "acumulado = ventas.copy()\nacumulado[\"acumulado\"] = acumulado.groupby(\"id_cliente\")[\"monto\"].cumsum()\n"
+  ],
+  "traceability": {
+    "sas_construct": "DATA step con RETAIN + suma implícita por grupo BY",
+    "business_rule": "Monto acumulado por cliente en orden de lectura"
+  },
+  "confidence": "medium",
+  "warnings": [
+    "El RETAIN de SAS depende del orden del dataset; cumsum respeta el orden actual del DataFrame — ordenar antes si el orden importa"
+  ]
+}

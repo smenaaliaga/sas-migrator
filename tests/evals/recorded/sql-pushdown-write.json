@@ -1,0 +1,17 @@
+{
+  "node_id": "sql-pushdown-write",
+  "node_label": "Resumen regional escrito en la BD",
+  "strategy": "sql_pushdown",
+  "imports": ["from sqlalchemy import text"],
+  "cells": [
+    "sql = \"\"\"\nSELECT region, SUM(monto) AS total\nINTO dbo.resumen_regional\nFROM dbo.ventas\nGROUP BY region\n\"\"\"\nwith engine.begin() as conn:\n    conn.execute(text(sql))\n"
+  ],
+  "traceability": {
+    "sas_construct": "PROC SQL CREATE TABLE sobre libref de BD",
+    "business_rule": "Total de montos por región materializado en la BD"
+  },
+  "confidence": "high",
+  "warnings": [
+    "CREATE TABLE AS de SAS se traduce a SELECT INTO en T-SQL; falla si la tabla ya existe"
+  ]
+}

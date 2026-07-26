@@ -1,0 +1,18 @@
+{
+  "node_id": "proc-export-csv",
+  "node_label": "Exporta resumen a CSV",
+  "strategy": "pandas",
+  "imports": ["from pathlib import Path"],
+  "cells": [
+    "salida = Path(\"salidas\") / \"resumen.csv\"\nsalida.parent.mkdir(parents=True, exist_ok=True)\nresumen.to_csv(salida, index=False, encoding=\"utf-8-sig\")\n"
+  ],
+  "traceability": {
+    "sas_construct": "PROC EXPORT DBMS=CSV REPLACE",
+    "business_rule": "Publica el resumen como CSV para consumo externo"
+  },
+  "confidence": "high",
+  "warnings": [
+    "La ruta absoluta C:\\salidas del SAS original se reemplaza por una ruta relativa del proyecto",
+    "utf-8-sig para que Excel abra acentos correctamente (SAS usaba wlatin1)"
+  ]
+}

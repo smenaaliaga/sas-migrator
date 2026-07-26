@@ -1,0 +1,17 @@
+{
+  "node_id": "first-last-bygroup",
+  "node_label": "Ultima compra por cliente",
+  "strategy": "pandas",
+  "imports": [],
+  "cells": [
+    "ultima_compra = (\n    ventas.sort_values([\"id_cliente\", \"fecha\"])\n    .drop_duplicates(\"id_cliente\", keep=\"last\")\n)\n"
+  ],
+  "traceability": {
+    "sas_construct": "PROC SORT + DATA step con last.variable",
+    "business_rule": "Conserva la última compra (por fecha) de cada cliente"
+  },
+  "confidence": "high",
+  "warnings": [
+    "last. depende del orden físico en SAS; aquí el orden es explícito en sort_values"
+  ]
+}

@@ -1,0 +1,13 @@
+id: proc-export-csv
+strategy: pandas
+placement: pandas
+node_label: Exporta resumen a CSV
+sas_code: |
+  proc export data=work.resumen
+    outfile="C:\salidas\resumen.csv"
+    dbms=csv replace;
+  run;
+expect:
+  cells_regex_all: ["to_csv", "index=False", "resumen"]
+  forbid: ["to_parquet", "duckdb", "read_sql"]
+  min_cells: 1

@@ -1,0 +1,15 @@
+id: sql-pushdown-write
+strategy: sql_pushdown
+placement: sql_pushdown
+node_label: Resumen regional escrito en la BD
+sas_code: |
+  proc sql;
+    create table gob.resumen_regional as
+    select region, sum(monto) as total
+    from gob.ventas
+    group by region;
+  quit;
+expect:
+  cells_regex_all: ['text\(', 'GROUP BY', 'resumen_regional', 'engine']
+  forbid: ["to_parquet", "duckdb"]
+  min_cells: 1

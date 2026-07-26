@@ -1,0 +1,17 @@
+{
+  "node_id": "proc-transpose",
+  "node_label": "Pivotea ventas por mes",
+  "strategy": "pandas",
+  "imports": [],
+  "cells": [
+    "ventas_ancho = (\n    ventas_mes.pivot(index=\"id_cliente\", columns=\"mes\", values=\"monto\")\n    .add_prefix(\"mes_\")\n    .reset_index()\n)\n"
+  ],
+  "traceability": {
+    "sas_construct": "PROC TRANSPOSE con BY/ID/VAR y PREFIX=",
+    "business_rule": "Una fila por cliente con un monto por columna de mes"
+  },
+  "confidence": "high",
+  "warnings": [
+    "PROC TRANSPOSE falla con BY duplicado; pivot lanza ValueError — mismo contrato"
+  ]
+}

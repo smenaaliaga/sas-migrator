@@ -1,0 +1,16 @@
+id: retain-cumsum
+strategy: pandas
+placement: pandas
+node_label: Acumulado de montos por cliente
+sas_code: |
+  data work.acumulado;
+    set work.ventas;
+    by id_cliente;
+    retain acumulado 0;
+    if first.id_cliente then acumulado = 0;
+    acumulado + monto;
+  run;
+expect:
+  cells_regex_all: ['groupby\(', 'cumsum', 'id_cliente']
+  forbid: ["to_parquet", "duckdb", "read_sql"]
+  min_cells: 1

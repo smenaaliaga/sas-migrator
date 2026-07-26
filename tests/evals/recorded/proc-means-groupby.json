@@ -1,0 +1,17 @@
+{
+  "node_id": "proc-means-groupby",
+  "node_label": "Resumen de montos por region",
+  "strategy": "pandas",
+  "imports": [],
+  "cells": [
+    "resumen = (\n    ventas.groupby(\"region\", as_index=False)\n    .agg(total_monto=(\"monto\", \"sum\"), promedio_monto=(\"monto\", \"mean\"))\n)\n"
+  ],
+  "traceability": {
+    "sas_construct": "PROC MEANS con CLASS y OUTPUT OUT=",
+    "business_rule": "Suma y promedio de montos por región"
+  },
+  "confidence": "high",
+  "warnings": [
+    "PROC MEANS con CLASS agrega también la fila total (_TYPE_=0); groupby no la incluye"
+  ]
+}
