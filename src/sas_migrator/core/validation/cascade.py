@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -101,12 +100,19 @@ def read_target_table(
     conn_cfg: dict,
     where: str | None,
     params: dict[str, Any],
+    config=None,
 ) -> pd.DataFrame:
-    """Read a target table from SQL Server, with an optional parameterized filter."""
+    """Read a target table from the DB, with an optional parameterized filter.
+
+    Dialect-agnóstico: la calificación/citado del nombre sale del dialecto del
+    engine (SQL Server: [schema].[tabla]; sqlite de prueba: sin schema).
+    """
     from sqlalchemy import text
-    engine = build_engine(conn_cfg)
-    schema = conn_cfg.get("schema_name", "dbo")
-    sql = f"SELECT * FROM [{schema}].[{table}]"
+
+    from sas_migrator.core.db.engine import qualified_table
+
+    engine = build_engine(conn_cfg, config)
+    sql = f"SELECT * FROM {qualified_table(engine, conn_cfg, table)}"
     if where:
         sql += f" WHERE {where}"  # el WHERE usa :params; los valores nunca se interpolan
     return pd.read_sql_query(text(sql), con=engine, params=params or {})
@@ -294,6 +300,7 @@ def validate_table(
     params: dict[str, Any],
     value_tolerance: float,
     row_tolerance: float,
+    config=None,
 ) -> dict[str, Any]:
     """Validate one target table against its reference file."""
     schema = conn_cfg.get("schema_name", "dbo")
@@ -311,7 +318,7 @@ def validate_table(
         result["message"] = f"Cannot read reference file: {ref_path}"
         return result
 
-    gen_df = read_target_table(table, conn_cfg, where, params)
+    gen_df = read_target_table(table, conn_cfg, where, params, config)
 
     hard_gate_tests = [
         lambda: compare_schemas(ref_df, gen_df),
@@ -338,6 +345,114 @@ def validate_table(
     return result
 
 
+def run_cascade(
+    state_dir: Path,
+    ref_dir: Path | None = None,
+    *,
+    config=None,
+    targets: list[str] | None = None,
+    where: str | None = None,
+    params: dict[str, Any] | None = None,
+    separator: str = ";",
+    row_tolerance: float = 0.001,
+    value_tolerance: float = 1e-6,
+    output_path: Path | None = None,
+) -> tuple[dict, int]:
+    """Cascada in-process. Devuelve (reporte, exit_code semántico).
+
+    Modos conservados: not_applicable (0, sin referencias), blocked (3, sin
+    conexiones o sin acceso a BD), full (0 si todo PASS, 1 si hay FAIL/ERROR).
+    Escribe el reporte en ``output_path`` (default state/validation_report.json).
+    """
+    global _CSV_SEP
+    _CSV_SEP = separator
+
+    state_dir = Path(state_dir)
+    ref_dir = Path(ref_dir) if ref_dir is not None else state_dir / "reference_outputs"
+    output_path = Path(output_path) if output_path else state_dir / "validation_report.json"
+    params = params or {}
+
+    def write_report(report: dict) -> dict:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(
+            json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8"
+        )
+        return report
+
+    if not ref_dir.exists() or not any(ref_dir.iterdir()):
+        return write_report({
+            "validation_mode": "not_applicable",
+            "total_tables": 0, "passed": 0, "failed": 0, "errors": 0,
+            "note": f"Reference directory '{ref_dir}' is empty or does not exist.",
+        }), 0
+
+    connections = load_connections(state_dir)
+    if not connections:
+        return write_report({
+            "validation_mode": "blocked",
+            "total_tables": 0, "passed": 0, "failed": 0, "errors": 0,
+            "note": "state/db_connections.yaml missing; cannot read target tables.",
+        }), 3
+
+    all_targets = load_target_tables(state_dir)
+    if targets:
+        requested = {t.strip().upper() for t in targets}
+        table_list = [t for t in all_targets if t in requested] or sorted(requested)
+    else:
+        table_list = all_targets
+
+    ref_files = {f.stem.upper(): f for f in ref_dir.iterdir() if f.is_file()}
+    matched = [t for t in table_list if t in ref_files]
+    unmatched_targets = sorted(set(table_list) - set(matched))
+    unmatched_refs = sorted(set(ref_files) - set(table_list))
+
+    results: list[dict[str, Any]] = []
+    for table in matched:
+        conn_cfg = resolve_connection(table, connections)
+        try:
+            results.append(validate_table(
+                table, ref_files[table], conn_cfg, where, params,
+                value_tolerance=value_tolerance, row_tolerance=row_tolerance,
+                config=config,
+            ))
+        except Exception as e:
+            msg = str(e)
+            if any(k in msg.lower() for k in ("login", "connect", "network", "timeout", "driver")):
+                return write_report({
+                    "validation_mode": "blocked",
+                    "total_tables": len(matched), "passed": 0, "failed": 0, "errors": 0,
+                    "note": f"No database access while reading {table}: {msg}",
+                }), 3
+            results.append({
+                "target_table": table,
+                "reference_file": str(ref_files[table]),
+                "overall_status": "ERROR",
+                "message": msg,
+                "tests": [],
+            })
+
+    passed = sum(1 for r in results if r["overall_status"] == "PASS")
+    failed = sum(1 for r in results if r["overall_status"] == "FAIL")
+    errors = sum(1 for r in results if r["overall_status"] == "ERROR")
+
+    report = write_report({
+        "validation_mode": "full",
+        "separator": separator,
+        "row_tolerance": row_tolerance,
+        "value_tolerance": value_tolerance,
+        "where": where,
+        "total_tables": len(matched),
+        "passed": passed,
+        "failed": failed,
+        "errors": errors,
+        "pass_rate": round(passed / max(len(matched), 1), 3),
+        "unvalidated_targets": unmatched_targets,
+        "unmatched_references": unmatched_refs,
+        "results": results,
+    })
+    return report, (0 if failed == 0 and errors == 0 else 1)
+
+
 def main() -> None:
     global _CSV_SEP
 
@@ -359,11 +474,6 @@ def main() -> None:
     parser.add_argument("--output", default="state/validation_report.json", help="Output report path")
     args = parser.parse_args()
 
-    _CSV_SEP = args.separator
-    state_dir = Path(args.state_dir)
-    ref_dir = Path(args.reference_dir)
-    os.makedirs(Path(args.output).parent, exist_ok=True)
-
     params: dict[str, Any] = {}
     for p in args.param:
         name, _, value = p.partition("=")
@@ -375,96 +485,34 @@ def main() -> None:
             except ValueError:
                 params[name] = value
 
-    def write_report(report: dict) -> None:
-        with open(args.output, "w", encoding="utf-8") as f:
-            json.dump(report, f, indent=2, ensure_ascii=False)
+    from sas_migrator.core.config import load_project_config
 
-    # --- References available? ---
-    if not ref_dir.exists() or not any(ref_dir.iterdir()):
-        print(f"No references found in {ref_dir}. Nothing to validate — exiting OK.")
-        write_report({
-            "validation_mode": "not_applicable",
-            "total_tables": 0, "passed": 0, "failed": 0, "errors": 0,
-            "note": f"Reference directory '{ref_dir}' is empty or does not exist.",
-        })
-        sys.exit(0)
+    state_dir = Path(args.state_dir)
+    report, code = run_cascade(
+        state_dir,
+        Path(args.reference_dir),
+        config=load_project_config(state_dir.resolve().parent),
+        targets=[t.strip() for t in args.targets.split(",")] if args.targets else None,
+        where=args.where,
+        params=params,
+        separator=args.separator,
+        row_tolerance=args.row_tolerance,
+        value_tolerance=args.value_tolerance,
+        output_path=Path(args.output),
+    )
 
-    # --- Connections available? ---
-    connections = load_connections(state_dir)
-    if not connections:
-        print("No db_connections.yaml — validation requires SQL Server target tables.")
-        write_report({
-            "validation_mode": "blocked",
-            "total_tables": 0, "passed": 0, "failed": 0, "errors": 0,
-            "note": "state/db_connections.yaml missing; cannot read target tables.",
-        })
-        sys.exit(3)
-
-    # --- Resolve target tables ---
-    all_targets = load_target_tables(state_dir)
-    if args.targets:
-        requested = {t.strip().upper() for t in args.targets.split(",")}
-        targets = [t for t in all_targets if t in requested] or sorted(requested)
+    mode = report.get("validation_mode")
+    if mode == "not_applicable":
+        print(f"No references found. Nothing to validate — exiting OK. ({report.get('note')})")
+    elif mode == "blocked":
+        print(f"✗ Validación bloqueada: {report.get('note')}")
     else:
-        targets = all_targets
-
-    ref_files = {f.stem.upper(): f for f in ref_dir.iterdir() if f.is_file()}
-    matched = [t for t in targets if t in ref_files]
-    unmatched_targets = sorted(set(targets) - set(matched))
-    unmatched_refs = sorted(set(ref_files) - set(targets))
-
-    results: list[dict[str, Any]] = []
-    for table in matched:
-        conn_cfg = resolve_connection(table, connections)
-        print(f"Validating: {table} (vs {ref_files[table].name})")
-        try:
-            results.append(validate_table(
-                table, ref_files[table], conn_cfg,
-                args.where, params,
-                value_tolerance=args.value_tolerance,
-                row_tolerance=args.row_tolerance,
-            ))
-        except Exception as e:
-            msg = str(e)
-            if any(k in msg.lower() for k in ("login", "connect", "network", "timeout", "driver")):
-                print(f"✗ Sin acceso a la BD: {msg}")
-                write_report({
-                    "validation_mode": "blocked",
-                    "total_tables": len(matched), "passed": 0, "failed": 0, "errors": 0,
-                    "note": f"No database access while reading {table}: {msg}",
-                })
-                sys.exit(3)
-            results.append({
-                "target_table": table,
-                "reference_file": str(ref_files[table]),
-                "overall_status": "ERROR",
-                "message": msg,
-                "tests": [],
-            })
-
-    passed = sum(1 for r in results if r["overall_status"] == "PASS")
-    failed = sum(1 for r in results if r["overall_status"] == "FAIL")
-    errors = sum(1 for r in results if r["overall_status"] == "ERROR")
-
-    write_report({
-        "validation_mode": "full",
-        "separator": _CSV_SEP,
-        "row_tolerance": args.row_tolerance,
-        "value_tolerance": args.value_tolerance,
-        "where": args.where,
-        "total_tables": len(matched),
-        "passed": passed,
-        "failed": failed,
-        "errors": errors,
-        "pass_rate": round(passed / max(len(matched), 1), 3),
-        "unvalidated_targets": unmatched_targets,
-        "unmatched_references": unmatched_refs,
-        "results": results,
-    })
-
-    print(f"\nValidation complete: {passed} passed, {failed} failed, {errors} errors")
-    print(f"Report: {args.output}")
-    sys.exit(0 if failed == 0 and errors == 0 else 1)
+        print(
+            f"\nValidation complete: {report['passed']} passed, "
+            f"{report['failed']} failed, {report['errors']} errors"
+        )
+        print(f"Report: {args.output}")
+    sys.exit(code)
 
 
 if __name__ == "__main__":

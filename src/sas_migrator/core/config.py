@@ -26,6 +26,10 @@ class DBConfig(BaseModel):
     # Hoy la conexión usa siempre AD integrated + Encrypt. Se mantienen como
     # default pero el certificado ya no se confía a ciegas salvo opt-in.
     trust_server_certificate: bool = False
+    # URL SQLAlchemy completa que REEMPLAZA la construcción mssql+pyodbc
+    # (BD de prueba: sqlite:///..., LocalDB, u otro dialecto). Vacía = flujo
+    # normal SQL Server con AD integrated.
+    connection_url: str = ""
 
 
 class AuditConfig(BaseModel):
