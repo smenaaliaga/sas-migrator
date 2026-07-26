@@ -74,14 +74,26 @@ def build_tools(session: MigrationSession) -> dict[str, Callable[..., Any]]:
         return _dump(session.answer(payload))
 
     def authorize_execution() -> dict:
-        """(Etapa 5) Autoriza la ejecución de notebooks contra datos reales."""
-        return {
-            "status": "not_available",
-            "message": (
-                "La ejecución de notebooks llega en la Etapa 5; la aprobación del "
-                "plan es approve_plan."
-            ),
+        """Autoriza la ejecución de notebooks (responde la tarjeta
+        execution_approval pendiente de la Fase 7 — la pausa sagrada)."""
+        card = session.pending()
+        if card is None or card.card_id != "execution_approval":
+            return {
+                "status": "error",
+                "message": (
+                    "no hay una autorización de ejecución pendiente; la tarjeta "
+                    f"activa es {card.card_id if card else 'ninguna'} — usar "
+                    "answer/get_pending_question"
+                ),
+            }
+        from sas_migrator.core.interview.execution import AUTHORIZE
+
+        payload = {
+            "card_id": "execution_approval",
+            "answers": [{"question_id": "Q-EXEC-1", "value": AUTHORIZE}],
+            "free_text": "",
         }
+        return _dump(session.answer(payload))
 
     def iterate(instruction: str) -> dict:
         """(Etapa 7) Itera sobre una migración completada (Fase 9)."""

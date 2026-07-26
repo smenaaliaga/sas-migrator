@@ -246,7 +246,9 @@ def run_translation(state_dir: Path, output_dir: Path, workspace: Path) -> dict:
             update={"node_id": nid, "node_label": target.get("node_label") or nid}
         )
 
-    mapping, failures = assemble_notebooks(plan, translations, Path(output_dir))
+    mapping, failures = assemble_notebooks(
+        plan, translations, Path(output_dir), db_bootstrap=bool(db_aliases)
+    )
     for failure in failures:
         record_needs_human(
             state_dir, phase=6, task="assembly", node_id=failure.node_id,

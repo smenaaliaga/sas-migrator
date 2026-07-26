@@ -610,6 +610,18 @@ def _phase7_semantic_regression_errors(state_path: Path) -> list[str]:
     return []
 
 
+def _phase7_execution_errors(state_path: Path) -> list[str]:
+    """Un notebook que falló al ejecutarse (ejecución autorizada) bloquea."""
+    report = _load_any(state_path / "execution_report.json")
+    if not isinstance(report, dict):
+        return []
+    return [
+        f"Notebook execution FAILED: {r.get('notebook')} — {str(r.get('error'))[:200]}"
+        for r in report.get("results", [])
+        if r.get("status") == "FAIL"
+    ]
+
+
 def check_gate(phase: int, state_dir: str | Path) -> tuple[bool, list[str]]:
     """Check if all required artifacts for a phase gate are valid.
     
@@ -630,7 +642,7 @@ def check_gate(phase: int, state_dir: str | Path) -> tuple[bool, list[str]]:
 
     # Cola needs_human (Etapa 4): trabajo LLM sin output utilizable bloquea el
     # gate de su fase hasta que un humano lo resuelva — nunca silencio.
-    if phase in (2, 3, 6):
+    if phase in (2, 3, 6, 7, 8):
         from sas_migrator.core.utils.needs_human import unresolved
 
         for item in unresolved(state_path, phase):
@@ -658,6 +670,7 @@ def check_gate(phase: int, state_dir: str | Path) -> tuple[bool, list[str]]:
 
     if phase == 7:
         all_errors.extend(_phase7_semantic_regression_errors(state_path))
+        all_errors.extend(_phase7_execution_errors(state_path))
 
     if phase == 8:
         all_errors.extend(_phase8_errors(state_path))

@@ -90,7 +90,9 @@ def test_full_pipeline_driven_by_interrupts(tmp_path: Path) -> None:
     assert "B4b:resolve:SRC" in card_ids
     assert any(cid.startswith("B5:M-") for cid in card_ids)
     assert "B6-closure" in card_ids
-    assert card_ids[-1] == "plan_approval"
+    assert "plan_approval" in card_ids
+    # Etapa 5: la última pausa es la autorización de ejecución (default: no ejecutar)
+    assert card_ids[-1] == "execution_approval"
 
     st = ws / "state"
     qa = yaml.safe_load((st / "initial_interview.yaml").read_text(encoding="utf-8"))

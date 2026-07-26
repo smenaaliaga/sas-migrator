@@ -33,6 +33,7 @@ notebook = [
     "jupytext>=1.16",
     "nbclient>=0.10",
     "papermill>=2.5",
+    "ipykernel>=6.29",
 ]
 cli = [
     "typer>=0.12",

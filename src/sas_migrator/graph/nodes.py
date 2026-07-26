@@ -193,39 +193,93 @@ def phase6_generation(state: MigrationGraphState) -> dict:
     return {"current_phase": 6, "notes": [note]}
 
 
-# ── Fase 7: validación (stub | referencias staged; cascada vs BD = Etapa 5) ──
+# ── Fase 7: verificación BD → autorización (pausa sagrada) → ejecución →
+#    cascada de validación ─────────────────────────────────────────────────
 
 def phase7_validation(state: MigrationGraphState) -> dict:
-    ws, st, _ = _paths(state)
+    ws, st, out = _paths(state)
     if state.get("stub_mode", True):
         stubs.stub_validation_report(st)
         return {"current_phase": 7, "notes": ["fase 7: validación not_applicable (stub)"]}
 
+    from sas_migrator.core.config import load_project_config
+    from sas_migrator.core.db.verify_tables import verify
+    from sas_migrator.core.gen_run_all import discover_notebooks
     from sas_migrator.core.validation.references import stage_references
 
+    cfg = load_project_config(ws)
+    notes: list[str] = []
+
+    # 1. Paso 4 de B4b: verificación de tablas contra la BD (idempotente).
+    vreport, vcode = verify(st, cfg)
+    if vreport.get("status") not in ("not_applicable",):
+        notes.append(f"verificación de tablas: {vreport.get('status')}")
+
+    # 2. Referencias SAS staged (byte-idempotente; puede correr antes del interrupt).
     staged = stage_references(st, ws / "input" / "data", st / "reference_outputs")
+
+    # 3. Autorización de ejecución — esa pausa es sagrada.
+    notebooks = discover_notebooks(out)
+    authorized = False
+    if notebooks:
+        from sas_migrator.core.interview.execution import AUTHORIZE, build_execution_card
+        from sas_migrator.graph.interviews import ask
+
+        answer = ask(build_execution_card(st))
+        authorized = any(a.value == AUTHORIZE for a in answer.answers)
+
+    exec_summary: dict | None = None
+    if authorized:
+        if vreport.get("status") == "blocked_missing_targets":
+            notes.append(
+                "ejecución NO corrida: faltan tablas DESTINO (ver table_verification.json)"
+            )
+        else:
+            from sas_migrator.core.execution import execute_notebooks, resolve_db_url
+
+            exec_report = execute_notebooks(
+                out, notebooks, db_url=resolve_db_url(st, cfg)
+            )
+            _dump_json(st / "execution_report.json", exec_report)
+            exec_summary = {
+                "passed": exec_report["passed"],
+                "failed": exec_report["failed"],
+            }
+            notes.append(
+                f"ejecución: {exec_report['passed']}/{exec_report['total']} notebooks OK"
+            )
+    elif notebooks:
+        notes.append("ejecución no autorizada por el usuario — notebooks sin correr")
+
+    # 4. Reporte de validación (la cascada real se integra con referencias+BD).
+    report = _build_validation_report(st, staged, exec_summary, notes)
+    _dump_json(st / "validation_report.json", report)
+    return {"current_phase": 7, "notes": [f"fase 7: {'; '.join(notes) or 'sin insumos'}"]}
+
+
+def _build_validation_report(
+    st: Path, staged: list[str], exec_summary: dict | None, notes: list[str]
+) -> dict:
     if staged:
         report = {
             "mode": "references_staged",
             "overall_status": "PASS",
             "results": [],
             "references": staged,
-            "notes": [
-                f"{len(staged)} referencia(s) SAS staged en state/reference_outputs/",
-                "la cascada de comparación contra la BD real corre en la Etapa 5",
-            ],
+            "notes": list(notes),
         }
-        note = f"fase 7: {len(staged)} referencia(s) staged (cascada vs BD = Etapa 5)"
     else:
         report = {
             "mode": "not_applicable",
             "overall_status": "PASS",
             "results": [],
-            "notes": ["sin referencias SAS ni tablas destino; validación pendiente (Etapa 5)"],
+            "notes": list(notes) or ["sin referencias SAS ni tablas destino"],
         }
-        note = "fase 7: validación not_applicable (sin referencias)"
-    _dump_json(st / "validation_report.json", report)
-    return {"current_phase": 7, "notes": [note]}
+    if exec_summary is not None:
+        report["execution"] = exec_summary
+        if exec_summary.get("failed"):
+            report["overall_status"] = "FAIL"
+    return report
 
 
 # ── Fase 8: documentación (stub) ─────────────────────────────────────────────

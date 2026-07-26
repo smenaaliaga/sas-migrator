@@ -135,6 +135,8 @@ def assemble_notebooks(
     plan: dict,
     translations: dict[str, NodeTranslation],
     output_dir: Path,
+    *,
+    db_bootstrap: bool = False,
 ) -> tuple[SasPythonMapping, list[NodeAssemblyFailure]]:
     """Construye los notebooks del plan y el mapping SAS→Python.
 
@@ -180,18 +182,31 @@ def assemble_notebooks(
 
         # Celda de configuración: imports agregados (dedupe, primera aparición).
         imports: list[str] = list(BASELINE_IMPORTS)
+        if db_bootstrap:
+            for line in ("import os", "import sqlalchemy"):
+                if line not in imports:
+                    imports.append(line)
         for nt in valid:
             for line in nt.imports:
                 line = line.strip()
                 if line and line not in imports:
                     imports.append(line)
 
+        config_source = (
+            "# ========= Celda 1: Configuración =========\n" + "\n".join(imports) + "\n"
+        )
+        if db_bootstrap:
+            # La URL la fija el orquestador (ejecución autorizada) vía env var;
+            # el notebook queda standalone y sin secretos.
+            config_source += (
+                "\n# Conexión a BD — la define el orquestador al ejecutar\n"
+                'engine = sqlalchemy.create_engine(os.environ["SASMIG_DB_URL"])\n'
+            )
+
         nb = nbformat.v4.new_notebook()
         cells = [
             nbformat.v4.new_markdown_cell(f"# {title}"),
-            nbformat.v4.new_code_cell(
-                "# ========= Celda 1: Configuración =========\n" + "\n".join(imports) + "\n"
-            ),
+            nbformat.v4.new_code_cell(config_source),
         ]
 
         for nt in valid:
