@@ -1,0 +1,29 @@
+{
+  "card_id": "B2-scope:confirm-exclusion",
+  "interview_type": "post_analysis",
+  "phase": 4,
+  "block_id": "B2-scope",
+  "title": "Confirmar exclusión de flujos",
+  "transition": "",
+  "questions": [
+    {
+      "id": "Q-B2-1b",
+      "text": "Excluyendo 1 flujo(s): 4 nodo(s) quedarán fuera del plan. ¿Confirmas?",
+      "question_type": "approval",
+      "required": true,
+      "options": [
+        "Confirmar exclusión",
+        "No, volver a elegir"
+      ],
+      "source_finding": "",
+      "context": "",
+      "recommended_default": "Confirmar exclusión",
+      "evidence": [
+        "flow_summary.json: PFD-1 — 4 nodos"
+      ]
+    }
+  ],
+  "allow_free_text": true,
+  "validation_error": null,
+  "progress": null
+}

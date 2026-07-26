@@ -1,0 +1,33 @@
+{
+  "card_id": "B5:M-001:detalle",
+  "interview_type": "post_analysis",
+  "phase": 4,
+  "block_id": "B5-improvements",
+  "title": "Mejora M-001 (detalle): [stub] Atender smells de categoría 'quality'",
+  "transition": "",
+  "questions": [
+    {
+      "id": "Q-M-001",
+      "text": "[stub] Atender smells de categoría 'quality' — [stub] 1 nodo(s) con smell 'quality'. ¿Qué decides?",
+      "question_type": "approval",
+      "required": true,
+      "options": [
+        "Aprobar",
+        "Rechazar"
+      ],
+      "source_finding": "",
+      "context": "[stub] 1 nodo(s) con smell 'quality'.",
+      "recommended_default": "Rechazar",
+      "evidence": [
+        "impacto low · esfuerzo low · riesgo low",
+        "afecta 1 nodo(s)",
+        "justificación: [stub] Evidencia en code_smells.json.",
+        "nodos: Query-1",
+        "recomendación del análisis: reject"
+      ]
+    }
+  ],
+  "allow_free_text": true,
+  "validation_error": null,
+  "progress": null
+}

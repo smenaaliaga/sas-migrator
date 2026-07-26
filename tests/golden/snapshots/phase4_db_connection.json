@@ -1,0 +1,46 @@
+{
+  "card_id": "B4b:step2",
+  "interview_type": "post_analysis",
+  "phase": 4,
+  "block_id": "B4b-db-connections",
+  "title": "Conexión a usar",
+  "transition": "",
+  "questions": [
+    {
+      "id": "Q-B4b-2",
+      "text": "¿Qué conexión de base de datos usará el resultado?",
+      "question_type": "single_choice",
+      "required": true,
+      "options": [
+        "Usar la conexión por defecto del proyecto",
+        "Especificar otra conexión"
+      ],
+      "source_finding": "",
+      "context": "",
+      "recommended_default": "Especificar otra conexión",
+      "evidence": [
+        "project_config.yaml: sin default_server configurado"
+      ]
+    },
+    {
+      "id": "Q-B4b-4",
+      "text": "¿La conexión se usa como fuente, destino o ambos?",
+      "question_type": "single_choice",
+      "required": true,
+      "options": [
+        "Solo lectura (fuente)",
+        "Solo escritura (destino)",
+        "Lectura y escritura"
+      ],
+      "source_finding": "",
+      "context": "",
+      "recommended_default": "Solo lectura (fuente)",
+      "evidence": [
+        "db_evidence.json: solo lecturas"
+      ]
+    }
+  ],
+  "allow_free_text": true,
+  "validation_error": null,
+  "progress": null
+}

@@ -1,0 +1,33 @@
+{
+  "card_id": "plan_approval",
+  "interview_type": "plan_approval",
+  "phase": 5,
+  "block_id": "plan-approval",
+  "title": "Aprobación del plan de traducción",
+  "transition": "El plan está listo. Una sola decisión:",
+  "questions": [
+    {
+      "id": "Q-PLAN-1",
+      "text": "¿Apruebas el plan de traducción?",
+      "question_type": "approval",
+      "required": true,
+      "options": [
+        "Aprobar el plan",
+        "Rechazar el plan"
+      ],
+      "source_finding": "",
+      "context": "",
+      "recommended_default": "Aprobar el plan",
+      "evidence": [
+        "translation_plan.json: 4 nodo(s) en 1 notebook(s)",
+        "nodos ignorados: 0",
+        "mejoras globales: 0",
+        "supuestos: 3",
+        "notebook: NB-01_flujo_principal.ipynb"
+      ]
+    }
+  ],
+  "allow_free_text": true,
+  "validation_error": null,
+  "progress": null
+}

@@ -1,0 +1,36 @@
+[
+  {
+    "card_id": "B4b:resolve:SRC",
+    "interview_type": "post_analysis",
+    "phase": 4,
+    "block_id": "B4b-db-connections",
+    "title": "Prefijo sin confirmar: SRC",
+    "transition": "",
+    "questions": [
+      {
+        "id": "Q-B4b-R-SRC",
+        "text": "'SRC' se usa como LIBREF.TABLA pero ningún LIBNAME lo declara. ¿Es una base de datos, o una ruta de archivos?",
+        "question_type": "single_choice",
+        "required": true,
+        "options": [
+          "Es una base de datos",
+          "Es una ruta de archivos (no BD)",
+          "No sé"
+        ],
+        "source_finding": "",
+        "context": "",
+        "recommended_default": "No sé",
+        "evidence": [
+          "db_evidence.json: prefijo SRC (unverified) — tablas: CLIENTES, VENTAS_RAW",
+          "nodos afectados: CodeTask-1, Query-1"
+        ]
+      }
+    ],
+    "allow_free_text": true,
+    "validation_error": null,
+    "progress": {
+      "index": 1,
+      "total": 1
+    }
+  }
+]

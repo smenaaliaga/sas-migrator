@@ -1,0 +1,35 @@
+[
+  {
+    "card_id": "B2-scope:native:ImportTask-1",
+    "interview_type": "post_analysis",
+    "phase": 4,
+    "block_id": "B2-scope",
+    "title": "Tarea nativa de EG: Importar Excel",
+    "transition": "",
+    "questions": [
+      {
+        "id": "Q-B2-4-ImportTask-1",
+        "text": "El nodo 'Importar Excel' (ImportTask-1) es una tarea de Enterprise Guide sin código SAS extraíble. ¿Lo excluimos, o lo traducimos a mano con tu descripción de lo que hace?",
+        "question_type": "single_choice",
+        "required": true,
+        "options": [
+          "Traducir a mano",
+          "Excluir de la migración"
+        ],
+        "source_finding": "",
+        "context": "",
+        "recommended_default": "Traducir a mano",
+        "evidence": [
+          "nodes_index.json: ImportTask-1 — tipo IMPORT, flujo Flujo Principal",
+          "el extractor no encontró código; excluirlo pierde el paso"
+        ]
+      }
+    ],
+    "allow_free_text": true,
+    "validation_error": null,
+    "progress": {
+      "index": 1,
+      "total": 1
+    }
+  }
+]

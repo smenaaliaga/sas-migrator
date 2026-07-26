@@ -1,0 +1,54 @@
+{
+  "card_id": "B1-initial",
+  "interview_type": "initial",
+  "phase": 1,
+  "block_id": "B1-initial",
+  "title": "Contexto inicial",
+  "transition": "Antes de analizar el código, tres preguntas de contexto:",
+  "questions": [
+    {
+      "id": "Q-001",
+      "text": "¿De qué trata este flujo? Descríbelo en 2-3 frases (en términos de negocio, no técnicos).",
+      "question_type": "free_text",
+      "required": true,
+      "options": [],
+      "source_finding": "",
+      "context": "",
+      "recommended_default": "no sé",
+      "evidence": [
+        "intake.json: demo.egp"
+      ]
+    },
+    {
+      "id": "Q-002",
+      "text": "¿Hay consideraciones especiales que deba tener en cuenta para esta migración? (reglas de negocio, supuestos, restricciones técnicas, casos borde)",
+      "question_type": "free_text",
+      "required": true,
+      "options": [],
+      "source_finding": "",
+      "context": "",
+      "recommended_default": "no",
+      "evidence": []
+    },
+    {
+      "id": "Q-003",
+      "text": "¿Existen archivos de referencia de entrada y de salida para comparar los resultados de la migración?",
+      "question_type": "single_choice",
+      "required": true,
+      "options": [
+        "sí (entrada y salida)",
+        "solo entrada",
+        "solo salida",
+        "no",
+        "no sé"
+      ],
+      "source_finding": "",
+      "context": "",
+      "recommended_default": "no sé",
+      "evidence": []
+    }
+  ],
+  "allow_free_text": true,
+  "validation_error": null,
+  "progress": null
+}

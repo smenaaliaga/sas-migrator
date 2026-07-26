@@ -1,0 +1,27 @@
+{
+  "card_id": "B6-closure",
+  "interview_type": "post_analysis",
+  "phase": 4,
+  "block_id": "B6-closure",
+  "title": "Cierre de la entrevista",
+  "transition": "",
+  "questions": [
+    {
+      "id": "Q-B6-1",
+      "text": "Resumen: migraremos 4 nodo(s), excluiremos 0, aplicaremos 0 mejora(s) y quedan 1 supuesto(s) visibles. ¿Procedemos con el plan de traducción?",
+      "question_type": "approval",
+      "required": true,
+      "options": [
+        "Sí, proceder al plan de traducción",
+        "No, detener aquí"
+      ],
+      "source_finding": "",
+      "context": "",
+      "recommended_default": "Sí, proceder al plan de traducción",
+      "evidence": []
+    }
+  ],
+  "allow_free_text": true,
+  "validation_error": null,
+  "progress": null
+}

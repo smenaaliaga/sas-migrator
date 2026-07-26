@@ -1,0 +1,39 @@
+{
+  "card_id": "B2-scope:flows",
+  "interview_type": "post_analysis",
+  "phase": 4,
+  "block_id": "B2-scope",
+  "title": "Alcance de la migración",
+  "transition": "",
+  "questions": [
+    {
+      "id": "Q-B2-1",
+      "text": "El .egp contiene 1 Process Flow(s) migrable(s) (4 nodos en total). Cada flujo seleccionado será un notebook independiente. ¿Cuáles migramos?",
+      "question_type": "multi_choice",
+      "required": true,
+      "options": [
+        "PFD-1: Flujo Principal (4 nodos)"
+      ],
+      "source_finding": "",
+      "context": "",
+      "recommended_default": "todos",
+      "evidence": [
+        "flow_summary.json: Flujo Principal — 4 nodos"
+      ]
+    },
+    {
+      "id": "Q-B2-3",
+      "text": "¿Hay algún nodo que sepas que no se usa aunque aparezca conectado?",
+      "question_type": "free_text",
+      "required": false,
+      "options": [],
+      "source_finding": "",
+      "context": "",
+      "recommended_default": "no",
+      "evidence": []
+    }
+  ],
+  "allow_free_text": true,
+  "validation_error": null,
+  "progress": null
+}

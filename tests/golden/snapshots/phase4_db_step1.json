@@ -1,0 +1,29 @@
+{
+  "card_id": "B4b:step1",
+  "interview_type": "post_analysis",
+  "phase": 4,
+  "block_id": "B4b-db-connections",
+  "title": "Conexión a base de datos",
+  "transition": "",
+  "questions": [
+    {
+      "id": "Q-B4b-1",
+      "text": "El flujo SAS depende de bases de datos. ¿El resultado (notebooks) se conectará a la base que reemplaza a la que usaba SAS?",
+      "question_type": "single_choice",
+      "required": true,
+      "options": [
+        "Sí, conectar a la base de datos",
+        "No, usar otra fuente (solo archivos)"
+      ],
+      "source_finding": "",
+      "context": "",
+      "recommended_default": "Sí, conectar a la base de datos",
+      "evidence": [
+        "db_evidence.json: 1 prefijo(s) sin confirmar: SRC"
+      ]
+    }
+  ],
+  "allow_free_text": true,
+  "validation_error": null,
+  "progress": null
+}
