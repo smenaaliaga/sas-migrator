@@ -11,8 +11,11 @@ import json
 
 from sas_migrator.core.models.analysis import Improvement
 from sas_migrator.core.models.translation import NodeTranslation, Traceability
+from sas_migrator.core.models.validation import MismatchDiagnosis
 from sas_migrator.llm.contracts import (
     CategoryVerdict,
+    DiagnosesOut,
+    DocsOut,
     FileMappingBatch,
     ImprovementsOut,
     NodeReviewNote,
@@ -77,6 +80,35 @@ def fake_translation(user: str) -> NodeTranslation:
     )
 
 
+def fake_diagnoses(user: str) -> DiagnosesOut:
+    head = _header(user)
+    return DiagnosesOut(
+        diagnoses=[
+            MismatchDiagnosis(
+                test_type="row_by_row",
+                dataset=str(head.get("tables", ["?"])[0]),
+                column="MONTO",
+                probable_cause="rounding",
+                explanation="Diferencias numéricas pequeñas en columna calculada.",
+                proposed_fix="Redondear con la misma regla que SAS (half-up) antes de escribir.",
+            )
+        ]
+    )
+
+
+def fake_docs(user: str) -> DocsOut:
+    def doc(title: str) -> str:
+        return f"# {title}\n\nDocumento generado por el doc-writer (fake determinista).\n"
+
+    return DocsOut(
+        readme=doc("README"),
+        lineage=doc("LINEAGE"),
+        decisions=doc("DECISIONS"),
+        improvements=doc("IMPROVEMENTS"),
+        runbook=doc("RUNBOOK"),
+    )
+
+
 def default_fake_caller() -> FakeCaller:
     return FakeCaller(
         {
@@ -84,5 +116,7 @@ def default_fake_caller() -> FakeCaller:
             "improvements": fake_improvements,
             "matching": FileMappingBatch(mappings=[]),
             "translation": fake_translation,
+            "mismatch_diagnosis": fake_diagnoses,
+            "docs": fake_docs,
         }
     )

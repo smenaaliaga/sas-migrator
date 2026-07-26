@@ -28,6 +28,14 @@ def build_matching_system() -> list[str]:
     return [_read("matching.md")]
 
 
+def build_diagnosis_system() -> list[str]:
+    return [_read("mismatch_diagnosis.md")]
+
+
+def build_docs_system() -> list[str]:
+    return [_read("doc_writer.md")]
+
+
 def build_translation_system() -> list[str]:
     return [
         _read("translation_system.md")

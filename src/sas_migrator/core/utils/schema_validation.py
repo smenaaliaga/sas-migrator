@@ -610,6 +610,26 @@ def _phase7_semantic_regression_errors(state_path: Path) -> list[str]:
     return []
 
 
+def _phase7_validation_errors(state_path: Path) -> list[str]:
+    """La cascada en modo full con FAIL/ERROR, o bloqueada, no deja avanzar."""
+    report = _load_any(state_path / "validation_report.json")
+    if not isinstance(report, dict):
+        return []
+    mode = report.get("validation_mode") or report.get("mode")
+    errors: list[str] = []
+    if mode == "blocked":
+        errors.append(f"Validación bloqueada: {report.get('note', 'sin acceso a la BD')}")
+    if mode == "full":
+        failed = int(report.get("failed", 0) or 0)
+        errs = int(report.get("errors", 0) or 0)
+        if failed or errs:
+            errors.append(
+                f"Validación con {failed} tabla(s) FAIL y {errs} ERROR — "
+                "ver diagnoses en validation_report.json"
+            )
+    return errors
+
+
 def _phase7_execution_errors(state_path: Path) -> list[str]:
     """Un notebook que falló al ejecutarse (ejecución autorizada) bloquea."""
     report = _load_any(state_path / "execution_report.json")
@@ -671,6 +691,7 @@ def check_gate(phase: int, state_dir: str | Path) -> tuple[bool, list[str]]:
     if phase == 7:
         all_errors.extend(_phase7_semantic_regression_errors(state_path))
         all_errors.extend(_phase7_execution_errors(state_path))
+        all_errors.extend(_phase7_validation_errors(state_path))
 
     if phase == 8:
         all_errors.extend(_phase8_errors(state_path))

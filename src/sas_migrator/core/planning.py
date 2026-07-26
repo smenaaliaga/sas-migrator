@@ -243,6 +243,14 @@ def build(state: Path) -> dict:
             placement = effective_placement({"id": nid, **meta}, placement_overrides)
             if placement == "ambiguous":
                 ambiguous_nodes.append(nid)
+            # output_tables: salidas calificadas no-WORK del nodo (vista v2) —
+            # son las tablas que la cascada de validación compara contra
+            # referencias SAS.
+            node_doc = load_artifact(state / "nodes" / f"{nid}.json") or {}
+            output_tables = sorted({
+                str(o) for o in node_doc.get("outputs", [])
+                if "." in str(o) and not str(o).upper().startswith("WORK.")
+            })
             targets.append({
                 "node_id": nid,
                 "node_label": meta.get("label", ""),
@@ -255,7 +263,7 @@ def build(state: Path) -> dict:
                 "input_dir": None,
                 "input_files": node_inputs.get(nid, []),
                 "output_files": [],
-                "output_tables": [],
+                "output_tables": output_tables,
                 "reference_csv": node_reference.get(nid),
                 "approved_improvements": node_improvements.get(nid, []),
                 "preprocess_steps": node_preprocess.get(nid, []),
@@ -266,7 +274,7 @@ def build(state: Path) -> dict:
     assumptions = [
         "Plan generado por build_translation_plan.py; el agente debe revisar strategy/notes y el usuario aprobar.",
         "strategy derivada del placement efectivo (clasificador + overrides de la entrevista B4b); utility → Python plano.",
-        "input/output_datasets y output_tables se resuelven desde los node files en la Fase 6 (traducción).",
+        "output_tables = salidas calificadas no-WORK del nodo (vista v2); input/output_datasets se resuelven en la Fase 6.",
     ]
     for nid in ambiguous_nodes:
         assumptions.append(

@@ -251,9 +251,35 @@ def phase7_validation(state: MigrationGraphState) -> dict:
     elif notebooks:
         notes.append("ejecución no autorizada por el usuario — notebooks sin correr")
 
-    # 4. Reporte de validación (la cascada real se integra con referencias+BD).
-    report = _build_validation_report(st, staged, exec_summary, notes)
-    _dump_json(st / "validation_report.json", report)
+    # 4. Cascada de validación (referencias + conexiones) o reporte honesto.
+    if staged and (st / "db_connections.yaml").exists():
+        from sas_migrator.core.validation.cascade import run_cascade
+
+        report, code = run_cascade(st, config=cfg)
+        report["mode"] = report.get("validation_mode", "full")
+        report.setdefault("results", [])
+        if exec_summary is not None:
+            report["execution"] = exec_summary
+        if report.get("failed") or report.get("errors"):
+            from sas_migrator.llm.phases import run_mismatch_diagnosis
+
+            report["diagnoses"] = run_mismatch_diagnosis(st, ws, report)
+            notes.append(
+                f"validación: {report.get('failed', 0)} FAIL / "
+                f"{report.get('errors', 0)} ERROR — diagnóstico adjunto"
+            )
+        elif report["mode"] == "full":
+            notes.append(f"validación: cascada PASS ({report.get('passed', 0)} tabla(s))")
+        else:
+            notes.append(f"validación: {report['mode']}")
+        report["overall_status"] = (
+            "PASS" if code == 0 else ("BLOCKED" if code == 3 else "FAIL")
+        )
+        report["notes"] = list(notes)
+        _dump_json(st / "validation_report.json", report)
+    else:
+        report = _build_validation_report(st, staged, exec_summary, notes)
+        _dump_json(st / "validation_report.json", report)
     return {"current_phase": 7, "notes": [f"fase 7: {'; '.join(notes) or 'sin insumos'}"]}
 
 
@@ -282,12 +308,24 @@ def _build_validation_report(
     return report
 
 
-# ── Fase 8: documentación (stub) ─────────────────────────────────────────────
+# ── Fase 8: documentación (stub | doc-writer LLM) ───────────────────────────
 
 def phase8_docs(state: MigrationGraphState) -> dict:
-    _, st, out = _paths(state)
-    stubs.stub_docs(st, out)
-    return {"current_phase": 8, "notes": ["fase 8: docs generados (stub)"]}
+    ws, st, out = _paths(state)
+    if state.get("stub_mode", True):
+        stubs.stub_docs(st, out)
+        return {"current_phase": 8, "notes": ["fase 8: docs generados (stub)"]}
+
+    from sas_migrator.llm.phases import run_docs
+
+    ok = run_docs(st, out, ws)
+    if not ok:
+        # Fallback al template para que los archivos existan; el item
+        # needs_human ya quedó registrado y el gate 8 bloquea igual.
+        stubs.stub_docs(st, out)
+    note = "fase 8: docs redactados (doc-writer)" if ok else \
+        "fase 8: docs template (doc-writer needs_human)"
+    return {"current_phase": 8, "notes": [note]}
 
 
 # ── Cierre ───────────────────────────────────────────────────────────────────

@@ -17,7 +17,13 @@ import yaml
 from sas_migrator.core.models.translation import NodeTranslation
 from sas_migrator.core.utils.needs_human import record as record_needs_human
 from sas_migrator.llm import prompt_builder, runtime
-from sas_migrator.llm.contracts import FileMappingBatch, ImprovementsOut, PfdAnalysisOut
+from sas_migrator.llm.contracts import (
+    DiagnosesOut,
+    DocsOut,
+    FileMappingBatch,
+    ImprovementsOut,
+    PfdAnalysisOut,
+)
 from sas_migrator.llm.errors import NeedsHuman
 
 MAX_CODE_CHARS = 20_000  # techo defensivo por nodo en los prompts
@@ -262,3 +268,111 @@ def run_translation(state_dir: Path, output_dir: Path, workspace: Path) -> dict:
         "assembly_failures": len(failures),
         "targets": len(plan.get("targets", [])),
     }
+
+
+# ── Fase 7: diagnóstico de mismatches de validación ─────────────────────────
+
+def run_mismatch_diagnosis(
+    state_dir: Path, workspace: Path, validation_report: dict
+) -> list[dict]:
+    """Diagnostica los resultados FAIL de la cascada con los 8 patrones de
+    causa. Devuelve diagnósticos (dicts MismatchDiagnosis); NeedsHuman queda
+    registrado en fase 7 y devuelve []."""
+    state_dir = Path(state_dir)
+    failed = [
+        r for r in validation_report.get("results", [])
+        if r.get("overall_status") in ("FAIL", "ERROR")
+    ]
+    if not failed:
+        return []
+    caller = runtime.get_caller(workspace)
+    head = prompt_builder.header_line(
+        {"tables": [str(r.get("target_table", "")) for r in failed]}
+    )
+    user = (
+        f"{head}\n\n## Resultados fallidos de la cascada\n```json\n"
+        + json.dumps(failed, ensure_ascii=False, default=str)[:40_000]
+        + "\n```\n"
+    )
+    try:
+        out = caller.call(
+            task="mismatch_diagnosis",
+            system_blocks=prompt_builder.build_diagnosis_system(),
+            user_content=user,
+            output_model=DiagnosesOut,
+        )
+        return [json.loads(d.model_dump_json()) for d in out.diagnoses]
+    except NeedsHuman as exc:
+        record_needs_human(
+            state_dir, phase=7, task="mismatch_diagnosis", reason=exc.reason,
+            detail=exc.detail, attempts=exc.attempts,
+        )
+        return []
+
+
+# ── Fase 8: doc-writer ──────────────────────────────────────────────────────
+
+def run_docs(state_dir: Path, output_dir: Path, workspace: Path) -> bool:
+    """Escribe los 5 documentos con el doc-writer LLM. Ante NeedsHuman cae al
+    template stub (gate 8 sigue verde en forma) y registra el item (gate 8
+    bloquea por needs_human) — nunca silencio, nunca docs vacíos."""
+    state_dir = Path(state_dir)
+    docs_dir = Path(output_dir) / "docs"
+
+    def _maybe(path: str, loader=_load_json):
+        p = state_dir / path
+        try:
+            return loader(p) if p.exists() else None
+        except Exception:
+            return None
+
+    context = {
+        "flow_summary": _maybe("flow_summary.json"),
+        "translation_plan": _maybe("translation_plan.json"),
+        "sas_python_mapping": _maybe("sas_python_mapping.json"),
+        "approved_improvements": _maybe(
+            "approved_improvements.yaml",
+            lambda p: yaml.safe_load(p.read_text(encoding="utf-8")),
+        ),
+        "validation_report": _maybe("validation_report.json"),
+        "db_connections_aliases": [
+            c.get("alias")
+            for c in (_maybe(
+                "db_connections.yaml",
+                lambda p: yaml.safe_load(p.read_text(encoding="utf-8")),
+            ) or {}).get("connections", [])
+        ],
+    }
+    head = prompt_builder.header_line(
+        {"project": (context.get("translation_plan") or {}).get("project_name", "")}
+    )
+    user = (
+        f"{head}\n\n## Contexto de la migración\n```json\n"
+        + json.dumps(context, ensure_ascii=False, default=str)[:60_000]
+        + "\n```\n"
+    )
+    caller = runtime.get_caller(workspace)
+    try:
+        out = caller.call(
+            task="docs",
+            system_blocks=prompt_builder.build_docs_system(),
+            user_content=user,
+            output_model=DocsOut,
+        )
+    except NeedsHuman as exc:
+        record_needs_human(
+            state_dir, phase=8, task="docs", reason=exc.reason,
+            detail=exc.detail, attempts=exc.attempts,
+        )
+        return False
+
+    docs_dir.mkdir(parents=True, exist_ok=True)
+    for name, text in (
+        ("README.md", out.readme),
+        ("LINEAGE.md", out.lineage),
+        ("DECISIONS.md", out.decisions),
+        ("IMPROVEMENTS.md", out.improvements),
+        ("RUNBOOK.md", out.runbook),
+    ):
+        (docs_dir / name).write_text(text.strip() + "\n", encoding="utf-8")
+    return True
