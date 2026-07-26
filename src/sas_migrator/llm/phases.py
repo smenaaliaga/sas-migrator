@@ -1,0 +1,262 @@
+"""Runners LLM por fase — la rama no-stub de los nodos del grafo.
+
+Cada runner es función de (state_dir, workspace): lee artefactos de state/,
+llama al caller estructurado y escribe los MISMOS artefactos que el stub, con
+los mismos contratos que exigen los gates. Un NeedsHuman se registra en
+state/needs_human.yaml (el gate de la fase bloquea) y el runner sigue con el
+resto — nunca silencio, nunca un crash por contenido.
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import yaml
+
+from sas_migrator.core.models.translation import NodeTranslation
+from sas_migrator.core.utils.needs_human import record as record_needs_human
+from sas_migrator.llm import prompt_builder, runtime
+from sas_migrator.llm.contracts import FileMappingBatch, ImprovementsOut, PfdAnalysisOut
+from sas_migrator.llm.errors import NeedsHuman
+
+MAX_CODE_CHARS = 20_000  # techo defensivo por nodo en los prompts
+
+
+def _load_json(path: Path):
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _dump_json(path: Path, data) -> None:
+    path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def _node_code(state_dir: Path, node_id: str) -> str:
+    path = state_dir / "nodes" / f"{node_id}.json"
+    if not path.exists():
+        return ""
+    return str(_load_json(path).get("code") or "")[:MAX_CODE_CHARS]
+
+
+# ── Fase 2: análisis (map por PFD + reduce de mejoras) ──────────────────────
+
+def run_analysis(state_dir: Path, workspace: Path) -> dict:
+    state_dir = Path(state_dir)
+    caller = runtime.get_caller(workspace)
+    index = _load_json(state_dir / "nodes_index.json")
+    nodes = index.get("nodes", [])
+
+    by_pfd: dict[str, list[dict]] = {}
+    for n in nodes:
+        by_pfd.setdefault(str(n.get("pfd_id") or "sin_pfd"), []).append(n)
+
+    reviews_dir = state_dir / "analysis_reviews"
+    reviews_dir.mkdir(exist_ok=True)
+    summary_path = state_dir / "flow_summary.json"
+    summary = _load_json(summary_path)
+    flows_by_pfd = {f.get("pfd_id"): f for f in summary.get("flows", [])}
+    pfds_ok = 0
+
+    for pfd_id in sorted(by_pfd):
+        pfd_nodes = by_pfd[pfd_id]
+        expected_ids = [str(n["id"]) for n in pfd_nodes]
+        head = prompt_builder.header_line({"pfd_id": pfd_id, "node_ids": expected_ids})
+        body = "\n\n".join(
+            f"### {n['id']} — {n.get('label', '')} ({n.get('node_type', '?')})\n"
+            f"```sas\n{_node_code(state_dir, str(n['id']))}\n```"
+            for n in pfd_nodes
+        )
+        try:
+            out = caller.call(
+                task="analysis_reviews",
+                system_blocks=prompt_builder.build_analysis_system(),
+                user_content=f"{head}\n\n{body}",
+                output_model=PfdAnalysisOut,
+            )
+        except NeedsHuman as exc:
+            record_needs_human(
+                state_dir, phase=2, task="analysis_reviews", node_id=None,
+                reason=exc.reason, detail=f"PFD {pfd_id}: {exc.detail}",
+                attempts=exc.attempts,
+            )
+            continue
+
+        known = set(expected_ids)
+        reviews = [
+            {"node_id": r.node_id, "note": r.note}
+            for r in out.reviews
+            if r.node_id in known
+        ]
+        _dump_json(reviews_dir / f"{pfd_id}.json", {"pfd_id": pfd_id, "reviews": reviews})
+        flow = flows_by_pfd.get(pfd_id)
+        if flow is not None and not str(flow.get("description") or "").strip():
+            flow["description"] = out.flow_description
+        pfds_ok += 1
+
+    _dump_json(summary_path, summary)
+
+    # Reduce: fichas M-xxx desde la evidencia.
+    evidence = _load_json(state_dir / "analysis_evidence.json")
+    smells = _load_json(state_dir / "code_smells.json")
+    smell_cats = sorted(
+        {str(s.get("category", "")).strip() for s in smells.get("smells", []) if s.get("category")}
+    )
+    head = prompt_builder.header_line({"smell_categories": smell_cats})
+    user = (
+        f"{head}\n\n## analysis_evidence.json\n```json\n"
+        + json.dumps(evidence, ensure_ascii=False)[:40_000]
+        + "\n```\n\n## code_smells.json (resumen)\n```json\n"
+        + json.dumps(smells.get("summary", {}), ensure_ascii=False)
+        + "\n```\n"
+    )
+    try:
+        out = caller.call(
+            task="improvements",
+            system_blocks=prompt_builder.build_improvements_system(),
+            user_content=user,
+            output_model=ImprovementsOut,
+        )
+        improvements = []
+        for imp in out.improvements:
+            data = json.loads(imp.model_dump_json())
+            data["status"] = "proposed"  # la decisión es del usuario, siempre
+            improvements.append(data)
+        doc = {
+            "improvements": improvements,
+            "category_scan_summary": {v.category: v.verdict for v in out.category_scan},
+        }
+        (state_dir / "improvements_proposed.yaml").write_text(
+            yaml.safe_dump(doc, allow_unicode=True, sort_keys=False), encoding="utf-8"
+        )
+    except NeedsHuman as exc:
+        record_needs_human(
+            state_dir, phase=2, task="improvements", reason=exc.reason,
+            detail=exc.detail, attempts=exc.attempts,
+        )
+
+    return {"pfds_ok": pfds_ok, "pfds_total": len(by_pfd)}
+
+
+# ── Fase 3: matching archivo↔nodo ───────────────────────────────────────────
+
+def run_matching(state_dir: Path, workspace: Path) -> dict:
+    state_dir = Path(state_dir)
+    profiles_path = state_dir / "profile_report.json"
+    profiles = []
+    if profiles_path.exists():
+        doc = _load_json(profiles_path)
+        profiles = doc if isinstance(doc, list) else doc.get("profiles", [])
+
+    if not profiles:
+        _dump_json(state_dir / "file_mapping.json", {"mappings": []})
+        return {"mappings": 0, "llm": False}
+
+    index = _load_json(state_dir / "nodes_index.json")
+    node_summaries = [
+        {
+            "id": n["id"],
+            "label": n.get("label", ""),
+            "node_type": n.get("node_type", ""),
+            "placement": n.get("placement"),
+            "flags": n.get("flags", {}),
+        }
+        for n in index.get("nodes", [])
+    ]
+    head = prompt_builder.header_line(
+        {"files": [str(p.get("file_path", "")) for p in profiles]}
+    )
+    user = (
+        f"{head}\n\n## Perfiles\n```json\n"
+        + json.dumps(profiles, ensure_ascii=False)[:40_000]
+        + "\n```\n\n## Nodos\n```json\n"
+        + json.dumps(node_summaries, ensure_ascii=False)[:40_000]
+        + "\n```\n"
+    )
+    caller = runtime.get_caller(workspace)
+    try:
+        out = caller.call(
+            task="matching",
+            system_blocks=prompt_builder.build_matching_system(),
+            user_content=user,
+            output_model=FileMappingBatch,
+        )
+        mappings = [json.loads(m.model_dump_json()) for m in out.mappings]
+    except NeedsHuman as exc:
+        record_needs_human(
+            state_dir, phase=3, task="matching", reason=exc.reason,
+            detail=exc.detail, attempts=exc.attempts,
+        )
+        # Fallback honesto: todo pendiente de confirmación humana.
+        mappings = [
+            {
+                "file_path": str(p.get("file_path", "")),
+                "node_id": None,
+                "role": "unknown",
+                "confidence": 0.0,
+                "reasons": ["matching LLM falló — confirmar a mano (needs_human)"],
+                "needs_confirmation": True,
+            }
+            for p in profiles
+        ]
+    _dump_json(state_dir / "file_mapping.json", {"mappings": mappings})
+    if profiles and not (state_dir / "column_mapping.yaml").exists():
+        (state_dir / "column_mapping.yaml").write_text(
+            yaml.safe_dump({"mappings": []}), encoding="utf-8"
+        )
+    return {"mappings": len(mappings), "llm": True}
+
+
+# ── Fase 6: traducción por nodo + ensamblado ────────────────────────────────
+
+def run_translation(state_dir: Path, output_dir: Path, workspace: Path) -> dict:
+    from sas_migrator.core.assembly.notebook import assemble_notebooks
+
+    state_dir = Path(state_dir)
+    plan = _load_json(state_dir / "translation_plan.json")
+    caller = runtime.get_caller(workspace)
+    system = prompt_builder.build_translation_system()
+
+    db_aliases: list[str] = []
+    conns_path = state_dir / "db_connections.yaml"
+    if conns_path.exists():
+        conns = yaml.safe_load(conns_path.read_text(encoding="utf-8")) or {}
+        db_aliases = [str(c.get("alias", "")) for c in conns.get("connections", [])]
+
+    translations: dict[str, NodeTranslation] = {}
+    for target in plan.get("targets", []):
+        nid = str(target.get("node_id"))
+        user = prompt_builder.build_translation_user(
+            target, _node_code(state_dir, nid), db_aliases
+        )
+        try:
+            nt = caller.call(
+                task="translation",
+                system_blocks=system,
+                user_content=user,
+                output_model=NodeTranslation,
+            )
+        except NeedsHuman as exc:
+            record_needs_human(
+                state_dir, phase=6, task="translation", node_id=nid,
+                reason=exc.reason, detail=exc.detail, attempts=exc.attempts,
+            )
+            continue
+        # Identidad defensiva: el mapping se construye con los ids del PLAN.
+        translations[nid] = nt.model_copy(
+            update={"node_id": nid, "node_label": target.get("node_label") or nid}
+        )
+
+    mapping, failures = assemble_notebooks(plan, translations, Path(output_dir))
+    for failure in failures:
+        record_needs_human(
+            state_dir, phase=6, task="assembly", node_id=failure.node_id,
+            reason="static_check_failed", detail=f"{failure.reason}: {failure.detail}",
+        )
+    _dump_json(
+        state_dir / "sas_python_mapping.json", json.loads(mapping.model_dump_json())
+    )
+    return {
+        "translated": len(translations),
+        "assembly_failures": len(failures),
+        "targets": len(plan.get("targets", [])),
+    }

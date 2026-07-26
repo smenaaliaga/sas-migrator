@@ -84,11 +84,21 @@ def phase2_analysis(state: MigrationGraphState) -> dict:
     enrich_state(st)
     core_ledger.cmd_init(st)
 
-    # Criterio del code-analyst (stub): reviews, descripciones, fichas M-xxx.
-    stubs.stub_analysis_reviews(st)
+    # Criterio del code-analyst: reviews, descripciones, fichas M-xxx.
+    if state.get("stub_mode", True):
+        stubs.stub_analysis_reviews(st)
+        note = "fase 2: extracción + análisis + reviews (stub)"
+    else:
+        from sas_migrator.llm.phases import run_analysis
+
+        counts = run_analysis(st, ws)
+        note = (
+            "fase 2: extracción + análisis + reviews (LLM) — "
+            f"{counts['pfds_ok']}/{counts['pfds_total']} PFDs"
+        )
     core_ledger.cmd_sync(st)
 
-    return {"current_phase": 2, "notes": ["fase 2: extracción + análisis + reviews (stub)"]}
+    return {"current_phase": 2, "notes": [note]}
 
 
 # ── Fase 3: profiling + matching (stub) ──────────────────────────────────────
@@ -108,8 +118,15 @@ def phase3_profiling(state: MigrationGraphState) -> dict:
                     profiles.append({"file_path": str(f), "file_type": f.suffix.lstrip("."), "error": str(exc)})
     _dump_json(st / "profile_report.json", profiles)
 
-    stubs.stub_file_mapping(st)
-    return {"current_phase": 3, "notes": [f"fase 3: {len(profiles)} perfil(es) + matching (stub)"]}
+    if state.get("stub_mode", True):
+        stubs.stub_file_mapping(st)
+        note = f"fase 3: {len(profiles)} perfil(es) + matching (stub)"
+    else:
+        from sas_migrator.llm.phases import run_matching
+
+        counts = run_matching(st, ws)
+        note = f"fase 3: {len(profiles)} perfil(es) + matching (LLM: {counts['mappings']})"
+    return {"current_phase": 3, "notes": [note]}
 
 
 # ── Fase 4: entrevista post-análisis (stub | interrupts) ────────────────────
@@ -157,12 +174,23 @@ def phase5_plan(state: MigrationGraphState) -> dict:
 # ── Fase 6: generación (traducción stub | LLM + ensamblador determinista) ───
 
 def phase6_generation(state: MigrationGraphState) -> dict:
-    _, st, out = _paths(state)
+    ws, st, out = _paths(state)
     from sas_migrator.core.gen_run_all import write_run_all
 
-    stubs.stub_generate_notebooks(st, out)
+    if state.get("stub_mode", True):
+        stubs.stub_generate_notebooks(st, out)
+        note = "fase 6: notebooks generados (stub/ensamblador)"
+    else:
+        from sas_migrator.llm.phases import run_translation
+
+        counts = run_translation(st, out, ws)
+        note = (
+            "fase 6: notebooks generados (LLM/ensamblador) — "
+            f"{counts['translated']}/{counts['targets']} nodos, "
+            f"{counts['assembly_failures']} fallos estáticos"
+        )
     write_run_all(out)
-    return {"current_phase": 6, "notes": ["fase 6: notebooks generados (stub/ensamblador)"]}
+    return {"current_phase": 6, "notes": [note]}
 
 
 # ── Fase 7: validación (modo sin insumos en stub) ────────────────────────────
