@@ -1,0 +1,78 @@
+{
+  "$defs": {
+    "Confidence": {
+      "enum": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "title": "Confidence",
+      "type": "string"
+    },
+    "MappingEntry": {
+      "description": "Una fila de sas_python_mapping.json — la escribe el ensamblador.",
+      "properties": {
+        "node_id": {
+          "title": "Node Id",
+          "type": "string"
+        },
+        "node_label": {
+          "default": "",
+          "title": "Node Label",
+          "type": "string"
+        },
+        "sas_construct": {
+          "default": "",
+          "title": "Sas Construct",
+          "type": "string"
+        },
+        "python_artifact": {
+          "default": "",
+          "title": "Python Artifact",
+          "type": "string"
+        },
+        "notebook_path": {
+          "default": "",
+          "title": "Notebook Path",
+          "type": "string"
+        },
+        "cell_index": {
+          "default": 0,
+          "title": "Cell Index",
+          "type": "integer"
+        },
+        "cell_count": {
+          "default": 1,
+          "title": "Cell Count",
+          "type": "integer"
+        },
+        "business_rule": {
+          "default": "",
+          "title": "Business Rule",
+          "type": "string"
+        },
+        "confidence": {
+          "$ref": "#/$defs/Confidence",
+          "default": "low"
+        }
+      },
+      "required": [
+        "node_id"
+      ],
+      "title": "MappingEntry",
+      "type": "object"
+    }
+  },
+  "description": "Artefacto state/sas_python_mapping.json — correcto por construcción.",
+  "properties": {
+    "mappings": {
+      "items": {
+        "$ref": "#/$defs/MappingEntry"
+      },
+      "title": "Mappings",
+      "type": "array"
+    }
+  },
+  "title": "SasPythonMapping",
+  "type": "object"
+}

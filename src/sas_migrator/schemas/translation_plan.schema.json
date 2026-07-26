@@ -31,6 +31,18 @@
           "title": "Strategy",
           "type": "string"
         },
+        "placement": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Placement"
+        },
         "notebook_path": {
           "anyOf": [
             {

@@ -140,11 +140,12 @@ def _phase6_state(tmp_path: Path, *, mapped: list[str], notebooks: list[str]) ->
     return state
 
 
-def test_generation_status_reports_pending(tmp_path, monkeypatch):
+def test_generation_status_reports_pending(tmp_path):
+    # Sin chdir: notebook_path se resuelve contra la raíz del workspace
+    # (state_dir.parent), no contra el cwd del proceso.
     state = _phase6_state(
         tmp_path, mapped=["CT-1"], notebooks=["output/NB-01_flujo.ipynb"]
     )
-    monkeypatch.chdir(tmp_path)
     result = genstat.build_status(state, tmp_path / "output")
 
     assert result["done"] == ["CT-1"]
@@ -154,13 +155,12 @@ def test_generation_status_reports_pending(tmp_path, monkeypatch):
     assert by_nb["output/NB-02_otro.ipynb"]["notebook_exists"] is False
 
 
-def test_generation_status_all_done(tmp_path, monkeypatch):
+def test_generation_status_all_done(tmp_path):
     state = _phase6_state(
         tmp_path,
         mapped=["CT-1", "CT-2", "CT-3"],
         notebooks=["output/NB-01_flujo.ipynb", "output/NB-02_otro.ipynb"],
     )
-    monkeypatch.chdir(tmp_path)
     result = genstat.build_status(state, tmp_path / "output")
     assert result["pending"] == []
     assert result["total_targets"] == 3

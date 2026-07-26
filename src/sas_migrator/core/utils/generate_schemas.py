@@ -36,7 +36,11 @@ from sas_migrator.core.models.interview import (
     QuestionBlock,
 )
 from sas_migrator.core.models.state import GateCheck, IterationEntry, MigrationState, PhaseResult
-from sas_migrator.core.models.translation import TranslationPlan
+from sas_migrator.core.models.translation import (
+    NodeTranslation,
+    SasPythonMapping,
+    TranslationPlan,
+)
 from sas_migrator.core.models.validation import (
     MismatchDiagnosis,
     NodeTranslationAuditReport,
@@ -78,6 +82,8 @@ SCHEMA_MAP: dict[str, type] = {
     "profile_report": DataProfile,
     "intake": IntakeCatalog,
     "translation_plan": TranslationPlan,
+    "node_translation": NodeTranslation,
+    "sas_python_mapping": SasPythonMapping,
 }
 
 

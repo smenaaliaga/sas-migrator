@@ -96,7 +96,7 @@ GATE_REQUIREMENTS: dict[int, list[tuple[str, str]]] = {
         ("approved_improvements.yaml", "improvements"),
     ],
     5: [("translation_plan.json", "translation_plan")],
-    6: [],  # generated code — validated by phase 7
+    6: [("sas_python_mapping.json", "sas_python_mapping")],
     7: [
         ("validation_report.json", "validation_report"),
         ("node_translation_audit.json", "node_translation_audit"),
@@ -458,6 +458,10 @@ def _phase6_generation_errors(state_path: Path) -> list[str]:
     if not notebooks:
         errors.append("No generated notebooks found in output/ (expected NB-*.ipynb or flow.ipynb)")
         return errors
+
+    run_all = output_dir / "run_all.py"
+    if not run_all.exists() or not run_all.read_text(encoding="utf-8").strip():
+        errors.append("Missing or empty orchestrator: output/run_all.py (gen_run_all)")
 
     translation_signals = (
         "pd.read_sql",

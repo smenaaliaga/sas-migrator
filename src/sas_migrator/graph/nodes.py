@@ -154,11 +154,14 @@ def phase5_plan(state: MigrationGraphState) -> dict:
     return {"current_phase": 5, "notes": [f"fase 5: plan construido; {note}"]}
 
 
-# ── Fase 6: generación (stub = embrión del ensamblador) ─────────────────────
+# ── Fase 6: generación (traducción stub | LLM + ensamblador determinista) ───
 
 def phase6_generation(state: MigrationGraphState) -> dict:
     _, st, out = _paths(state)
+    from sas_migrator.core.gen_run_all import write_run_all
+
     stubs.stub_generate_notebooks(st, out)
+    write_run_all(out)
     return {"current_phase": 6, "notes": ["fase 6: notebooks generados (stub/ensamblador)"]}
 
 

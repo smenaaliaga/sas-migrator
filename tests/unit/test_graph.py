@@ -53,6 +53,7 @@ def test_e2e_stub_run_completes_all_gates(tmp_path: Path) -> None:
     ):
         assert (st / artifact).exists(), f"falta {artifact}"
     assert list((ws / "output").glob("NB-*.ipynb")), "sin notebooks generados"
+    assert (ws / "output" / "run_all.py").exists(), "gen_run_all debe correr en fase 6"
     assert (ws / "output" / "docs" / "README.md").exists()
 
 

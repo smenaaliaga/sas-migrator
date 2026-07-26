@@ -86,24 +86,36 @@ def discover_notebooks(output_dir: Path) -> list[str]:
     return []
 
 
+def write_run_all(output_dir: Path) -> list[str]:
+    """Escribe output/run_all.py desde los notebooks existentes.
+
+    Devuelve la lista ordenada de notebooks incluidos ([] si no hay ninguno —
+    en ese caso no escribe nada). Es la vía in-process para el nodo de Fase 6.
+    """
+    output_dir = Path(output_dir)
+    notebooks = discover_notebooks(output_dir)
+    if not notebooks:
+        return []
+    notebook_lines = "\n".join(f"    {nb!r}," for nb in notebooks)
+    (output_dir / "run_all.py").write_text(
+        TEMPLATE.format(notebook_lines=notebook_lines), encoding="utf-8"
+    )
+    return notebooks
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Generate output/run_all.py from existing notebooks")
     parser.add_argument("--output-dir", default="output", help="Directory with generated notebooks (default: output)")
     args = parser.parse_args()
 
     output_dir = Path(args.output_dir)
-    notebooks = discover_notebooks(output_dir)
+    notebooks = write_run_all(output_dir)
 
     if not notebooks:
         print(f"ERROR: no se encontraron notebooks (NB-*.ipynb ni flow.ipynb) en {output_dir}/", file=__import__("sys").stderr)
         return 1
 
-    notebook_lines = "\n".join(f"    {nb!r}," for nb in notebooks)
-    content = TEMPLATE.format(notebook_lines=notebook_lines)
-
-    out = output_dir / "run_all.py"
-    out.write_text(content, encoding="utf-8")
-    print(f"OK run_all.py: {len(notebooks)} notebooks -> {out}")
+    print(f"OK run_all.py: {len(notebooks)} notebooks -> {output_dir / 'run_all.py'}")
     for nb in notebooks:
         print(f"  - {nb}")
     return 0

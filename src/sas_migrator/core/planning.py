@@ -193,10 +193,12 @@ def build(state: Path) -> dict:
 
         nb_index += 1
         slug = flow.get("notebook_slug") or flow.get("pfd_id") or f"flow{nb_index}"
+        # Convención única de rutas: relativas a la raíz del workspace con
+        # prefijo output/ (igual que sas_python_mapping y la auditoría).
         if output_strategy == "single":
-            notebook_path = "flow.ipynb"
+            notebook_path = "output/flow.ipynb"
         else:
-            notebook_path = f"NB-{nb_index:02d}_{slug}.ipynb"
+            notebook_path = f"output/NB-{nb_index:02d}_{slug}.ipynb"
         if notebook_path not in notebooks:
             notebooks.append(notebook_path)
 

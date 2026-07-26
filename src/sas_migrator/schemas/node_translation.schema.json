@@ -1,0 +1,80 @@
+{
+  "$defs": {
+    "Confidence": {
+      "enum": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "title": "Confidence",
+      "type": "string"
+    },
+    "Traceability": {
+      "description": "Trazabilidad SAS→Python de un nodo traducido.",
+      "properties": {
+        "sas_construct": {
+          "default": "",
+          "title": "Sas Construct",
+          "type": "string"
+        },
+        "business_rule": {
+          "default": "",
+          "title": "Business Rule",
+          "type": "string"
+        }
+      },
+      "title": "Traceability",
+      "type": "object"
+    }
+  },
+  "description": "Output estructurado del traductor para UN nodo.\n\nEs también el ``output_model`` de la llamada LLM (structured output). Las\n``cells`` van SIN header ni ancla — los agrega el ensamblador, que es\nquien calcula ``cell_index`` por construcción.",
+  "properties": {
+    "node_id": {
+      "title": "Node Id",
+      "type": "string"
+    },
+    "node_label": {
+      "default": "",
+      "title": "Node Label",
+      "type": "string"
+    },
+    "strategy": {
+      "default": "pandas",
+      "title": "Strategy",
+      "type": "string"
+    },
+    "imports": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Imports",
+      "type": "array"
+    },
+    "cells": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Cells",
+      "type": "array"
+    },
+    "traceability": {
+      "$ref": "#/$defs/Traceability"
+    },
+    "confidence": {
+      "$ref": "#/$defs/Confidence",
+      "default": "low"
+    },
+    "warnings": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Warnings",
+      "type": "array"
+    }
+  },
+  "required": [
+    "node_id"
+  ],
+  "title": "NodeTranslation",
+  "type": "object"
+}

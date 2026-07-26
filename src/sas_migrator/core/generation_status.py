@@ -56,7 +56,9 @@ def build_status(state_dir: Path, output_dir: Path) -> dict:
             {"done": [], "pending": [], "notebook_exists": None},
         )
         if entry["notebook_exists"] is None and nb_rel != "(sin notebook)":
-            nb_path = Path(nb_rel)
+            # notebook_path es relativo a la raíz del workspace (state_dir.parent),
+            # no al cwd del proceso.
+            nb_path = Path(state_dir).parent / nb_rel
             exists = nb_path.exists()
             if exists:
                 try:

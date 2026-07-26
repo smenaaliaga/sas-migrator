@@ -43,6 +43,10 @@ def test_load_schema_reports_missing_file(tmp_path, monkeypatch) -> None:
 def test_phase6_semantic_gate_blocks_high_issues(tmp_path, monkeypatch) -> None:
     state_dir = tmp_path / "state"
     state_dir.mkdir()
+    # El gate 6 valida sas_python_mapping.json contra schema (Etapa 4).
+    (state_dir / "sas_python_mapping.json").write_text(
+        json.dumps({"mappings": []}), encoding="utf-8"
+    )
 
     monkeypatch.setattr(schema_validation, "_phase6_generation_errors", lambda _: [])
     monkeypatch.setattr(

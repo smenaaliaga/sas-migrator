@@ -236,73 +236,50 @@ def stub_approve_plan(state_dir: Path) -> None:
     _dump_json(plan_path, plan)
 
 
-# ── Fase 6: generación (embrión del ensamblador determinista) ────────────────
+# ── Fase 6: generación (stub de traducción + ensamblador real) ───────────────
+
+def stub_node_translations(plan: dict) -> dict:
+    """NodeTranslation determinista por target — el 'traductor' del stub.
+
+    Las celdas incluyen `.merge(`/`.groupby(` para satisfacer las señales de
+    traducción del gate 6 sin fingir una traducción real.
+    """
+    from sas_migrator.core.models.translation import NodeTranslation, Traceability
+
+    translations = {}
+    for t in plan.get("targets", []):
+        label = t.get("node_label") or t["node_id"]
+        translations[t["node_id"]] = NodeTranslation(
+            node_id=t["node_id"],
+            node_label=label,
+            strategy=t.get("strategy", "pandas"),
+            cells=[
+                f"# [stub] Traducción pendiente de LLM real ({t['node_id']}).\n"
+                "df = pd.DataFrame()\n"
+                "df = df.merge(df, how='left', left_index=True, right_index=True)\n"
+                "resumen = df.groupby(level=0).size() if len(df) else None\n"
+            ],
+            traceability=Traceability(sas_construct="[stub]", business_rule="[stub]"),
+            confidence="low",
+        )
+    return translations
+
 
 def stub_generate_notebooks(state_dir: Path, output_dir: Path) -> None:
-    """Genera un notebook real por cada notebook del plan vía nbformat.
+    """Traducción stub + ensamblador determinista REAL (core.assembly).
 
-    El mapping SAS→Python se calcula desde los índices de celda REALES al
-    ensamblar — el contrato clave de la arquitectura v2 (cell_index correcto
-    por construcción, nunca mantenido a mano).
+    El mapping SAS→Python sale de los índices de celda calculados al ensamblar
+    — el contrato clave de la arquitectura v2 (cell_index correcto por
+    construcción, nunca mantenido a mano). El camino stub ejercita el mismo
+    ensamblador que usará la traducción LLM.
     """
-    import nbformat
+    from sas_migrator.core.assembly.notebook import assemble_notebooks
 
     plan = json.loads((state_dir / "translation_plan.json").read_text(encoding="utf-8"))
-    targets = plan.get("targets", [])
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    # Agrupar preservando el orden del plan (ya viene en topo_order por flujo).
-    by_notebook: dict[str, list[dict]] = {}
-    for t in targets:
-        by_notebook.setdefault(t["notebook_path"], []).append(t)
-
-    mappings: list[dict] = []
-    for nb_name, nb_targets in by_notebook.items():
-        nb = nbformat.v4.new_notebook()
-        cells = []
-        title = Path(nb_name).stem
-        cells.append(nbformat.v4.new_markdown_cell(f"# {title}\n\n*[stub] Etapa 1*"))
-        cells.append(
-            nbformat.v4.new_code_cell(
-                "# ========= Celda 1: Configuración =========\n"
-                "import pandas as pd\nimport numpy as np\n"
-            )
-        )
-        # Ruta relativa a la raíz del workspace — es lo que la auditoría resuelve.
-        nb_rel = f"output/{Path(nb_name).name}"
-        for t in nb_targets:
-            label = t.get("node_label") or t["node_id"]
-            cells.append(nbformat.v4.new_markdown_cell(f"## {label}"))
-            code_index = len(cells)  # índice REAL de la celda de código que sigue
-            cells.append(
-                nbformat.v4.new_code_cell(
-                    f"# ========= {label} =========\n"
-                    f"# [stub] Traducción pendiente de LLM real ({t['node_id']}).\n"
-                    "df = pd.DataFrame()\n"
-                    "df = df.merge(df, how='left', left_index=True, right_index=True)\n"
-                    "resumen = df.groupby(level=0).size() if len(df) else None\n"
-                )
-            )
-            mappings.append(
-                {
-                    "node_id": t["node_id"],
-                    "node_label": label,
-                    "sas_construct": "[stub]",
-                    "python_artifact": nb_rel,
-                    "notebook_path": nb_rel,
-                    "cell_index": code_index,
-                    "business_rule": "[stub]",
-                    "confidence": "low",
-                }
-            )
-        # nbformat asigna ids aleatorios; regenerar un notebook debe dar bytes
-        # idénticos, así que los ids se fijan por posición.
-        for i, cell in enumerate(cells):
-            cell["id"] = f"cell-{i:03d}"
-        nb["cells"] = cells
-        nbformat.write(nb, str(output_dir / Path(nb_name).name))
-
-    _dump_json(state_dir / "sas_python_mapping.json", {"mappings": mappings})
+    mapping, failures = assemble_notebooks(plan, stub_node_translations(plan), output_dir)
+    if failures:  # el stub emite traducciones siempre válidas — esto es un bug
+        raise RuntimeError(f"stub de traducción falló chequeos estáticos: {failures}")
+    _dump_json(state_dir / "sas_python_mapping.json", _model_dump(mapping))
 
 
 # ── Fase 7: reporte de validación (modo sin insumos) ─────────────────────────
