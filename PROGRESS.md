@@ -11,7 +11,7 @@
 | **2 — Parser SAS v2 + placement** | ✅ Completada | Tokenizador + parsers dirigidos + placement con evidencia. **113 tests.** |
 | **2.5 — Resolución PREGUNTAS Q1-Q3** | ✅ Completada | Vista v2 única (lineage calificado), DB_ENGINES general+config, placement `utility`. **125 tests.** |
 | **3 — Human-in-the-loop + MCP** | ✅ Completada | Entrevistas como `interrupt()` con payloads tipados, CLI interactiva, servidor MCP, 5 ADRs. **173 tests.** |
-| **4 — Nodos LLM + ensamblador** | ✅ Completada | LLM real en fases 2/3/6 con retry→needs_human, ensamblador determinista, audit placement-aware, eval set. **~225 tests.** |
+| **4 — Nodos LLM + ensamblador** | ✅ Completada | LLM real en fases 2/3/6 con retry→needs_human, ensamblador determinista, audit placement-aware, eval set. **222 tests (+6 evals live con API key).** |
 
 ## Etapa 4 — qué se hizo
 
