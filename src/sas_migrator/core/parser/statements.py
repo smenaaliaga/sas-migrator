@@ -197,6 +197,9 @@ def _parse_sql_statement(stmt: str, parse: NodeParse) -> None:
 
 def parse_sas_code(code: str) -> NodeParse:
     """Parsea el código SAS de un nodo y devuelve inputs/outputs/evidencia."""
+    # Los code.sas de un .egp real traen BOM UTF-8; pegado al primer token
+    # rompía el head del primer statement (bug cazado por el harness).
+    code = code.replace("﻿", "")
     parse = NodeParse()
     statements = code_statements(code)
     parse.statements_total = len(statements)

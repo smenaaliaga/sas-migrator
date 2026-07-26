@@ -50,3 +50,13 @@ def test_placement_never_crashes(code: str) -> None:
     assert decision.placement in {
         "sql_passthrough", "sql_pushdown", "pandas", "hybrid", "ambiguous", "utility",
     }
+
+
+def test_bom_does_not_break_first_statement() -> None:
+    # Regresión del primer bug cazado por el harness .egp real: el BOM UTF-8
+    # pegado al primer statement hacía perder el DATA inicial del nodo.
+    base = "DATA tablas.BD_CTSI (COMPRESS=YES); SET tablas.BD_CTSI; RUN;"
+    for code in (base, "\ufeff" + base, "\ufeff/*COMPRIME*/\r\n" + base):
+        parse = parse_sas_code(code)
+        outs = {f"{r.libref}.{r.table}" for r in parse.outputs}
+        assert "TABLAS.BD_CTSI" in outs, repr(code[:20])
