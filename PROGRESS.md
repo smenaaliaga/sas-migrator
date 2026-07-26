@@ -10,6 +10,42 @@
 | **1 — Grafo esqueleto** | ✅ Completada | Pipeline 0-8 end-to-end con gates forzados por topología. **90 tests.** |
 | **2 — Parser SAS v2 + placement** | ✅ Completada | Tokenizador + parsers dirigidos + placement con evidencia. **113 tests.** |
 | **2.5 — Resolución PREGUNTAS Q1-Q3** | ✅ Completada | Vista v2 única (lineage calificado), DB_ENGINES general+config, placement `utility`. **125 tests.** |
+| **3 — Human-in-the-loop + MCP** | ✅ Completada | Entrevistas como `interrupt()` con payloads tipados, CLI interactiva, servidor MCP, 5 ADRs. **173 tests.** |
+
+## Etapa 3 — qué se hizo
+
+- **Contratos** (`core/models/interview.py`): `InterviewCard` (payload de UN
+  interrupt: tarjeta con preguntas, default recomendado, evidencia, sin
+  timestamps) + `CardAnswers` (valor de `Command(resume=...)`) +
+  `PlacementDecisions` (B4b). `Question` ganó `recommended_default`/`evidence`.
+- **`core/interview/`** (determinista puro, ADR-0001): builders de todas las
+  tarjetas (B1-initial fijo; fase 4: mapping, alcance con nativos uno a uno,
+  preprocesamiento, ambigüedades, B4b con resolución de placement POR CAUSA
+  RAÍZ, M-xxx una a la vez, cierre; aprobación de plan), `validate.py`
+  (semántica de respuestas) y `apply.py` (escritores atómicos: la Fase 4
+  produce `db_connections.yaml` —primer productor real— y
+  `placement_decisions.yaml` con re-clasificación de nodos ambiguos).
+- **Nodos `interrupt()`** (`graph/interviews.py`): `ask()` revalida al
+  reanudar — inválida ⇒ re-interrupt con `validation_error`, nunca crash;
+  rama `stub_mode` intacta (CI y golden de determinismo sin cambios);
+  `pending_interrupt` eliminado del estado (LangGraph ya expone el payload).
+  Reanudación a mitad de entrevista probada sobre SqliteSaver reconstruyendo
+  el grafo (DoD).
+- **`service/MigrationSession`** (ADR-0005): única vía al grafo con
+  checkpointer; `✅ Fase N completada` derivado del delta de gate_history.
+- **CLI**: `run --no-stub` interactiva (render lean: opciones numeradas,
+  `(Recomendado)`, Enter = default) o por guion `--answers-file`; `resume`
+  continúa entrevistas a mitad; `status` muestra la tarjeta pendiente;
+  `serve` levanta el servidor MCP.
+- **Servidor MCP** (`mcp_server/server.py`, FastMCP stdio, extra `mcp`):
+  `start_migration, status, get_pending_question, answer, approve_plan,
+  authorize_execution, iterate` — las dos últimas `not_available` honesto.
+- **Snapshots golden** (`tests/golden/`, ADR-0004): payload de cada tarjeta
+  byte a byte + invariantes del UX lean; regeneración con `UPDATE_SNAPSHOTS=1`.
+- **ADRs 0001-0005** en `docs/adr/` (deuda del principio "toda invariante es
+  un ADR" saldada).
+- Pendiente diferido a Etapa 5 (anotado): paso 4 de B4b (verificación de
+  tablas contra la BD real) — nada de red en el pipeline de la Etapa 3.
 
 ## Etapa 2.5 — qué se hizo (respuestas de Seba a PREGUNTAS.md)
 
