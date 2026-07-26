@@ -628,6 +628,18 @@ def check_gate(phase: int, state_dir: str | Path) -> tuple[bool, list[str]]:
         for e in errors:
             all_errors.append(f"{artifact_file}: {e}")
 
+    # Cola needs_human (Etapa 4): trabajo LLM sin output utilizable bloquea el
+    # gate de su fase hasta que un humano lo resuelva — nunca silencio.
+    if phase in (2, 3, 6):
+        from sas_migrator.core.utils.needs_human import unresolved
+
+        for item in unresolved(state_path, phase):
+            all_errors.append(
+                f"needs_human sin resolver: {item.id} [{item.task}"
+                + (f"/{item.node_id}" if item.node_id else "")
+                + f"]: {item.reason}"
+            )
+
     if phase == 2:
         all_errors.extend(_phase2_completeness_errors(state_path))
 

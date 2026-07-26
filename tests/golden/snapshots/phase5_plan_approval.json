@@ -22,7 +22,7 @@
         "translation_plan.json: 4 nodo(s) en 1 notebook(s)",
         "nodos ignorados: 0",
         "mejoras globales: 0",
-        "supuestos: 3",
+        "supuestos: 5",
         "notebook: output/NB-01_flujo_principal.ipynb"
       ]
     }

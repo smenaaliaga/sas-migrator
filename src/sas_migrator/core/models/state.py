@@ -40,6 +40,34 @@ class PhaseResult(BaseModel):
     gate: GateCheck | None = None
 
 
+# ── Cola needs_human (Etapa 4) ──────────────────────────────────────────────
+
+class NeedsHumanItem(BaseModel):
+    """Un trabajo LLM que no produjo output utilizable — NUNCA silencio.
+
+    Se resuelve editando ``state/needs_human.yaml`` (``resolved: true`` +
+    ``resolution``) tras atender la causa; el gate de la fase bloquea mientras
+    haya items sin resolver.
+    """
+
+    id: str  # NH-001, NH-002, ...
+    phase: int
+    task: str  # "analysis_reviews" | "matching" | "translation" | "assembly"
+    node_id: str | None = None
+    reason: str  # "validation_retries_exhausted" | "refusal" | "static_check_failed"
+    detail: str = ""
+    attempts: int = 0
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    resolved: bool = False
+    resolution: str = ""
+
+
+class NeedsHumanQueue(BaseModel):
+    """Artefacto ``state/needs_human.yaml``."""
+
+    items: list[NeedsHumanItem] = Field(default_factory=list)
+
+
 class Decision(BaseModel):
     """A decision made during the migration."""
 

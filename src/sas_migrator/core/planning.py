@@ -86,9 +86,38 @@ def to_node_id(item) -> str:
 # Build
 # ---------------------------------------------------------------------------
 
-def choose_strategy(node_type: str) -> str:
-    # Todo se traduce a pandas (incluido PROC SQL). No se usa ningún motor SQL embebido.
-    return "pandas"
+# Estrategia de traducción por placement (Etapas 2-3: clasificador + entrevista
+# B4b). El default replica la localidad que SAS tenía; `utility` es Python
+# plano sin motor de datos; `ambiguous` sin resolver cae a pandas con un
+# supuesto VISIBLE en el plan.
+STRATEGY_BY_PLACEMENT = {
+    "sql_passthrough": "sql_passthrough",
+    "sql_pushdown": "sql_pushdown",
+    "pandas": "pandas",
+    "hybrid": "hybrid",
+    "utility": "python",
+    "ambiguous": "pandas",
+}
+
+
+def load_placement_overrides(state: Path) -> dict[str, str]:
+    """node_id → placement desde placement_decisions.yaml (entrevista B4b)."""
+    doc = load_artifact(state / "placement_decisions.yaml") or {}
+    return {
+        str(d["node_id"]): str(d["placement"])
+        for d in doc.get("decisions", [])
+        if isinstance(d, dict) and d.get("node_id") and d.get("placement")
+    }
+
+
+def effective_placement(node_meta: dict, overrides: dict[str, str]) -> str | None:
+    """Placement efectivo de un nodo: override de B4b > clasificador."""
+    nid = str(node_meta.get("id", ""))
+    return overrides.get(nid) or node_meta.get("placement")
+
+
+def choose_strategy(placement: str | None) -> str:
+    return STRATEGY_BY_PLACEMENT.get(placement or "", "pandas")
 
 
 def build(state: Path) -> dict:
@@ -183,6 +212,8 @@ def build(state: Path) -> dict:
     targets: list[dict] = []
     notebooks: list[str] = []
     nb_index = 0
+    placement_overrides = load_placement_overrides(state)
+    ambiguous_nodes: list[str] = []
 
     for flow in flows:
         if not flow.get("migratable_candidate", True):
@@ -209,11 +240,15 @@ def build(state: Path) -> dict:
             meta = idx.get(nid, {})
             node_type = meta.get("node_type", "")
             deps = sorted({d for d in predecessors.get(nid, []) if d not in ignored})
+            placement = effective_placement({"id": nid, **meta}, placement_overrides)
+            if placement == "ambiguous":
+                ambiguous_nodes.append(nid)
             targets.append({
                 "node_id": nid,
                 "node_label": meta.get("label", ""),
                 "node_type": node_type,
-                "strategy": choose_strategy(node_type),
+                "strategy": choose_strategy(placement),
+                "placement": placement,
                 "notebook_path": notebook_path,
                 "input_datasets": [],
                 "output_datasets": [],
@@ -230,9 +265,13 @@ def build(state: Path) -> dict:
 
     assumptions = [
         "Plan generado por build_translation_plan.py; el agente debe revisar strategy/notes y el usuario aprobar.",
-        "strategy = pandas para todos los nodos (incluido PROC SQL); no se usa ningún motor SQL embebido.",
+        "strategy derivada del placement efectivo (clasificador + overrides de la entrevista B4b); utility → Python plano.",
         "input/output_datasets y output_tables se resuelven desde los node files en la Fase 6 (traducción).",
     ]
+    for nid in ambiguous_nodes:
+        assumptions.append(
+            f"placement ambiguous sin resolver en {nid} → strategy pandas (supuesto visible; revisar B4b)"
+        )
     if flow_graph is None:
         assumptions.append("flow_graph.json ausente: 'dependencies' quedó vacío (correr build_indexes/extractor).")
 
