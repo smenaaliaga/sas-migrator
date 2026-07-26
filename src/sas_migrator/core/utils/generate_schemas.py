@@ -11,6 +11,10 @@ import json
 import sys
 from pathlib import Path
 
+# Consolas Windows cp1252 no soportan flechas/checks - forzar UTF-8.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 # Asegurar que src/ sea importable desde la raiz del repositorio.
 REPO_ROOT = Path(__file__).resolve().parents[4]
 
@@ -77,7 +81,8 @@ def generate(output_dir: Path) -> None:
 
 
 if __name__ == "__main__":
-    out = Path(sys.argv[1]) if len(sys.argv) > 1 else REPO_ROOT / "src" / "schemas"
+    from sas_migrator.core.utils.schema_validation import SCHEMAS_DIR
+    out = Path(sys.argv[1]) if len(sys.argv) > 1 else SCHEMAS_DIR
     print(f"Generating JSON Schemas → {out}/")
     generate(out)
     print("Done.")

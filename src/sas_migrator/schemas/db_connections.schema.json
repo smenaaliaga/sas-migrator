@@ -26,8 +26,8 @@
           "type": "string"
         },
         "server": {
-          "default": "srvplatdat.bcch.local",
-          "description": "Hostname o IP del servidor SQL Server",
+          "default": "",
+          "description": "Hostname o IP del servidor SQL Server. Vacío = se resuelve desde db.default_server en project_config.yaml; sin default configurado, conectar falla con error explícito (nunca se asume un servidor).",
           "title": "Server",
           "type": "string"
         },

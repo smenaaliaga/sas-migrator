@@ -48,27 +48,14 @@ def profile_table_from_db(conn_cfg: dict, table_name: str) -> dict:
 
     Lanza ConnectionError si no hay acceso al servidor.
     """
-    from sqlalchemy import create_engine, text
+    from sqlalchemy import text
 
-    server = conn_cfg.get("server", "srvplatdat.bcch.local")
-    port = conn_cfg.get("port", 1433)
-    driver = conn_cfg.get("driver", "ODBC Driver 17 for SQL Server")
+    from sas_migrator.core.db.engine import build_engine
+
     schema = conn_cfg.get("schema_name", "dbo")
-    database = conn_cfg.get("database", "")
-
-    connection_string = (
-        "mssql+pyodbc:///?"
-        "odbc_connect="
-        f"DRIVER={{{driver}}};"
-        f"SERVER=tcp:{server},{port};"
-        f"DATABASE={database};"
-        "Authentication=ActiveDirectoryIntegrated;"
-        "Encrypt=yes;"
-        "TrustServerCertificate=yes"
-    )
 
     try:
-        engine = create_engine(connection_string, fast_executemany=True)
+        engine = build_engine(conn_cfg)
         with engine.connect() as conn:
             # Conteo de filas
             row_count = conn.execute(

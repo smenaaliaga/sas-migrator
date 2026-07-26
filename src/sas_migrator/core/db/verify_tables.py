@@ -23,23 +23,9 @@ from pathlib import Path
 import yaml
 
 
-def build_engine(conn_cfg: dict):
-    from sqlalchemy import create_engine
-    server = conn_cfg.get("server", "srvplatdat.bcch.local")
-    port = conn_cfg.get("port", 1433)
-    driver = conn_cfg.get("driver", "ODBC Driver 17 for SQL Server")
-    database = conn_cfg.get("database", "")
-    connection_string = (
-        "mssql+pyodbc:///?"
-        "odbc_connect="
-        f"DRIVER={{{driver}}};"
-        f"SERVER=tcp:{server},{port};"
-        f"DATABASE={database};"
-        "Authentication=ActiveDirectoryIntegrated;"
-        "Encrypt=yes;"
-        "TrustServerCertificate=yes"
-    )
-    return create_engine(connection_string, fast_executemany=True)
+
+
+from sas_migrator.core.db.engine import build_engine  # noqa: E402
 
 
 def main() -> None:

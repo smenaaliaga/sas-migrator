@@ -28,8 +28,8 @@ from pathlib import Path
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-STATE = Path("state")
-NODES_DIR = STATE / "nodes"
+# Default histórico; main() acepta state_dir explícito (fix del hardcode v1).
+DEFAULT_STATE = Path("state")
 NOW = datetime.now(timezone.utc).isoformat()
 
 FILE_EXTENSIONS = {"XLSX", "XLS", "CSV", "TXT", "PDF", "HTML", "SAS7BDAT"}
@@ -40,9 +40,9 @@ DB_ENGINES = {"ODBC", "OLEDB", "SQLSVR", "ORACLE", "TERADATA", "POSTGRES"}
 # ─────────────────────────────────────────────────────────────
 # Helpers
 # ─────────────────────────────────────────────────────────────
-def load_nodes() -> dict[str, dict]:
+def load_nodes(nodes_dir: Path) -> dict[str, dict]:
     nodes = {}
-    for p in sorted(NODES_DIR.glob("*.json")):
+    for p in sorted(nodes_dir.glob("*.json")):
         n = json.loads(p.read_text(encoding="utf-8"))
         nodes[n["id"]] = n
     return nodes
@@ -444,12 +444,14 @@ def build_evidence(nodes: dict, all_smells: list[dict],
 # ─────────────────────────────────────────────────────────────
 # Main
 # ─────────────────────────────────────────────────────────────
-def main():
+def main(state_dir: Path | None = None):
+    state = Path(state_dir) if state_dir is not None else DEFAULT_STATE
+    nodes_dir = state / "nodes"
     print("Cargando flow_graph.json ...")
-    flow_graph = json.loads((STATE / "flow_graph.json").read_text(encoding="utf-8"))
+    flow_graph = json.loads((state / "flow_graph.json").read_text(encoding="utf-8"))
 
     print("Cargando nodos ...")
-    nodes = load_nodes()
+    nodes = load_nodes(nodes_dir)
     sinks = sink_node_ids(nodes, flow_graph)
 
     # ── 1. Classify all nodes and update metadata ──────────────
@@ -462,7 +464,7 @@ def main():
         if "classification" not in meta:
             meta.update(classify_node(node, sinks))
 
-        (NODES_DIR / f"{nid}.json").write_text(
+        (nodes_dir / f"{nid}.json").write_text(
             json.dumps(node, indent=2, ensure_ascii=False), encoding="utf-8"
         )
     print("  ✓ Nodos clasificados")
@@ -484,7 +486,7 @@ def main():
         },
         "smells": all_smells,
     }
-    (STATE / "code_smells.json").write_text(
+    (state / "code_smells.json").write_text(
         json.dumps(code_smells, indent=2, ensure_ascii=False), encoding="utf-8"
     )
     print(f"  ✓ {len(all_smells)} smells detectados "
@@ -495,7 +497,7 @@ def main():
     # ── 3. Evidencia para fichas M-xxx ─────────────────────────
     print("Construyendo evidencia de análisis ...")
     evidence = build_evidence(nodes, all_smells, magic_numbers)
-    (STATE / "analysis_evidence.json").write_text(
+    (state / "analysis_evidence.json").write_text(
         json.dumps(evidence, indent=2, ensure_ascii=False), encoding="utf-8"
     )
     print(f"  ✓ analysis_evidence.json: "
@@ -520,7 +522,7 @@ def main():
         "covered_nodes": len({e["node_id"] for e in entries}),
         "lineage": entries,
     }
-    (STATE / "lineage.json").write_text(
+    (state / "lineage.json").write_text(
         json.dumps(lineage, indent=2, ensure_ascii=False), encoding="utf-8"
     )
     print(f"  ✓ {len(lineage['lineage'])} entradas de linaje "
@@ -541,4 +543,9 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Análisis determinista de nodos SAS")
+    parser.add_argument("--state-dir", default=None, help="Directorio de estado (default: state/)")
+    args = parser.parse_args()
+    main(args.state_dir)

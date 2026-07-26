@@ -126,8 +126,12 @@ class DatabaseConnection(BaseModel):
 
     alias: str = Field(description="Nombre corto para identificar la conexión (ej: PLATDAT)")
     server: str = Field(
-        default="srvplatdat.bcch.local",
-        description="Hostname o IP del servidor SQL Server",
+        default="",
+        description=(
+            "Hostname o IP del servidor SQL Server. Vacío = se resuelve desde "
+            "db.default_server en project_config.yaml; sin default configurado, "
+            "conectar falla con error explícito (nunca se asume un servidor)."
+        ),
     )
     port: int = Field(default=1433, ge=1, le=65535)
     database: str = Field(description="Nombre de la base de datos (ej: PYDCNI)")

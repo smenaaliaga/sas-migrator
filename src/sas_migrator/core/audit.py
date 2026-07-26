@@ -42,21 +42,36 @@ def load_json(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-# Heurísticas específicas del proyecto — sobreescribibles vía
-# state/audit_heuristics.yaml. Los defaults corresponden al proyecto de
-# referencia; con el YAML presente, sus claves reemplazan a las de aquí.
+# Heurísticas dependientes de dominio — neutras por default y sobreescribibles
+# vía state/audit_heuristics.yaml (o project_config.yaml: sección audit). Los
+# chequeos que dependen de marcadores vacíos simplemente no aplican; los
+# genéricos (PROC HTTP→requests, IMPORT→read_csv, secretos) no dependen de esto.
 DEFAULT_HEURISTICS: dict[str, list[str]] = {
-    "domain_markers": ["si3.bcentral.cl", "sieterestws"],
-    "sql_engine_markers": ["engine_si3"],
-    "sql_from_markers": ["from dbo.bcentral"],
-    "env_secret_markers": ["si3_api_user", "si3_api_pass", "os.environ", "dotenv"],
-    "runtime_df_checks": ["df_bd_ctsi"],
+    "domain_markers": [],
+    "sql_engine_markers": [],
+    "sql_from_markers": [],
+    "env_secret_markers": ["os.environ", "dotenv"],
+    "runtime_df_checks": [],
 }
 
 
 def load_heuristics(state_dir: Path) -> dict[str, list[str]]:
-    config_path = state_dir / "audit_heuristics.yaml"
     heuristics = dict(DEFAULT_HEURISTICS)
+
+    # Capa 1: project_config.yaml del workspace (sección audit).
+    try:
+        from sas_migrator.core.config import load_project_config
+
+        audit_cfg = load_project_config(state_dir.resolve().parent).audit
+        for key in heuristics:
+            values = getattr(audit_cfg, key, None)
+            if values:
+                heuristics[key] = [str(x) for x in values]
+    except Exception:
+        pass  # config opcional
+
+    # Capa 2: state/audit_heuristics.yaml pisa lo anterior clave por clave.
+    config_path = state_dir / "audit_heuristics.yaml"
     if not config_path.exists():
         return heuristics
     try:
@@ -67,7 +82,7 @@ def load_heuristics(state_dir: Path) -> dict[str, list[str]]:
             if isinstance(data.get(key), list):
                 heuristics[key] = [str(x) for x in data[key]]
     except Exception:
-        pass  # config opcional: si no se puede leer, valen los defaults
+        pass  # config opcional: si no se puede leer, valen las capas previas
     return heuristics
 
 
