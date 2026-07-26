@@ -17,6 +17,7 @@ from sas_migrator.core.models.analysis import (
     Improvement,
     LineageEntry,
     NodeClassification,
+    PlacementDecisions,
 )
 from sas_migrator.core.models.artifacts import IntakeCatalog
 from sas_migrator.core.models.data import (
@@ -28,7 +29,12 @@ from sas_migrator.core.models.data import (
     PreprocessCandidate,
 )
 from sas_migrator.core.models.graph import ExtractionResidue, FlowGraph, FlowSummary, SASNode
-from sas_migrator.core.models.interview import InterviewQA, QuestionBlock
+from sas_migrator.core.models.interview import (
+    CardAnswers,
+    InterviewCard,
+    InterviewQA,
+    QuestionBlock,
+)
 from sas_migrator.core.models.state import GateCheck, IterationEntry, MigrationState, PhaseResult
 from sas_migrator.core.models.translation import TranslationPlan
 from sas_migrator.core.models.validation import (
@@ -60,6 +66,9 @@ SCHEMA_MAP: dict[str, type] = {
     "db_connections": DatabaseConnections,
     "interview": InterviewQA,
     "question_block": QuestionBlock,
+    "interview_card": InterviewCard,
+    "card_answers": CardAnswers,
+    "placement_decisions": PlacementDecisions,
     "validation_report": ValidationReport,
     "test_result": TestResult,
     "mismatch_diagnosis": MismatchDiagnosis,

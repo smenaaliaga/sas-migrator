@@ -26,6 +26,11 @@ class Question(BaseModel):
     options: list[str] = Field(default_factory=list)
     source_finding: str = ""  # reference to the finding that triggered this question
     context: str = ""  # additional context shown to the user
+    # Payload de interrupt (Etapa 3): el default que el migrador recomienda
+    # (debe ser una de options si las hay) y la evidencia que lo sustenta,
+    # como líneas cortas con referencia a artefacto.
+    recommended_default: str | None = None
+    evidence: list[str] = Field(default_factory=list)
 
 
 class Answer(BaseModel):
@@ -64,3 +69,40 @@ class InterviewQA(BaseModel):
     @property
     def is_complete(self) -> bool:
         return all(b.required_answered for b in self.blocks)
+
+
+# ── Payloads de interrupt() (Etapa 3) ───────────────────────────────────────
+
+class CardProgress(BaseModel):
+    """Posición de la tarjeta dentro de su bloque (para 'tarjeta 2 de 5')."""
+
+    index: int  # 1-based
+    total: int | None = None  # None si el total depende de ramas condicionales
+
+
+class InterviewCard(BaseModel):
+    """Payload tipado de UNA llamada a ``interrupt()``.
+
+    Es la unidad de conversación del UX lean: 1..n preguntas presentadas
+    juntas, con default recomendado y evidencia por pregunta. Sin timestamps
+    por diseño: el replay del nodo debe producir bytes idénticos.
+    """
+
+    card_id: str  # "B1-initial", "B2-scope:flows", "B5:M-003", "plan_approval", ...
+    interview_type: str  # "initial" | "post_analysis" | "plan_approval"
+    phase: int  # 1 | 4 | 5
+    block_id: str
+    title: str
+    transition: str = ""  # micro-línea de transición; NUNCA un recap
+    questions: list[Question] = Field(default_factory=list)
+    allow_free_text: bool = True
+    validation_error: str | None = None  # poblado al re-presentar tras respuesta inválida
+    progress: CardProgress | None = None
+
+
+class CardAnswers(BaseModel):
+    """Valor esperado en ``Command(resume=...)`` para una tarjeta."""
+
+    card_id: str
+    answers: list[Answer] = Field(default_factory=list)
+    free_text: str = ""

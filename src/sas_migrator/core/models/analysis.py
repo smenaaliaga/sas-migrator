@@ -113,3 +113,23 @@ class Improvement(BaseModel):
     affected_nodes: list[str] = Field(default_factory=list)
     status: ImprovementStatus = ImprovementStatus.PROPOSED
     user_comment: str = ""
+
+
+# ── Resolución de placement (entrevista B4b, Etapa 3) ───────────────────────
+
+class PlacementResolution(BaseModel):
+    """Placement final de un nodo que el clasificador dejó ambiguous/hybrid,
+    decidido (o confirmado) por el usuario en el bloque B4b."""
+
+    node_id: str
+    placement: str  # sql_passthrough | sql_pushdown | pandas | hybrid | utility
+    reason: str = ""  # causa raíz que lo resolvió (p. ej. "prefijo SRC = BD")
+
+
+class PlacementDecisions(BaseModel):
+    """Artefacto ``state/placement_decisions.yaml`` — lo escribe código tras
+    B4b; el traductor (Etapa 4) lo consume como override del clasificador."""
+
+    decisions: list[PlacementResolution] = Field(default_factory=list)
+    confirmed_prefixes: list[str] = Field(default_factory=list)  # librefs que SÍ son BD
+    noise_prefixes: list[str] = Field(default_factory=list)  # falsos positivos (no BD)

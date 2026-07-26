@@ -1,27 +1,29 @@
 {
   "$defs": {
-    "Answer": {
-      "description": "User's answer to a question.",
+    "CardProgress": {
+      "description": "Posición de la tarjeta dentro de su bloque (para 'tarjeta 2 de 5').",
       "properties": {
-        "question_id": {
-          "title": "Question Id",
-          "type": "string"
+        "index": {
+          "title": "Index",
+          "type": "integer"
         },
-        "value": {
-          "title": "Value",
-          "type": "string"
-        },
-        "answered_at": {
-          "format": "date-time",
-          "title": "Answered At",
-          "type": "string"
+        "total": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Total"
         }
       },
       "required": [
-        "question_id",
-        "value"
+        "index"
       ],
-      "title": "Answer",
+      "title": "CardProgress",
       "type": "object"
     },
     "Question": {
@@ -88,44 +90,6 @@
       "title": "Question",
       "type": "object"
     },
-    "QuestionBlock": {
-      "description": "A thematic group of questions within an interview.",
-      "properties": {
-        "block_id": {
-          "title": "Block Id",
-          "type": "string"
-        },
-        "title": {
-          "title": "Title",
-          "type": "string"
-        },
-        "description": {
-          "default": "",
-          "title": "Description",
-          "type": "string"
-        },
-        "questions": {
-          "items": {
-            "$ref": "#/$defs/Question"
-          },
-          "title": "Questions",
-          "type": "array"
-        },
-        "answers": {
-          "items": {
-            "$ref": "#/$defs/Answer"
-          },
-          "title": "Answers",
-          "type": "array"
-        }
-      },
-      "required": [
-        "block_id",
-        "title"
-      ],
-      "title": "QuestionBlock",
-      "type": "object"
-    },
     "QuestionType": {
       "enum": [
         "free_text",
@@ -138,8 +102,12 @@
       "type": "string"
     }
   },
-  "description": "Complete interview (initial or post-analysis).",
+  "description": "Payload tipado de UNA llamada a ``interrupt()``.\n\nEs la unidad de conversación del UX lean: 1..n preguntas presentadas\njuntas, con default recomendado y evidencia por pregunta. Sin timestamps\npor diseño: el replay del nodo debe producir bytes idénticos.",
   "properties": {
+    "card_id": {
+      "title": "Card Id",
+      "type": "string"
+    },
     "interview_type": {
       "title": "Interview Type",
       "type": "string"
@@ -148,30 +116,34 @@
       "title": "Phase",
       "type": "integer"
     },
-    "blocks": {
+    "block_id": {
+      "title": "Block Id",
+      "type": "string"
+    },
+    "title": {
+      "title": "Title",
+      "type": "string"
+    },
+    "transition": {
+      "default": "",
+      "title": "Transition",
+      "type": "string"
+    },
+    "questions": {
       "items": {
-        "$ref": "#/$defs/QuestionBlock"
+        "$ref": "#/$defs/Question"
       },
-      "title": "Blocks",
+      "title": "Questions",
       "type": "array"
     },
-    "started_at": {
-      "anyOf": [
-        {
-          "format": "date-time",
-          "type": "string"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null,
-      "title": "Started At"
+    "allow_free_text": {
+      "default": true,
+      "title": "Allow Free Text",
+      "type": "boolean"
     },
-    "completed_at": {
+    "validation_error": {
       "anyOf": [
         {
-          "format": "date-time",
           "type": "string"
         },
         {
@@ -179,13 +151,27 @@
         }
       ],
       "default": null,
-      "title": "Completed At"
+      "title": "Validation Error"
+    },
+    "progress": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/CardProgress"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     }
   },
   "required": [
+    "card_id",
     "interview_type",
-    "phase"
+    "phase",
+    "block_id",
+    "title"
   ],
-  "title": "InterviewQA",
+  "title": "InterviewCard",
   "type": "object"
 }

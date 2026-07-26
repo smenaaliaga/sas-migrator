@@ -1,0 +1,52 @@
+{
+  "$defs": {
+    "Answer": {
+      "description": "User's answer to a question.",
+      "properties": {
+        "question_id": {
+          "title": "Question Id",
+          "type": "string"
+        },
+        "value": {
+          "title": "Value",
+          "type": "string"
+        },
+        "answered_at": {
+          "format": "date-time",
+          "title": "Answered At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "question_id",
+        "value"
+      ],
+      "title": "Answer",
+      "type": "object"
+    }
+  },
+  "description": "Valor esperado en ``Command(resume=...)`` para una tarjeta.",
+  "properties": {
+    "card_id": {
+      "title": "Card Id",
+      "type": "string"
+    },
+    "answers": {
+      "items": {
+        "$ref": "#/$defs/Answer"
+      },
+      "title": "Answers",
+      "type": "array"
+    },
+    "free_text": {
+      "default": "",
+      "title": "Free Text",
+      "type": "string"
+    }
+  },
+  "required": [
+    "card_id"
+  ],
+  "title": "CardAnswers",
+  "type": "object"
+}

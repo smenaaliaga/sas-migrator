@@ -60,6 +60,25 @@
           "default": "",
           "title": "Context",
           "type": "string"
+        },
+        "recommended_default": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Recommended Default"
+        },
+        "evidence": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Evidence",
+          "type": "array"
         }
       },
       "required": [
