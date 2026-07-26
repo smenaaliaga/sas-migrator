@@ -12,22 +12,19 @@ import pytest
 import yaml
 
 from sas_migrator.core.analysis import ledger
-from sas_migrator.core.models.analysis import Improvement
-from sas_migrator.core.models.translation import NodeTranslation, Traceability
+from sas_migrator.core.models.translation import NodeTranslation
 from sas_migrator.core.utils.needs_human import unresolved
 from sas_migrator.core.utils.schema_validation import check_gate
 from sas_migrator.graph.builder import build_graph, initial_state
 from sas_migrator.llm import phases, runtime
-from sas_migrator.llm.contracts import (
-    CategoryVerdict,
-    FileMappingBatch,
-    ImprovementsOut,
-    NodeReviewNote,
-    PfdAnalysisOut,
-)
+from sas_migrator.llm.contracts import FileMappingBatch
 from sas_migrator.llm.errors import NeedsHuman
 from sas_migrator.llm.fake import FakeCaller
 from sas_migrator.testing.egp_builder import build_egp
+from sas_migrator.testing.fake_llm import _header
+from sas_migrator.testing.fake_llm import fake_improvements as _improvements_fake
+from sas_migrator.testing.fake_llm import fake_reviews as _reviews_fake
+from sas_migrator.testing.fake_llm import fake_translation as _translation_fake
 
 
 @pytest.fixture(autouse=True)
@@ -56,58 +53,6 @@ def ws(stub_ws: Path, tmp_path: Path) -> Path:
     return dst
 
 
-def _header(user: str) -> dict:
-    return json.loads(user.splitlines()[0])
-
-
-def _reviews_fake(user: str) -> PfdAnalysisOut:
-    head = _header(user)
-    return PfdAnalysisOut(
-        pfd_id=head["pfd_id"],
-        flow_description="Consolida ventas regionales para reportes mensuales.",
-        reviews=[
-            NodeReviewNote(
-                node_id=nid,
-                note=f"{nid}: transforma ventas del flujo; riesgo bajo de traducción.",
-            )
-            for nid in head["node_ids"]
-        ],
-    )
-
-
-def _improvements_fake(user: str) -> ImprovementsOut:
-    head = _header(user)
-    return ImprovementsOut(
-        improvements=[
-            Improvement(
-                id="M-001", category="quality",
-                title="Explicitar columnas en SELECT",
-                description="Query-1 usa SELECT *.",
-                justification="code_smells.json: select_star en Query-1.",
-                impact="low", effort="low", risk="low",
-                recommendation="approve", affected_nodes=["Query-1"],
-            )
-        ],
-        category_scan=[
-            CategoryVerdict(category=c, verdict=f"1 ficha propuesta para {c}")
-            for c in head["smell_categories"]
-        ],
-    )
-
-
-def _translation_fake(user: str) -> NodeTranslation:
-    head = _header(user)
-    return NodeTranslation(
-        node_id=head["node_id"],
-        node_label=head["node_label"],
-        strategy=head["strategy"],
-        cells=[
-            "df = pd.DataFrame()\n"
-            "resultado = df.sort_values(list(df.columns)) if len(df.columns) else df\n"
-        ],
-        traceability=Traceability(sas_construct="PROC SQL", business_rule="consolida ventas"),
-        confidence="medium",
-    )
 
 
 # ── Fase 2 ──────────────────────────────────────────────────────────────────

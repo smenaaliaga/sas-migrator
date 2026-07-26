@@ -10,6 +10,16 @@ from sas_migrator.cli.render import default_card_answers
 from sas_migrator.mcp_server.server import build_tools
 from sas_migrator.service import MigrationSession
 from sas_migrator.testing.egp_builder import build_egp
+from sas_migrator.testing.fake_llm import default_fake_caller
+
+
+@pytest.fixture(autouse=True)
+def _fake_llm():
+    from sas_migrator.llm import runtime
+
+    runtime.set_caller(default_fake_caller())
+    yield
+    runtime.set_caller(None)
 
 
 def make_workspace(root: Path) -> Path:

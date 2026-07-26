@@ -41,7 +41,13 @@ class AnthropicCaller:
     """Caller real sobre el SDK oficial de Anthropic (messages.parse)."""
 
     def __init__(self, config: LlmConfig | None = None):
-        import anthropic  # lazy: solo quien construye el caller necesita el SDK
+        try:
+            import anthropic  # lazy: solo quien construye el caller necesita el SDK
+        except ModuleNotFoundError as exc:  # pragma: no cover - mensaje de instalación
+            raise RuntimeError(
+                "El modo LLM real requiere el extra 'llm': "
+                "pip install sas-migrator[llm] (y ANTHROPIC_API_KEY en el entorno)."
+            ) from exc
 
         self._anthropic = anthropic
         self._client = anthropic.Anthropic()

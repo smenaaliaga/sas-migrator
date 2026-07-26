@@ -11,12 +11,25 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
+import pytest
 import yaml
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import Command
 
 from sas_migrator.graph.builder import build_graph, initial_state
 from sas_migrator.testing.egp_builder import build_egp
+from sas_migrator.testing.fake_llm import default_fake_caller
+
+
+@pytest.fixture(autouse=True)
+def _fake_llm():
+    """stub_mode=False toma la rama LLM real (Etapa 4) — estos tests prueban
+    las entrevistas, así que el LLM va con el caller fake determinista."""
+    from sas_migrator.llm import runtime
+
+    runtime.set_caller(default_fake_caller())
+    yield
+    runtime.set_caller(None)
 
 
 def make_workspace(root: Path) -> tuple[Path, Path]:
