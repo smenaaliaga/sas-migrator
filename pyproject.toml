@@ -37,6 +37,9 @@ notebook = [
 cli = [
     "typer>=0.12",
 ]
+mcp = [
+    "mcp>=1.2",
+]
 dev = [
     "pytest>=8.0",
     "pytest-cov>=4.0",
