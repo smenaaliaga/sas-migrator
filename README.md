@@ -37,12 +37,18 @@ D:\Projects\sas-migrator-v2\.venv\Scripts\sas-migrator.exe --help
 
 # 3. Global y aislado, disponible desde cualquier carpeta (recomendado)
 python -m pip install --user pipx
-pipx install --editable "D:\Projects\sas-migrator-v2[graph,cli,mcp,db,notebook,llm]"
+python -m pipx install --editable "D:\Projects\sas-migrator-v2[graph,cli,mcp,db,notebook,llm]"
 ```
 
-`--editable` en pipx mantiene el comando apuntando al repo: `git pull` y el
-comando queda actualizado, sin reinstalar. Solo hay que reinstalar si cambian
-los entry points de `pyproject.toml`.
+`python -m pipx`, no `pipx` a secas: `pip install --user` deja el ejecutable en
+`...\Roaming\Python\Python3xx\Scripts`, que no suele estar en el PATH. Como
+módulo funciona igual. (`python -m pipx ensurepath` lo agrega, pero para esto
+no hace falta: el comando instalado va a `~\.local\bin`, que pipx sí pone en el
+PATH.)
+
+`--editable` mantiene el comando apuntando al repo: `git pull` y el comando
+queda actualizado, sin reinstalar. Solo hay que reinstalar si cambian los entry
+points de `pyproject.toml` — o los extras que querés instalados.
 
 El workspace por defecto es el directorio actual, así que con el comando en el
 PATH lo habitual es pararse en la migración y omitir `--workspace`:
