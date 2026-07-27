@@ -318,3 +318,85 @@ def test_seeded_improvement_with_bad_category_raises(tmp_path):
     )
     with pytest.raises(ValidationError):
         _seeded_improvements(tmp_path)
+
+
+# ── Nodos grandes: truncar en silencio es peor que fallar ───────────────────
+
+def _state_con_nodo(tmp_path: Path, code: str) -> Path:
+    state = tmp_path / "state"
+    (state / "nodes").mkdir(parents=True)
+    (state / "nodes" / "N-1.json").write_text(
+        json.dumps({"code": code}), encoding="utf-8"
+    )
+    return state
+
+
+def test_node_code_no_trunca_nunca(tmp_path: Path) -> None:
+    """El recorte lo decide quien arma el prompt, no el lector del artefacto."""
+    from sas_migrator.llm import phases
+
+    state = _state_con_nodo(tmp_path, "x" * 500_000)
+    assert len(phases._node_code(state, "N-1")) == 500_000
+
+
+def test_extracto_de_analisis_declara_lo_que_omite(tmp_path: Path) -> None:
+    """Un modelo que no sabe que ve un extracto cree que el nodo termina ahí."""
+    from sas_migrator.llm import phases
+
+    state = _state_con_nodo(tmp_path, "y" * 1000)
+    extracto = phases._node_excerpt(state, "N-1", 400)
+    assert "EXTRACTO" in extracto and "600" in extracto and "1000" in extracto
+    # Bajo el límite no se anuncia nada.
+    assert "EXTRACTO" not in phases._node_excerpt(state, "N-1", 5000)
+
+
+def test_split_corta_entre_bloques_nunca_dentro_de_uno() -> None:
+    from sas_migrator.llm.phases import split_sas_blocks
+
+    code = (
+        "PROC SQL;\n  CREATE TABLE a AS SELECT * FROM x;\nQUIT;\n"
+        "DATA b;\n  SET a;\nRUN;\n"
+        "PROC SORT DATA=b;\n  BY z;\nRUN;\n"
+    )
+    trozos = split_sas_blocks(code, 60)
+    assert len(trozos) > 1
+    assert "".join(trozos) == code, "no se pierde ni se duplica una línea"
+    for t in trozos:
+        assert t.lstrip().upper().startswith(("PROC", "DATA")), t
+
+
+def test_bloque_indivisible_mas_grande_que_el_techo_no_se_parte() -> None:
+    """Sin corte honesto, el nodo va a needs_human — no se traduce a medias."""
+    from sas_migrator.llm.phases import split_sas_blocks
+
+    gigante = "PROC SQL;\n" + "  SELECT 1;\n" * 5000 + "QUIT;\n"
+    assert split_sas_blocks(gigante, 1000) == []
+
+
+def test_nodo_sin_corte_posible_bloquea_el_gate() -> None:
+    from sas_migrator.llm import phases
+    from sas_migrator.llm.errors import NeedsHuman
+
+    gigante = "PROC SQL;\n" + "  SELECT 1;\n" * 200_000 + "QUIT;\n"
+    with pytest.raises(NeedsHuman) as exc:
+        phases._translate_node(
+            None, system=[], target={"node_id": "N-1"}, code=gigante, db_aliases=[]
+        )
+    assert exc.value.reason == "node_code_too_large"
+
+
+def test_merge_conserva_orden_dedupea_imports_y_baja_la_confianza() -> None:
+    from sas_migrator.core.models.translation import Confidence, NodeTranslation
+    from sas_migrator.llm.phases import merge_translations
+
+    p1 = NodeTranslation(node_id="N", imports=["import pandas as pd"], cells=["a = 1\n"],
+                         confidence=Confidence.HIGH, warnings=["ojo con a"])
+    p2 = NodeTranslation(node_id="N", imports=["import pandas as pd", "import numpy as np"],
+                         cells=["b = a + 1\n"], confidence=Confidence.LOW)
+    merged = merge_translations([p1, p2])
+
+    assert merged.cells == ["a = 1\n", "b = a + 1\n"], "orden de ejecución del SAS"
+    assert merged.imports == ["import pandas as pd", "import numpy as np"]
+    assert merged.confidence == Confidence.LOW, "no más confiable que su peor tramo"
+    assert any("NODO PARTIDO" in w for w in merged.warnings)
+    assert any("[parte 1/2] ojo con a" == w for w in merged.warnings)

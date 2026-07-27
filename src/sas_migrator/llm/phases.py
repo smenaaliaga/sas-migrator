@@ -10,11 +10,12 @@ resto — nunca silencio, nunca un crash por contenido.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import yaml
 
-from sas_migrator.core.models.translation import NodeTranslation
+from sas_migrator.core.models.translation import Confidence, NodeTranslation
 from sas_migrator.core.utils.needs_human import record as record_needs_human
 from sas_migrator.llm import prompt_builder, runtime
 from sas_migrator.llm.contracts import (
@@ -26,7 +27,18 @@ from sas_migrator.llm.contracts import (
 )
 from sas_migrator.llm.errors import NeedsHuman
 
-MAX_CODE_CHARS = 20_000  # techo defensivo por nodo en los prompts
+# Techo de código SAS por llamada de traducción. Los modelos actuales tienen
+# ventana de 200k tokens: 120k chars ≈ 30k tokens dejan lugar de sobra para el
+# system, el plan y la respuesta. Un nodo más grande NO se corta — se parte por
+# frontera de PROC/DATA (ver `split_sas_blocks`) y, si ni así entra, va a
+# needs_human. Truncar en silencio produce traducciones que parecen completas
+# y cubren una fracción del nodo.
+MAX_CODE_CHARS = 120_000
+
+# En el prompt de ANÁLISIS entran todos los nodos de un PFD a la vez, y el
+# objetivo es revisar (clasificar, detectar mejoras), no reproducir el código.
+# Ahí sí se recorta, pero el recorte se anuncia dentro del prompt.
+ANALYSIS_EXCERPT_CHARS = 20_000
 
 
 def _load_json(path: Path):
@@ -63,10 +75,68 @@ def _seeded_improvements(state_dir: Path) -> list[dict]:
 
 
 def _node_code(state_dir: Path, node_id: str) -> str:
+    """Código SAS COMPLETO del nodo. Nunca recorta: la decisión de qué hacer
+    con un nodo que no entra en un prompt es de quien arma ese prompt."""
     path = state_dir / "nodes" / f"{node_id}.json"
     if not path.exists():
         return ""
-    return str(_load_json(path).get("code") or "")[:MAX_CODE_CHARS]
+    return str(_load_json(path).get("code") or "")
+
+
+def _node_excerpt(state_dir: Path, node_id: str, limit: int) -> str:
+    """Extracto para prompts de revisión, con el recorte declarado en el texto.
+
+    Un modelo que recibe código cortado sin avisar cree estar viendo el nodo
+    entero; si lo sabe, puede decirlo en su review.
+    """
+    code = _node_code(state_dir, node_id)
+    if len(code) <= limit:
+        return code
+    faltan = len(code) - limit
+    return (
+        f"{code[:limit]}\n"
+        f"/* ⚠ EXTRACTO: se omitieron {faltan} caracteres ({len(code)} en total). "
+        f"No concluyas que el nodo termina acá. */"
+    )
+
+
+# Frontera de bloque SAS: el inicio de un PROC/DATA de primer nivel. Cortar en
+# cualquier otro lado parte una sentencia al medio.
+_SAS_BLOCK_START = re.compile(r"^[ \t]*(?:PROC|DATA)\b", re.IGNORECASE | re.MULTILINE)
+
+
+def split_sas_blocks(code: str, limit: int) -> list[str]:
+    """Parte el código en trozos de ``<= limit`` cortando SOLO entre bloques.
+
+    Devuelve ``[]`` si un bloque individual ya excede el techo: en ese caso no
+    hay corte honesto posible y el nodo debe ir a needs_human, no traducirse a
+    medias.
+    """
+    if len(code) <= limit:
+        return [code] if code else []
+
+    cortes = [m.start() for m in _SAS_BLOCK_START.finditer(code)]
+    if not cortes or cortes[0] > limit:
+        return []  # ni el preámbulo entra: sin frontera utilizable
+    bloques = [
+        code[ini:fin]
+        for ini, fin in zip([0, *cortes], [*cortes, len(code)], strict=True)
+        if ini < fin
+    ]
+    if any(len(b) > limit for b in bloques):
+        return []  # un solo PROC/DATA más grande que el techo
+
+    trozos: list[str] = []
+    actual = ""
+    for bloque in bloques:
+        if actual and len(actual) + len(bloque) > limit:
+            trozos.append(actual)
+            actual = bloque
+        else:
+            actual += bloque
+    if actual:
+        trozos.append(actual)
+    return trozos
 
 
 # ── Fase 2: análisis (map por PFD + reduce de mejoras) ──────────────────────
@@ -94,7 +164,8 @@ def run_analysis(state_dir: Path, workspace: Path) -> dict:
         head = prompt_builder.header_line({"pfd_id": pfd_id, "node_ids": expected_ids})
         body = "\n\n".join(
             f"### {n['id']} — {n.get('label', '')} ({n.get('node_type', '?')})\n"
-            f"```sas\n{_node_code(state_dir, str(n['id']))}\n```"
+            "```sas\n"
+            f"{_node_excerpt(state_dir, str(n['id']), ANALYSIS_EXCERPT_CHARS)}\n```"
             for n in pfd_nodes
         )
         try:
@@ -242,6 +313,91 @@ def run_matching(state_dir: Path, workspace: Path) -> dict:
 
 # ── Fase 6: traducción por nodo + ensamblado ────────────────────────────────
 
+def merge_translations(partes: list[NodeTranslation]) -> NodeTranslation:
+    """Fusiona las traducciones de las partes de un nodo en una sola.
+
+    Las celdas se concatenan en orden (el orden de ejecución del SAS original);
+    los imports se deduplican conservando la primera aparición. La confianza es
+    la MÍNIMA de las partes: un nodo partido no es más confiable que su tramo
+    más dudoso.
+    """
+    if len(partes) == 1:
+        return partes[0]
+
+    base = partes[0]
+    imports: list[str] = []
+    for parte in partes:
+        for linea in parte.imports:
+            if linea not in imports:
+                imports.append(linea)
+
+    orden = [Confidence.LOW, Confidence.MEDIUM, Confidence.HIGH]
+    peor = min(partes, key=lambda p: orden.index(p.confidence)).confidence
+
+    warnings = [
+        f"NODO PARTIDO: se tradujo en {len(partes)} partes por tamaño; el corte "
+        "se hizo entre bloques PROC/DATA. Revisar que las variables compartidas "
+        "entre partes se sigan llamando igual."
+    ]
+    for i, parte in enumerate(partes, start=1):
+        warnings.extend(f"[parte {i}/{len(partes)}] {w}" for w in parte.warnings)
+
+    return base.model_copy(update={
+        "imports": imports,
+        "cells": [c for parte in partes for c in parte.cells],
+        "confidence": peor,
+        "warnings": warnings,
+    })
+
+
+def _translate_node(
+    caller, *, system: list[str], target: dict, code: str, db_aliases: list[str],
+    iteration_note: str | None = None,
+) -> NodeTranslation:
+    """Traduce un nodo, partiéndolo por bloques si no entra en un prompt.
+
+    Lanza ``NeedsHuman`` si el código no admite un corte honesto: mejor bloquear
+    el gate que entregar un notebook que cubre parte del nodo sin decirlo.
+    """
+    trozos = [code] if len(code) <= MAX_CODE_CHARS else split_sas_blocks(code, MAX_CODE_CHARS)
+    if not trozos:
+        raise NeedsHuman(
+            task="translation",
+            reason="node_code_too_large",
+            attempts=0,
+            detail=(
+                f"{len(code)} caracteres de SAS y ningún corte posible en frontera "
+                f"PROC/DATA bajo {MAX_CODE_CHARS}: hay un bloque indivisible más "
+                "grande que el techo. Partir el nodo a mano en el .egp o subir "
+                "MAX_CODE_CHARS."
+            ),
+        )
+
+    partes: list[NodeTranslation] = []
+    for i, trozo in enumerate(trozos, start=1):
+        nota = iteration_note
+        if len(trozos) > 1:
+            # El modelo debe saber que ve un tramo: si no, "completa" el código
+            # que no ve, o declara terminado un nodo que sigue.
+            aviso = (
+                f"Este es el tramo {i} de {len(trozos)} del nodo, cortado entre "
+                "bloques PROC/DATA. Traduce SOLO este tramo; los DataFrames que "
+                "vengan de tramos anteriores ya existen en el notebook y los "
+                "posteriores continúan después. No agregues imports repetidos ni "
+                "recrees tablas de otros tramos."
+            )
+            nota = f"{aviso}\n\n{nota}" if nota else aviso
+        partes.append(caller.call(
+            task="translation",
+            system_blocks=system,
+            user_content=prompt_builder.build_translation_user(
+                target, trozo, db_aliases, iteration_note=nota
+            ),
+            output_model=NodeTranslation,
+        ))
+    return merge_translations(partes)
+
+
 def run_translation(state_dir: Path, output_dir: Path, workspace: Path) -> dict:
     from sas_migrator.core.assembly.notebook import assemble_notebooks
 
@@ -270,15 +426,10 @@ def run_translation(state_dir: Path, output_dir: Path, workspace: Path) -> dict:
         nid = str(target.get("node_id"))
         if nid in translations:
             continue
-        user = prompt_builder.build_translation_user(
-            target, _node_code(state_dir, nid), db_aliases
-        )
         try:
-            nt = caller.call(
-                task="translation",
-                system_blocks=system,
-                user_content=user,
-                output_model=NodeTranslation,
+            nt = _translate_node(
+                caller, system=system, target=target,
+                code=_node_code(state_dir, nid), db_aliases=db_aliases,
             )
         except NeedsHuman as exc:
             record_needs_human(
@@ -348,14 +499,11 @@ def retranslate_nodes(
         target = targets_by_id.get(nid)
         if target is None:
             continue
-        user = prompt_builder.build_translation_user(
-            target, _node_code(state_dir, nid), db_aliases,
-            iteration_note=iteration_note,
-        )
         try:
-            nt = caller.call(
-                task="translation", system_blocks=system, user_content=user,
-                output_model=NodeTranslation,
+            nt = _translate_node(
+                caller, system=system, target=target,
+                code=_node_code(state_dir, nid), db_aliases=db_aliases,
+                iteration_note=iteration_note,
             )
         except NeedsHuman as exc:
             record_needs_human(
