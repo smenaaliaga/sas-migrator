@@ -161,3 +161,48 @@ def test_sas_replace_translated_as_delete_plus_append_is_clean(tmp_path, monkeyp
         "r.to_sql('RESUMEN', engine, if_exists='append', index=False)\n",
     )
     assert _semantic_details(tmp_path, monkeypatch) == []
+
+
+# ── dominio declarado: el traductor no puede cambiar el endpoint ─────────────
+
+_SAS_HTTP = (
+    'FILENAME resp TEMP;\n'
+    'PROC HTTP URL = "https://api.cliente.cl/ws?serie=X" METHOD = "get" OUT = resp; RUN;'
+)
+
+
+def _declare_domain(tmp_path: Path) -> None:
+    (tmp_path / "state" / "audit_heuristics.yaml").write_text(
+        "domain_markers: [api.cliente.cl]\n", encoding="utf-8"
+    )
+
+
+def test_http_to_declared_domain_is_clean(tmp_path, monkeypatch):
+    _write_pair(
+        tmp_path,
+        _SAS_HTTP,
+        'r = requests.get("https://api.cliente.cl/ws", params={"serie": "X"})\n',
+    )
+    _declare_domain(tmp_path)
+    assert _semantic_details(tmp_path, monkeypatch) == []
+
+
+def test_http_to_other_domain_is_flagged(tmp_path, monkeypatch):
+    _write_pair(
+        tmp_path,
+        _SAS_HTTP,
+        'r = requests.get("https://otro.endpoint.com/v2", params={"serie": "X"})\n',
+    )
+    _declare_domain(tmp_path)
+    details = _semantic_details(tmp_path, monkeypatch)
+    assert any("declared domain" in d for d in details), details
+
+
+def test_endpoint_rule_is_inert_without_declared_markers(tmp_path, monkeypatch):
+    """Sin domain_markers la regla no existe: no inventa hallazgos."""
+    _write_pair(
+        tmp_path,
+        _SAS_HTTP,
+        'r = requests.get("https://otro.endpoint.com/v2")\n',
+    )
+    assert _semantic_details(tmp_path, monkeypatch) == []

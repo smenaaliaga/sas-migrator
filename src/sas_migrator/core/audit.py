@@ -139,7 +139,7 @@ def find_features_sas(sas_code: str, heuristics: dict[str, list[str]]) -> dict[s
     low = sas_code.lower()
     return {
         "proc_http": bool(re.search(r"\bPROC\s+HTTP\b", sas_code, flags=re.IGNORECASE)),
-        "si3_url": any(marker in low for marker in heuristics["domain_markers"]),
+        "domain_marker": any(marker in low for marker in heuristics["domain_markers"]),
         "macro_user_pass": bool(re.search(r"&(user|password)\b", sas_code, flags=re.IGNORECASE)),
         "proc_import": bool(re.search(r"\bPROC\s+IMPORT\b", sas_code, flags=re.IGNORECASE)),
         # Semántica de escritura del SAS original (espejo, no invención):
@@ -162,6 +162,7 @@ def find_features_py(py_text: str, heuristics: dict[str, list[str]]) -> dict[str
     low = py_text.lower()
     return {
         "requests_like": ("requests." in low) or ("httpx." in low) or ("urllib" in low),
+        "domain_marker": any(marker in low for marker in heuristics["domain_markers"]),
         "env_secret": any(marker in low for marker in heuristics["env_secret_markers"]),
         "sql_si3": (
             any(marker in low for marker in heuristics["sql_engine_markers"])
@@ -452,6 +453,29 @@ def run_audit(state_dir: Path, output_dir: Path) -> int:
                 )
             )
 
+        # El SAS llama a un dominio declarado y el Python sí hace HTTP, pero a
+        # otro lado: el traductor cambió el endpoint. Solo aplica si el proyecto
+        # declaró domain_markers; sin marcadores la regla no existe.
+        if (
+            sas_f["domain_marker"]
+            and (py_f_cell["requests_like"] or py_f_nb["requests_like"])
+            and not (py_f_cell["domain_marker"] or py_f_nb["domain_marker"])
+        ):
+            issues.append(
+                Issue(
+                    severity="high",
+                    category="semantic",
+                    node_id=nid,
+                    node_label=node_label,
+                    notebook_path=nb_rel,
+                    detail=(
+                        "SAS node calls a declared domain (audit.domain_markers) "
+                        "but the Python HTTP call does not mention it — endpoint "
+                        "may have been changed or invented"
+                    ),
+                )
+            )
+
         if (
             sas_f["proc_http"]
             and (py_f_cell["sql_si3"] or py_f_nb["sql_si3"])
@@ -465,8 +489,8 @@ def run_audit(state_dir: Path, output_dir: Path) -> int:
                     node_label=node_label,
                     notebook_path=nb_rel,
                     detail=(
-                        "PROC HTTP appears to be replaced by SQL read of SI3.BCENTRAL "
-                        "(potential semantic drift)"
+                        "PROC HTTP appears to be replaced by a SQL read of a "
+                        "declared source (audit.sql_from_markers) — semantic drift"
                     ),
                 )
             )

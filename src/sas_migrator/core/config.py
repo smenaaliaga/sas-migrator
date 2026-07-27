@@ -10,6 +10,7 @@ BD) fallan con un error claro en vez de apuntar silenciosamente a infra ajena.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 
 import yaml
 from pydantic import BaseModel, Field
@@ -56,11 +57,29 @@ class LlmConfig(BaseModel):
     ``model`` va pineado (ID fijo, sin sufijo de fecha). Sin parámetros de
     sampling: los modelos actuales los removieron del API; el determinismo se
     persigue con structured outputs y prompts, no con temperature.
+
+    ``provider`` elige el backend: ``anthropic`` (API directa) o ``foundry``
+    (Claude servido por Microsoft Foundry / Azure AI Foundry). Las credenciales
+    NUNCA viven acá — este archivo se commitea. Van por entorno o ``.env``:
+    ``ANTHROPIC_API_KEY``, o ``ANTHROPIC_FOUNDRY_API_KEY`` para Foundry.
+    ``foundry_resource`` sí va acá: es el nombre del recurso de Azure
+    (``https://<resource>.services.ai.azure.com``), infraestructura, no secreto.
     """
 
+    provider: Literal["anthropic", "foundry"] = "anthropic"
     model: str = "claude-opus-5"
     max_tokens: int = 16000
     max_validation_retries: int = 3
+    # Cómo se obtiene el objeto estructurado:
+    #   native → output_config.format (structured outputs del API)
+    #   tool   → tool use no-strict + validación Pydantic local
+    #   auto   → native, con degradación a tool si el backend lo rechaza
+    # Los workspaces de Foundry sin structured_outputs habilitado necesitan
+    # `tool`; `auto` lo detecta solo, sin tocar config.
+    structured_mode: Literal["auto", "native", "tool"] = "auto"
+    # Solo para provider=foundry. Puede sobreescribirse por entorno con
+    # ANTHROPIC_FOUNDRY_RESOURCE (útil si dev/prod usan recursos distintos).
+    foundry_resource: str = ""
 
 
 class ParserConfig(BaseModel):

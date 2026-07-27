@@ -37,6 +37,31 @@ def _dump_json(path: Path, data) -> None:
     path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
+def _seeded_improvements(state_dir: Path) -> list[dict]:
+    """Fichas M-xxx escritas a mano en ``state/improvements_seed.yaml``.
+
+    La fase 2 sobrescribe improvements_proposed.yaml, así que una ficha que el
+    LLM no puede derivar de la evidencia (una decisión de arquitectura, p. ej.
+    usar un SDK oficial en vez de la llamada HTTP cruda) necesita esta puerta.
+    Se validan contra Improvement como cualquier otra y entran siempre como
+    ``proposed``: sembrar una ficha NO la aprueba, solo garantiza que la
+    entrevista B5 te la pregunte.
+    """
+    path = state_dir / "improvements_seed.yaml"
+    if not path.exists():
+        return []
+    from sas_migrator.core.models.analysis import Improvement
+
+    doc = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    seeded = []
+    for raw in doc.get("improvements", []):
+        if not isinstance(raw, dict):
+            continue
+        data = json.loads(Improvement.model_validate({**raw, "status": "proposed"}).model_dump_json())
+        seeded.append(data)
+    return seeded
+
+
 def _node_code(state_dir: Path, node_id: str) -> str:
     path = state_dir / "nodes" / f"{node_id}.json"
     if not path.exists():
@@ -101,7 +126,7 @@ def run_analysis(state_dir: Path, workspace: Path) -> dict:
 
     _dump_json(summary_path, summary)
 
-    # Reduce: fichas M-xxx desde la evidencia.
+    # Reduce: fichas M-xxx desde la evidencia (más las sembradas a mano).
     evidence = _load_json(state_dir / "analysis_evidence.json")
     smells = _load_json(state_dir / "code_smells.json")
     smell_cats = sorted(
@@ -122,10 +147,13 @@ def run_analysis(state_dir: Path, workspace: Path) -> dict:
             user_content=user,
             output_model=ImprovementsOut,
         )
-        improvements = []
+        improvements = list(_seeded_improvements(state_dir))
+        seen = {str(i.get("id")) for i in improvements}
         for imp in out.improvements:
             data = json.loads(imp.model_dump_json())
             data["status"] = "proposed"  # la decisión es del usuario, siempre
+            if str(data.get("id")) in seen:  # una semilla con el mismo id manda
+                continue
             improvements.append(data)
         doc = {
             "improvements": improvements,
@@ -228,9 +256,20 @@ def run_translation(state_dir: Path, output_dir: Path, workspace: Path) -> dict:
         conns = yaml.safe_load(conns_path.read_text(encoding="utf-8")) or {}
         db_aliases = [str(c.get("alias", "")) for c in conns.get("connections", [])]
 
+    # Persistir cada traducción apenas se obtiene (no al final del loop): si el
+    # proceso muere a mitad de camino, retomar la corrida salta los nodos que
+    # ya tengan .json en disco en vez de perder todo el trabajo en memoria.
+    trans_dir = state_dir / "translations"
+    trans_dir.mkdir(exist_ok=True)
     translations: dict[str, NodeTranslation] = {}
+    for path in sorted(trans_dir.glob("*.json")):
+        nt = NodeTranslation.model_validate(_load_json(path))
+        translations[nt.node_id] = nt
+
     for target in plan.get("targets", []):
         nid = str(target.get("node_id"))
+        if nid in translations:
+            continue
         user = prompt_builder.build_translation_user(
             target, _node_code(state_dir, nid), db_aliases
         )
@@ -248,15 +287,10 @@ def run_translation(state_dir: Path, output_dir: Path, workspace: Path) -> dict:
             )
             continue
         # Identidad defensiva: el mapping se construye con los ids del PLAN.
-        translations[nid] = nt.model_copy(
+        nt = nt.model_copy(
             update={"node_id": nid, "node_label": target.get("node_label") or nid}
         )
-
-    # Persistir las traducciones: la iteración (Fase 9) re-traduce solo los
-    # nodos afectados y re-ensambla con el resto intacto.
-    trans_dir = state_dir / "translations"
-    trans_dir.mkdir(exist_ok=True)
-    for nid, nt in translations.items():
+        translations[nid] = nt
         _dump_json(trans_dir / f"{nid}.json", json.loads(nt.model_dump_json()))
 
     mapping, failures = assemble_notebooks(

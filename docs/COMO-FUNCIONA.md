@@ -186,6 +186,12 @@ qué librefs son BD (B4b), qué mejoras se aplican (M-xxx), aprobación del plan
 iteraciones. Toda pregunta llega como tarjeta con default recomendado y
 evidencia; "no sé" es respuesta válida.
 
+Una ficha M-xxx que el LLM no puede derivar de la evidencia (una decisión de
+arquitectura, p. ej. reemplazar una llamada HTTP cruda por el SDK oficial del
+proveedor) se siembra a mano en `state/improvements_seed.yaml`: se valida
+contra `Improvement`, se fusiona con las propuestas de la fase 2 y se pregunta
+en B5. Sembrar **no** aprueba — la ficha entra siempre como `proposed`.
+
 ---
 
 ## 5. Los estándares (y dónde vive cada uno)

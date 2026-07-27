@@ -163,6 +163,10 @@ def test_run_matching_without_profiles_skips_llm(ws: Path) -> None:
 
 def test_run_translation_passes_real_gate6(ws: Path) -> None:
     state = ws / "state"
+    # partir de cero: sin traducciones stub previas (run_translation ahora
+    # retoma desde lo que ya exista en disco, no debe confundirlas con
+    # traducciones reales).
+    shutil.rmtree(state / "translations", ignore_errors=True)
     runtime.set_caller(FakeCaller({"translation": _translation_fake}))
     counts = phases.run_translation(state, ws / "output", ws)
 
@@ -179,6 +183,7 @@ def test_run_translation_passes_real_gate6(ws: Path) -> None:
 
 def test_run_translation_failed_node_is_needs_human_and_gate_blocks(ws: Path) -> None:
     state = ws / "state"
+    shutil.rmtree(state / "translations", ignore_errors=True)
 
     def flaky(user: str) -> NodeTranslation:
         head = _header(user)
@@ -203,6 +208,7 @@ def test_run_translation_failed_node_is_needs_human_and_gate_blocks(ws: Path) ->
 
 def test_run_translation_static_failure_is_recorded(ws: Path) -> None:
     state = ws / "state"
+    shutil.rmtree(state / "translations", ignore_errors=True)
 
     def bad_code(user: str) -> NodeTranslation:
         nt = _translation_fake(user)
@@ -267,3 +273,48 @@ def test_full_pipeline_llm_fake_and_interviews(tmp_path: Path) -> None:
     assert {m["confidence"] for m in mapping["mappings"]} == {"medium"}, (
         "la traducción vino del caller fake, no del stub"
     )
+
+
+# ── semillas M-xxx (fichas que el LLM no puede derivar de la evidencia) ──────
+
+def test_seeded_improvements_absent_file_is_inert(tmp_path):
+    from sas_migrator.llm.phases import _seeded_improvements
+
+    assert _seeded_improvements(tmp_path) == []
+
+
+def test_seeded_improvement_is_validated_and_forced_to_proposed(tmp_path):
+    from sas_migrator.llm.phases import _seeded_improvements
+
+    (tmp_path / "improvements_seed.yaml").write_text(
+        "improvements:\n"
+        "  - id: M-901\n"
+        "    category: modernization\n"
+        "    title: Usar el SDK oficial\n"
+        "    description: d\n"
+        "    justification: j\n"
+        "    impact: medium\n"
+        "    effort: low\n"
+        "    risk: medium\n"
+        "    recommendation: Rechazar por ahora\n"
+        "    status: approved\n"          # sembrar no aprueba
+        "    affected_nodes: [CT-1]\n",
+        encoding="utf-8",
+    )
+    seeded = _seeded_improvements(tmp_path)
+    assert [i["id"] for i in seeded] == ["M-901"]
+    assert seeded[0]["status"] == "proposed"
+
+
+def test_seeded_improvement_with_bad_category_raises(tmp_path):
+    import pytest
+    from pydantic import ValidationError
+
+    from sas_migrator.llm.phases import _seeded_improvements
+
+    (tmp_path / "improvements_seed.yaml").write_text(
+        "improvements:\n  - id: M-902\n    category: inventada\n    title: t\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValidationError):
+        _seeded_improvements(tmp_path)

@@ -23,6 +23,18 @@ audit:
   # DataFrames cuya inicialización debe verificarse en runtime.
   runtime_df_checks: []
 
+llm:
+  # Backend de Claude: "anthropic" (API directa) o "foundry" (Azure AI Foundry).
+  provider: "anthropic"
+  model: "claude-opus-5"
+  max_tokens: 16000
+  max_validation_retries: 3
+  # Solo con provider=foundry: el <resource> de
+  # https://<resource>.services.ai.azure.com — infraestructura, no secreto.
+  foundry_resource: ""
+  # Las API keys NO van acá (este archivo se commitea): van en .env o en el
+  # entorno — ANTHROPIC_API_KEY / ANTHROPIC_FOUNDRY_API_KEY. Ver .env.example.
+
 parser:
   # Engines de BD adicionales a reconocer en LIBNAME (alias custom del
   # cliente que no están en la lista default de SAS/ACCESS).

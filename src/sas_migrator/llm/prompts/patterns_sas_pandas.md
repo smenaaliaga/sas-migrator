@@ -29,3 +29,6 @@
 | `COMPRESS/STRIP/UPCASE(s)` | `s.str.replace(" ", "")` / `s.str.strip()` / `s.str.upper()` |
 | `SUBSTR(s,i,n)` / `SCAN(s,n,sep)` | `s.str[i-1:i-1+n]` / `s.str.split(sep).str[n-1]` (SAS indexa desde 1) |
 | `%LET var = valor;` | variable Python al inicio de la celda con `# parámetro` |
+| `FILENAME resp TEMP; PROC HTTP URL="..." METHOD="get" OUT=resp;` | `r = requests.get(url, params={...}, timeout=30); r.raise_for_status()` — la URL literal del SAS se descompone en `params`, nunca se arma por f-string |
+| `LIBNAME lib json fileref=resp automap=create;` | `pd.json_normalize(r.json()[...])` — `automap` aplana el JSON; replicá la ruta de campos que el SAS lee después (`SUBSTR(indexdateString,...)`, etc.) |
+| URL con credenciales en macro vars (`&user`, `&password`) | `os.environ["..."]` — jamás el literal; el scanner de secretos rechaza el ensamblado |
