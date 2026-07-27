@@ -52,7 +52,7 @@ _SECRET_PATTERNS = (
 @dataclass
 class NodeAssemblyFailure:
     node_id: str
-    reason: str  # syntax_error | unresolvable_import | forbidden_pattern | strategy_mismatch | empty_translation | secret_detected
+    reason: str  # syntax_error | unresolvable_import | forbidden_pattern | strategy_mismatch | empty_translation | secret_detected | absolute_path
     detail: str
 
 
@@ -80,6 +80,29 @@ def _fstring_sql(tree: ast.AST) -> str | None:
             ).lower()
             if any(word in text for word in _SQL_WORDS):
                 return text[:120]
+    return None
+
+
+# Rutas absolutas literales (hardening): el SAS original vive lleno de rutas
+# de otro mundo (servidores SAS, unidades de red); el estándar de traducción
+# es ruta RELATIVA al workspace + warning. Se detecta sobre los strings del
+# AST — no sobre el fuente crudo — para no confundir comentarios ni regex.
+_ABS_PATH_PATTERNS = (
+    re.compile(r"^[A-Za-z]:[\\/]"),            # C:\... o C:/...
+    re.compile(r"^\\{1,2}[\w.$-]+\\"),         # \\servidor\share\... (o \raíz\...)
+    re.compile(r"^/(?:[\w.-]+/)+[\w.-]+"),     # /ruta/unix/con/segmentos
+)
+
+
+def _absolute_path_literal(tree: ast.AST) -> str | None:
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            text = node.value
+            if "://" in text:  # URLs y connection strings no son rutas de disco
+                continue
+            for pattern in _ABS_PATH_PATTERNS:
+                if pattern.match(text):
+                    return text
     return None
 
 
@@ -127,6 +150,13 @@ def check_node_translation(nt: NodeTranslation) -> NodeAssemblyFailure | None:
         if sql is not None:
             return NodeAssemblyFailure(
                 nt.node_id, "forbidden_pattern", f"SQL dinámico por f-string: {sql}"
+            )
+        path = _absolute_path_literal(tree)
+        if path is not None:
+            return NodeAssemblyFailure(
+                nt.node_id, "absolute_path",
+                f"ruta absoluta literal '{path[:60]}' — el estándar es ruta "
+                "relativa al workspace (declarar el cambio en warnings)",
             )
         roots |= _import_root_names(tree)
     for name in sorted(roots):

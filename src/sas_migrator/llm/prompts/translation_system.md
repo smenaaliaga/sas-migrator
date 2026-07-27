@@ -26,6 +26,10 @@ user te dice cuál aplica.
 - PROHIBIDO: `to_parquet`, `duckdb`, y SQL dinámico por f-string — el SQL va
   en strings literales con parámetros de sqlalchemy (`text(...)` con
   `:param`).
+- PROHIBIDO rutas absolutas literales (`C:\...`, `\\servidor\...`,
+  `/ruta/unix/...`): las rutas del SAS original se reemplazan por rutas
+  RELATIVAS al workspace con `pathlib` (`Path("salidas") / "x.csv"`),
+  declarando el cambio en `warnings`.
 - Macrovariables SAS (`&var`) → variables Python declaradas al inicio de la
   celda con un comentario `# parámetro`.
 - Escritura a BD idempotente por periodo: DELETE del periodo + INSERT

@@ -150,3 +150,27 @@ def test_secret_api_key_and_token_fail() -> None:
 def test_secret_env_lookup_is_fine() -> None:
     ok = _nt("A", ["import os\npwd = os.environ.get('DB_PASSWORD')\nx = 1\n"])
     assert check_node_translation(ok) is None
+
+
+# ── Rutas absolutas (hardening) ─────────────────────────────────────────────
+
+def test_absolute_paths_fail() -> None:
+    for cell in (
+        'df = pd.read_csv("C:/datos/ventas.csv")\n',
+        'df = pd.read_csv(r"C:\datos\ventas.csv")\n',
+        'df.to_excel(r"\\\\srvarchivos\\publico\\salida.xlsx")\n',
+        'df = pd.read_sas("/BCCH/GEM_DCNI/Data/t_aj.sas7bdat")\n',
+    ):
+        failure = check_node_translation(_nt("A", [cell]))
+        assert failure is not None and failure.reason == "absolute_path", cell
+
+
+def test_relative_paths_urls_and_formats_are_fine() -> None:
+    ok = _nt("A", [
+        'from pathlib import Path\n'
+        'salida = Path("salidas") / "resumen.csv"\n'
+        'df.to_csv(salida, index=False)\n'
+        'fecha = x.strftime("%d/%m/%Y")\n'
+        'api = "https://api.ejemplo.cl/v1/datos"\n',
+    ])
+    assert check_node_translation(ok) is None
