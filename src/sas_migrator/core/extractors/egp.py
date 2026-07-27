@@ -4,6 +4,8 @@ The .egp format (SAS EG 7.1+) is a ZIP archive containing:
 - project.xml (UTF-16): project metadata, elements, PFD (Process Flow Diagrams), dependencies
 - CodeTask-<id>/code.sas: SAS source code for each code task
 - Query-<id>/...: generated SQL for query builder tasks
+- Query-<id>/Log-<id>/result.log: log de la última ejecución, con el SQL que EG
+  generó — la única fuente del código de un Query Builder que no dejó payload
 - ImportTask-<id>/...: import task metadata
 """
 
@@ -114,6 +116,108 @@ def _extract_datasets(code: str) -> tuple[list[str], list[str], list[str]]:
         sorted({f"{r.libref}.{r.table}" for r in parse.outputs}),
         sorted(parse.librefs_declared),
     )
+
+
+# ── Query Builder: recuperar el SQL desde el log de ejecución ───────────────
+
+# Líneas de código fuente en un log de EG: 's', el número de línea y el texto
+# original alineado a una columna fija. Los demás prefijos ('n' nota, 'w', 'e',
+# 't' título) son salida del runtime, no código.
+_LOG_SOURCE_LINE = re.compile(r"^s\s+\d+")
+_PROC_SQL_BLOCK = re.compile(r"^\s*PROC SQL;.*?^\s*QUIT;", re.DOTALL | re.IGNORECASE | re.MULTILINE)
+
+
+def _sas_from_eg_log(log_text: str) -> str:
+    """Reconstruye el código fuente que EG ejecutó, desde su log.
+
+    El log intercala fuente y salida del runtime; solo las líneas 's' son
+    código. El texto original empieza en una columna fija (el ancho del campo
+    de numeración), que se deduce de la línea menos indentada para no comerse
+    la indentación real del SQL.
+    """
+    starts: list[tuple[str, int]] = []
+    for raw in log_text.splitlines():
+        line = raw.rstrip("\r")
+        match = _LOG_SOURCE_LINE.match(line)
+        if match is None:
+            continue
+        rest = line[match.end():]
+        starts.append((line, match.end() + (len(rest) - len(rest.lstrip(" ")))))
+    if not starts:
+        return ""
+    column = min(col for _line, col in starts)
+    return "\n".join(line[column:] for line, _col in starts)
+
+
+def _read_query_log(zf: zipfile.ZipFile, q_id: str, warnings: list[str]) -> str:
+    """Texto del log de ejecución de un Query, o cadena vacía si no hay.
+
+    Se queda con el log más largo cuando hay varios: EG conserva uno por
+    corrida y el más extenso es el que llegó a emitir el SQL completo.
+    """
+    prefix = f"{q_id}/"
+    entries = [
+        n for n in zf.namelist()
+        if n.startswith(prefix) and n.endswith("/result.log") and "/Log-" in n
+    ]
+    best = ""
+    for entry in entries:
+        try:
+            raw = zf.read(entry)
+        except Exception as exc:
+            warnings.append(f"No se pudo leer {entry}: {exc}")
+            continue
+        for encoding in ("utf-8-sig", "utf-8", "latin-1"):
+            try:
+                text = raw.decode(encoding)
+                break
+            except UnicodeDecodeError:
+                continue
+        else:  # pragma: no cover - latin-1 nunca falla
+            continue
+        if len(text) > len(best):
+            best = text
+    return best
+
+
+def _query_sql_from_log(code: str) -> str:
+    """Los bloques ``PROC SQL; … QUIT;`` de un Query Builder, sin el andamiaje.
+
+    Un log de Query trae además el preámbulo que EG inyecta en toda tarea
+    (ODS, %LET _CLIENT*, GOPTIONS). Ese ruido no es del nodo: mantenerlo haría
+    que el traductor migre configuración de Enterprise Guide como si fuera
+    lógica de negocio.
+    """
+    blocks = _PROC_SQL_BLOCK.findall(code)
+    return "\n\n".join(b.strip() for b in blocks)
+
+
+def _mark_preview_queries(nodes: list[SASNode]) -> None:
+    """Marca los Query Builder que solo sirvieron para mirar datos.
+
+    Enterprise Guide nombra ``WORK.QUERY_FOR_<origen>`` la salida de una
+    consulta armada para inspeccionar un dataset. Si además nadie lee esa
+    tabla, el nodo no aporta nada al proceso: es exploración del analista que
+    quedó guardada en el .egp.
+
+    La distinción importa porque el criterio NO es el prefijo del nombre sino
+    quién consume la salida: una consulta que escribe en una librería
+    permanente es un entregable aunque nada dentro del .egp la lea.
+    """
+    consumed: set[str] = set()
+    for node in nodes:
+        consumed.update(ref.upper() for ref in node.inputs)
+
+    for node in nodes:
+        if node.node_type is not NodeType.QUERY or not node.outputs:
+            continue
+        temporales = all(o.upper().startswith("WORK.") for o in node.outputs)
+        autogenerados = all("QUERY_FOR_" in o.upper() for o in node.outputs)
+        if temporales and autogenerados and not any(o.upper() in consumed for o in node.outputs):
+            node.metadata["query_preview"] = True
+            # Sigue necesitando decisión humana, pero informada: la tarjeta
+            # muestra el SQL y recomienda excluir.
+            node.metadata["requires_manual_review"] = True
 
 
 # ── Process Flow inventory ──────────────────────────────────────────────────
@@ -438,9 +542,29 @@ def extract_egp(egp_path: str | Path, output_dir: str | Path | None = None) -> F
             pfd_label = pfds.get(pfd_id, "")
 
             code = code_sas_map.get(q_id, "")
+            code_source = "payload" if code else ""
+            if not code:
+                # Sin payload, el SQL generado sobrevive en el log de la última
+                # ejecución. Es la única fuente: sin esto el nodo llega a la
+                # entrevista como una caja negra que el usuario debe describir
+                # de memoria.
+                recovered = _query_sql_from_log(
+                    _sas_from_eg_log(_read_query_log(zf, q_id, warnings))
+                )
+                if recovered:
+                    code = recovered
+                    code_source = "eg_log"
+
             if code:
                 inputs, outputs, libraries = _extract_datasets(code)
-                metadata = {"sas_constructs": _detect_constructs(code)}
+                metadata = {
+                    "sas_constructs": _detect_constructs(code),
+                    "code_source": code_source,
+                }
+                if code_source == "eg_log":
+                    # Procedencia explícita: el log refleja la ÚLTIMA corrida.
+                    # Si la consulta se editó después, el SQL está desfasado.
+                    metadata["code_from_last_run"] = True
             else:
                 inputs, outputs, libraries = [], [], []
                 queries_without_payload.append(q_id)
@@ -485,6 +609,8 @@ def extract_egp(egp_path: str | Path, output_dir: str | Path | None = None) -> F
             )
             nodes.append(node)
             node_ids_seen.add(t_id)
+
+        _mark_preview_queries(nodes)
 
         # ── Build edges from PFD Dependencies ──────────────────────────
         # Toda arista descartada queda registrada en el residuo con su razón:

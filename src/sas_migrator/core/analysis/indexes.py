@@ -175,6 +175,10 @@ def main() -> None:
             # aquí por nombre para decidir su destino una por una.
             "native_task": bool(meta.get("native_task", False)),
             "requires_manual_review": bool(meta.get("requires_manual_review", False)),
+            # Query Builder de inspección: tiene SQL, pero su salida no la lee
+            # nadie. La entrevista lo pregunta con el SQL a la vista.
+            "query_preview": bool(meta.get("query_preview", False)),
+            "code_source": meta.get("code_source", ""),
             "flags": {
                 "has_db": bool(refs),
                 "has_macro": "&" in code or "%MACRO" in upper,

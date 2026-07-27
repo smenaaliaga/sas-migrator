@@ -243,33 +243,67 @@ def build_native_node_cards(state_dir: Path) -> list[InterviewCard]:
     cards: list[InterviewCard] = []
     for i, n in enumerate(sorted(natives, key=lambda x: x["id"]), start=1):
         label = n.get("label") or n["id"]
+        flujo = n.get("pfd_label") or n.get("pfd_id") or "?"
+        if n.get("query_preview"):
+            title = f"Consulta de inspección: {label}"
+            text = (
+                f"El nodo '{label}' ({n['id']}) es una consulta que Enterprise "
+                "Guide armó para mirar datos: su salida no la lee ningún otro "
+                "nodo. ¿La excluimos, o la traducimos igual?"
+            )
+            default = "Excluir de la migración"
+            evidence = [
+                f"nodes_index.json: {n['id']} — flujo {flujo}",
+                "su salida no es entrada de ningún nodo: excluirla no corta la cadena",
+                *_query_sql_evidence(state_dir, n["id"]),
+            ]
+        else:
+            title = f"Tarea nativa de EG: {label}"
+            text = (
+                f"El nodo '{label}' ({n['id']}) es una tarea de Enterprise "
+                "Guide sin código SAS extraíble. ¿Lo excluimos, o lo "
+                "traducimos a mano con tu descripción de lo que hace?"
+            )
+            default = "Traducir a mano"
+            evidence = [
+                f"nodes_index.json: {n['id']} — tipo {n.get('node_type', '?')}, "
+                f"flujo {flujo}",
+                "el extractor no encontró código; excluirlo pierde el paso",
+            ]
         cards.append(
             _card(
                 f"B2-scope:native:{n['id']}",
                 "B2-scope",
-                f"Tarea nativa de EG: {label}",
+                title,
                 questions=[
                     Question(
                         id=f"Q-B2-4-{n['id']}",
-                        text=(
-                            f"El nodo '{label}' ({n['id']}) es una tarea de Enterprise "
-                            "Guide sin código SAS extraíble. ¿Lo excluimos, o lo "
-                            "traducimos a mano con tu descripción de lo que hace?"
-                        ),
+                        text=text,
                         question_type=QuestionType.SINGLE_CHOICE,
                         options=list(NATIVE_OPTIONS),
-                        recommended_default="Traducir a mano",
-                        evidence=[
-                            f"nodes_index.json: {n['id']} — tipo {n.get('node_type', '?')}, "
-                            f"flujo {n.get('pfd_label') or n.get('pfd_id') or '?'}",
-                            "el extractor no encontró código; excluirlo pierde el paso",
-                        ],
+                        recommended_default=default,
+                        evidence=evidence,
                     )
                 ],
                 progress=CardProgress(index=i, total=len(natives)),
             )
         )
     return cards
+
+
+def _query_sql_evidence(state_dir: Path, node_id: str, max_lines: int = 6) -> list[str]:
+    """Primeras líneas del SQL del nodo — decidir a ciegas no es decidir."""
+    node = load_json(Path(state_dir) / "nodes" / f"{node_id}.json") or {}
+    code = (node.get("code") or "").strip()
+    if not code:
+        return []
+    lines = [ln.strip() for ln in code.splitlines() if ln.strip()]
+    shown = [f"SQL: {ln}" for ln in lines[:max_lines]]
+    if len(lines) > max_lines:
+        shown.append(f"SQL: … (+{len(lines) - max_lines} líneas)")
+    if node.get("metadata", {}).get("code_from_last_run"):
+        shown.append("SQL recuperado del log de la ÚLTIMA ejecución en EG")
+    return shown
 
 
 # ── B3: pre-procesamiento ───────────────────────────────────────────────────

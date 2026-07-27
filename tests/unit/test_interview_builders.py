@@ -110,3 +110,53 @@ def test_low_confidence_mapping_becomes_pending_question(tmp_path: Path) -> None
     assert "Q-B1M-1" in ids and "Q-B1M-2" in ids
     low_q = next(q for q in card.questions if q.id == "Q-B1M-2")
     assert low_q.required is False, "los matches de baja confianza no bloquean"
+
+
+def test_query_de_inspeccion_pregunta_con_el_sql_y_recomienda_excluir(
+    tmp_path: Path,
+) -> None:
+    """Decidir sobre una consulta exige ver su SQL, no solo su ID."""
+    state = _state(
+        tmp_path,
+        nodes_index={
+            "nodes": [
+                {
+                    "id": "Query-1",
+                    "label": "Query Builder 3",
+                    "node_type": "QUERY",
+                    "pfd_label": "Salidas",
+                    "requires_manual_review": True,
+                    "query_preview": True,
+                },
+                {
+                    "id": "ImportTask-1",
+                    "label": "Importar Excel",
+                    "node_type": "IMPORT",
+                    "native_task": True,
+                },
+            ]
+        },
+    )
+    (state / "nodes").mkdir()
+    (state / "nodes" / "Query-1.json").write_text(
+        json.dumps(
+            {
+                "code": "PROC SQL;\n  CREATE TABLE WORK.QUERY_FOR_X AS\n"
+                "  SELECT DISTINCT t1.REGION FROM SRC.C t1;\nQUIT;",
+                "metadata": {"code_from_last_run": True},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    cards = post_analysis.build_native_node_cards(state)
+    preview = next(c for c in cards if c.card_id.endswith("Query-1"))
+    question = preview.questions[0]
+    assert question.recommended_default == "Excluir de la migración"
+    assert any("CREATE TABLE WORK.QUERY_FOR_X" in e for e in question.evidence)
+    assert any("ÚLTIMA ejecución" in e for e in question.evidence)
+
+    # La tarea nativa sin código conserva su default opuesto: excluirla pierde
+    # un paso que nadie puede reconstruir.
+    nativa = next(c for c in cards if c.card_id.endswith("ImportTask-1"))
+    assert nativa.questions[0].recommended_default == "Traducir a mano"

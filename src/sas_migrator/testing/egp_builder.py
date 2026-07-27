@@ -40,6 +40,26 @@ proc sql;
 quit;
 """
 
+# Log de ejecución de un Query Builder tal como lo escribe EG: prefijo de tipo
+# ('s' fuente, 'n' nota, 't' título), número de línea y el texto alineado a una
+# columna fija. Es la única fuente del SQL cuando la tarea no dejó payload, y
+# trae el preámbulo de EG (ODS/%LET) que NO es del nodo.
+QUERY_1_LOG = "\r\n".join([
+    "t11                          The SAS System                    10:38 Tuesday",
+    "t ",
+    "s 1          ;*';*\";*/;quit;run;",
+    "s 2          %LET _CLIENTTASKLABEL='Query Builder';",
+    "s 3          ODS _ALL_ CLOSE;",
+    "n NOTE: Writing TAGSETS.SASREPORT13(EGSR) Body file: EGSR",
+    "s 4          PROC SQL;",
+    "s 5             CREATE TABLE WORK.QUERY_FOR_CLIENTES AS",
+    "s 6             SELECT DISTINCT t1.REGION",
+    "s 7                FROM SRC.CLIENTES t1;",
+    "n NOTE: Table WORK.QUERY_FOR_CLIENTES created, with 12 rows and 1 columns.",
+    "s 8          QUIT;",
+    "s 9          ODS _ALL_ CLOSE;",
+])
+
 # CodeTask-3 (opcional, flag db_write_task): escribe a una tabla de BD real —
 # habilita el e2e contra una BD de prueba (verify + ejecución + cascada).
 CODE_TASK_3_SAS = """
@@ -84,6 +104,7 @@ def build_egp(
     codetask_without_file: bool = False,
     unknown_dependency: bool = False,
     db_write_task: bool = False,
+    query_log_only: bool = False,
 ) -> Path:
     """Construye un .egp sintético (ZIP + project.xml UTF-16) y devuelve su ruta.
 
@@ -93,6 +114,8 @@ def build_egp(
     - ``codetask_without_file``: declara ``CodeTask-3`` sin ``code.sas`` en el ZIP.
     - ``unknown_dependency``: agrega una dependencia hacia ``GhostTask-1``, un ID
       que no existe en ``<Elements>``.
+    - ``query_log_only``: ``Query-1`` sin payload pero con log de ejecución —
+      el caso real de un Query Builder armado en la GUI.
     """
     elements = [
         _element("PFD-1", "CONTAINER", "Flujo Principal"),
@@ -135,7 +158,11 @@ def build_egp(
         zf.writestr("project.xml", xml_text.encode("utf-16"))
         zf.writestr("CodeTask-1/code.sas", CODE_TASK_1_SAS)
         zf.writestr("CodeTask-2/code.sas", CODE_TASK_2_SAS)
-        if include_query_payload:
+        if query_log_only:
+            zf.writestr(
+                "Query-1/Log-abc/result.log", QUERY_1_LOG.encode("utf-8-sig")
+            )
+        elif include_query_payload:
             zf.writestr("Query-1/code.sas", QUERY_1_SAS)
         if db_write_task:
             zf.writestr("CodeTask-9/code.sas", CODE_TASK_3_SAS)

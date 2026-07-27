@@ -110,6 +110,46 @@ def test_query_without_payload_is_reported(synthetic_egp, tmp_path):
     assert residue["unexplained_count"] == 0
 
 
+def test_query_sin_payload_recupera_el_sql_del_log(synthetic_egp, tmp_path):
+    """El SQL que EG generó sobrevive en el log: es código, no una caja negra."""
+    out = tmp_path / "state"
+    graph = extract_egp(synthetic_egp(query_log_only=True), out)
+
+    node = _node(graph, "Query-1")
+    assert "CREATE TABLE WORK.QUERY_FOR_CLIENTES" in node.code
+    assert "SELECT DISTINCT t1.REGION" in node.code
+    assert node.metadata.get("code_source") == "eg_log"
+    # Procedencia visible: el log es de la última corrida, puede estar desfasado.
+    assert node.metadata.get("code_from_last_run") is True
+    # El andamiaje que EG inyecta en toda tarea no es lógica del nodo.
+    assert "ODS" not in node.code and "_CLIENTTASKLABEL" not in node.code
+    # Con código, el nodo deja de ser residuo y aporta su linaje.
+    residue = json.loads((out / "extraction_residue.json").read_text(encoding="utf-8"))
+    assert "Query-1" not in residue["queries_without_payload"]
+    assert node.inputs == ["SRC.CLIENTES"]
+
+
+def test_query_de_inspeccion_se_marca_pero_la_permanente_no(synthetic_egp, tmp_path):
+    """WORK.QUERY_FOR_* que nadie lee = exploración; a librería real = entregable."""
+    from sas_migrator.core.extractors.egp import _mark_preview_queries
+    from sas_migrator.core.models.graph import SASNode
+
+    graph = extract_egp(synthetic_egp(query_log_only=True), tmp_path / "state")
+    assert _node(graph, "Query-1").metadata.get("query_preview") is True
+
+    # Mismo patrón de nombre, pero su salida SÍ se consume → no es preview.
+    leida = SASNode(id="Query-2", label="q", node_type=NodeType.QUERY,
+                    outputs=["WORK.QUERY_FOR_X"])
+    lector = SASNode(id="CodeTask-8", label="c", node_type=NodeType.OTHER,
+                     inputs=["WORK.QUERY_FOR_X"])
+    # Salida a librería permanente → entregable aunque nadie la lea acá.
+    permanente = SASNode(id="Query-3", label="q", node_type=NodeType.QUERY,
+                         outputs=["TABLAS.T_INST_NF"])
+    _mark_preview_queries([leida, lector, permanente])
+    assert leida.metadata.get("query_preview") is not True
+    assert permanente.metadata.get("query_preview") is not True
+
+
 # ── Re-extracción: la topología se refresca, el análisis se conserva ────────
 
 def test_reextraction_preserves_node_enrichment(synthetic_egp, tmp_path):
