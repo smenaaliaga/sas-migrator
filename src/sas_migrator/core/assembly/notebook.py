@@ -188,6 +188,54 @@ def _canonical_nb_rel(notebook_path: str) -> str:
         else f"output/{name}"
 
 
+def _parameters_cell(nb_targets: list[dict], values: dict | None = None):
+    """Celda de parámetros del notebook, o None si el flujo no usa macro vars.
+
+    Las macro vars de SAS (``&ANIO``) se resuelven fuera del .egp —autoexec del
+    servidor, prompts de EG, la sesión del analista—, así que su valor no está
+    en ningún artefacto. Fijarlas como literal en medio del código convertiría
+    un proceso parametrizado por período en uno que solo sirve para un período.
+
+    Van arriba, en una celda con la tag ``parameters``: es la convención de
+    papermill, así que además quedan inyectables desde afuera sin editar el
+    notebook.
+    """
+    nombres = sorted({
+        str(v) for t in nb_targets for v in (t.get("macro_params") or []) if str(v).strip()
+    })
+    if not nombres:
+        return None
+
+    values = values or {}
+    lines = [
+        "# ========= Parámetros =========",
+        "# Variables macro del SAS original. El .egp NO las define (venían del",
+        "# entorno SAS): su valor sale de project_config.yaml → run.macro_params,",
+        "# o se inyecta acá (celda 'parameters' de papermill).",
+        "",
+    ]
+    lines.extend(
+        f"{name} = {values[name]!r}  # &{name}" if name in values
+        else f"{name} = None  # &{name} — sin declarar en run.macro_params"
+        for name in nombres
+    )
+    if any(name not in values for name in nombres):
+        # Fallar acá y con nombre propio: sin esto el None viaja hasta el filtro
+        # y revienta con un TypeError de pandas que no dice qué parámetro falta.
+        lines.append("")
+        lines.append(
+            "faltantes = [n for n, v in "
+            + "{" + ", ".join(f'"{n}": {n}' for n in nombres) + "}.items() if v is None]"
+        )
+        lines.append(
+            'if faltantes:\n'
+            '    raise ValueError(f"Parámetros sin valor: {faltantes}")'
+        )
+    cell = nbformat.v4.new_code_cell("\n".join(lines))
+    cell.metadata["tags"] = ["parameters"]
+    return cell
+
+
 def assemble_notebooks(
     plan: dict,
     translations: dict[str, NodeTranslation],
@@ -261,10 +309,11 @@ def assemble_notebooks(
             )
 
         nb = nbformat.v4.new_notebook()
-        cells = [
-            nbformat.v4.new_markdown_cell(f"# {title}"),
-            nbformat.v4.new_code_cell(config_source),
-        ]
+        cells = [nbformat.v4.new_markdown_cell(f"# {title}")]
+        params_cell = _parameters_cell(nb_targets, plan.get("macro_param_values"))
+        if params_cell is not None:
+            cells.append(params_cell)
+        cells.append(nbformat.v4.new_code_cell(config_source))
 
         for nt in valid:
             label = nt.node_label or nt.node_id

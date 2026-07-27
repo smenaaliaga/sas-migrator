@@ -35,6 +35,17 @@ llm:
   # Las API keys NO van acá (este archivo se commitea): van en .env o en el
   # entorno — ANTHROPIC_API_KEY / ANTHROPIC_FOUNDRY_API_KEY. Ver .env.example.
 
+run:
+  # Valores de las variables macro que el SAS heredaba del entorno (autoexec
+  # del servidor, prompts de EG) y que el .egp por lo tanto no define —
+  # típicamente el período de la corrida. Suben a la celda `parameters` de
+  # cada notebook que las use. Sin valor, el notebook falla al ejecutar
+  # diciendo cuál falta, en vez de correr con un período equivocado.
+  # Las credenciales (&user, &password) NO van acá: van a os.environ.
+  macro_params: {}
+  #  ANIO: 2024
+  #  TRIM: 4
+
 parser:
   # Engines de BD adicionales a reconocer en LIBNAME (alias custom del
   # cliente que no están en la lista default de SAS/ACCESS).

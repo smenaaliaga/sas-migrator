@@ -10,7 +10,7 @@ BD) fallan con un error claro en vez de apuntar silenciosamente a infra ajena.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, Field
@@ -95,6 +95,22 @@ class ParserConfig(BaseModel):
     ignore_db_engines: list[str] = Field(default_factory=list)
 
 
+class RunConfig(BaseModel):
+    """Valores de corrida: los parámetros con los que se ejecuta el proceso.
+
+    ``macro_params`` da valor a las variables macro que el SAS heredaba del
+    entorno (autoexec del servidor, prompts de EG) y que el .egp por lo tanto
+    no define — típicamente el período: ``{ANIO: 2024, TRIM: 4}``. Van acá y no
+    en el código porque cambian en cada corrida; la celda ``parameters`` del
+    notebook las expone para poder inyectarlas desde afuera.
+
+    Sin valor, el notebook falla al ejecutar diciendo cuál falta: correr un
+    proceso trimestral sin declarar el trimestre no es un default razonable.
+    """
+
+    macro_params: dict[str, Any] = Field(default_factory=dict)
+
+
 class ProjectConfig(BaseModel):
     """Raíz de project_config.yaml."""
 
@@ -102,6 +118,7 @@ class ProjectConfig(BaseModel):
     audit: AuditConfig = Field(default_factory=AuditConfig)
     parser: ParserConfig = Field(default_factory=ParserConfig)
     llm: LlmConfig = Field(default_factory=LlmConfig)
+    run: RunConfig = Field(default_factory=RunConfig)
 
 
 def load_project_config(workspace: Path | str | None = None) -> ProjectConfig:

@@ -6,6 +6,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from sas_migrator.core.assembly.notebook import (
     assemble_notebooks,
     check_node_translation,
@@ -184,3 +186,46 @@ def test_drop_table_and_replace_write_fail() -> None:
         _nt("A", ["df.to_sql('X', engine, if_exists='replace')\n"])
     )
     assert failure.reason == "forbidden_pattern" and "DDL" in failure.detail
+
+
+# ── Celda de parámetros: macro vars del SAS que el .egp no define ───────────
+
+def test_macro_vars_suben_a_celda_parameters_con_valor_del_proyecto() -> None:
+    from sas_migrator.core.assembly.notebook import _parameters_cell
+
+    cell = _parameters_cell(
+        [{"macro_params": ["ANIO", "TRIM"]}, {"macro_params": ["TRIM"]}],
+        {"ANIO": 2024, "TRIM": 4},
+    )
+    assert cell.metadata["tags"] == ["parameters"], "papermill inyecta por esta tag"
+    assert "ANIO = 2024" in cell.source and "TRIM = 4" in cell.source
+    # Todo declarado ⇒ nada que reclamar en runtime.
+    assert "raise ValueError" not in cell.source
+
+
+def test_macro_var_sin_valor_falla_al_ejecutar_diciendo_cual() -> None:
+    """Un proceso trimestral sin trimestre no tiene default razonable."""
+    from sas_migrator.core.assembly.notebook import _parameters_cell
+
+    cell = _parameters_cell([{"macro_params": ["ANIO", "TRIM"]}], {"ANIO": 2024})
+    assert "TRIM = None" in cell.source
+    assert "raise ValueError" in cell.source
+    ns: dict = {}
+    with pytest.raises(ValueError, match="TRIM"):
+        exec(cell.source, ns)  # noqa: S102 - se valida el código emitido
+
+
+def test_flujo_sin_macro_vars_no_lleva_celda_de_parametros() -> None:
+    from sas_migrator.core.assembly.notebook import _parameters_cell
+
+    assert _parameters_cell([{"macro_params": []}, {}]) is None
+
+
+def test_credenciales_nunca_llegan_a_los_parametros_del_notebook() -> None:
+    """El notebook se commitea: &user/&password van a os.environ, no acá."""
+    from sas_migrator.core.planning import is_credential_macro
+
+    for secreto in ("user", "password", "&PWD", "api_key", "auth_token", "MiSecret"):
+        assert is_credential_macro(secreto), secreto
+    for normal in ("ANIO", "TRIM", "Sector", "Entrada", "C_WTW"):
+        assert not is_credential_macro(normal), normal

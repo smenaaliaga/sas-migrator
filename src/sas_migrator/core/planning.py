@@ -116,6 +116,19 @@ def effective_placement(node_meta: dict, overrides: dict[str, str]) -> str | Non
     return overrides.get(nid) or node_meta.get("placement")
 
 
+# Fragmentos que delatan una macro var con credenciales. Estas NUNCA suben a
+# la celda de parámetros: el notebook se commitea y se comparte, así que su
+# destino es os.environ (misma regla que ya aplica el traductor y que el
+# scanner de secretos exige en el ensamblado).
+_CREDENTIAL_HINTS = ("user", "pass", "pwd", "uid", "token", "secret", "key", "cred", "auth")
+
+
+def is_credential_macro(variable: str) -> bool:
+    """¿La macro var parece una credencial? Ante la duda, sí."""
+    name = variable.strip().lstrip("&").lower()
+    return any(hint in name for hint in _CREDENTIAL_HINTS)
+
+
 def choose_strategy(placement: str | None) -> str:
     return STRATEGY_BY_PLACEMENT.get(placement or "", "pandas")
 
@@ -207,6 +220,30 @@ def build(state: Path) -> dict:
         if s and t:
             predecessors.setdefault(t, []).append(s)
 
+    # Variables macro por nodo: en SAS se resuelven fuera del .egp (autoexec,
+    # prompts de EG, sesión). En Python no hay equivalente, así que suben a una
+    # celda de parámetros del notebook en vez de quedar como literales pegados.
+    # Valores declarados por el proyecto (el .egp no los tiene: venían del
+    # entorno SAS). Las credenciales se filtran incluso si alguien las declaró
+    # acá por error — este archivo se commitea.
+    from sas_migrator.core.config import load_project_config
+
+    macro_param_values = {
+        str(k): v
+        for k, v in load_project_config(state.parent).run.macro_params.items()
+        if not is_credential_macro(str(k))
+    }
+
+    node_macro_params: dict[str, list[str]] = {}
+    for entry in as_list(load_artifact(state / "analysis_evidence.json"), "macro_variables"):
+        if not isinstance(entry, dict):
+            continue
+        var = str(entry.get("variable", "")).strip()
+        if not var or is_credential_macro(var):
+            continue  # las credenciales van a os.environ, nunca a un parámetro
+        for nid in entry.get("node_ids", []):
+            node_macro_params.setdefault(str(nid), []).append(var)
+
     # ── assemble targets, grouped by in-scope flow ──────────────────────────
     flows = as_list(flow_summary, "flows")
     targets: list[dict] = []
@@ -268,6 +305,7 @@ def build(state: Path) -> dict:
                 "approved_improvements": node_improvements.get(nid, []),
                 "preprocess_steps": node_preprocess.get(nid, []),
                 "dependencies": deps,
+                "macro_params": sorted(set(node_macro_params.get(nid, []))),
                 "notes": "",
             })
 
@@ -289,6 +327,10 @@ def build(state: Path) -> dict:
         "output_strategy": output_strategy,
         "generated_at": datetime.now(UTC).isoformat(),
         "targets": targets,
+        # Valores declarados para las macro vars (project_config.yaml → run).
+        # El plan los transporta para que el ensamblador escriba la celda de
+        # parámetros sin volver a leer config.
+        "macro_param_values": macro_param_values,
         "ignored_nodes": sorted(ignored),
         "global_improvements": global_improvements,
         "assumptions": assumptions,
