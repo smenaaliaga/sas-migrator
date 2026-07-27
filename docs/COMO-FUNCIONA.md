@@ -301,15 +301,22 @@ SASMIG_REAL_EGP=C:/ruta/proyecto.egp pytest tests/integration -q
 #   → nodos, flujos, residuo, nodos macro-dependientes → backlog JSON
 
 # Migración real (entrevistas + LLM + pausa antes de tocar la BD):
-sas-migrator run D:\Migraciones\mi_proyecto --no-stub
+sas-migrator run --workspace D:\Migraciones\mi_proyecto --no-stub
 
 # Estado / reanudar (checkpointer sqlite, sobrevive cortes):
-sas-migrator status D:\Migraciones\mi_proyecto
-sas-migrator resume D:\Migraciones\mi_proyecto
+sas-migrator status --workspace D:\Migraciones\mi_proyecto
+sas-migrator resume --workspace D:\Migraciones\mi_proyecto
+
+# Rehacer una fase desde cero (resume la continúa, rewind la reinicia):
+sas-migrator rewind --phase 6 --workspace D:\Migraciones\mi_proyecto
 
 # Conducirlo desde un chat (Claude Desktop, VS Code/Copilot — cualquier host MCP):
-sas-migrator serve D:\Migraciones\mi_proyecto
+sas-migrator serve --workspace D:\Migraciones\mi_proyecto
 ```
+
+Los tres frentes —CLI, MCP y `MigrationSession` en Python— son el mismo camino
+de ejecución: elegir frente cambia cómo se contestan las entrevistas, no qué
+corre. El README tiene la referencia completa de los tres.
 
 Requisitos para la corrida real: `ANTHROPIC_API_KEY` (o Claude vía Azure AI
 Foundry del trabajo), `db.default_server` en la config, y referencias en

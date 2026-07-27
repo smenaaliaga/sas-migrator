@@ -21,6 +21,21 @@ python -m venv .venv
 El extra `llm` (SDK de Anthropic) solo hace falta para corridas reales; los
 tests y el modo stub no lo usan.
 
+### Credenciales
+
+Qué backend se usa lo decide `project_config.yaml` → `llm.provider`; la
+credencial viene del entorno, nunca de la config. Copiar `.env.example` a
+`.env` y completar **solo** el bloque del proveedor que corresponda:
+
+| `llm.provider` | Variables |
+|---|---|
+| `anthropic` | `ANTHROPIC_API_KEY` |
+| `foundry` | `ANTHROPIC_FOUNDRY_API_KEY` + `ANTHROPIC_FOUNDRY_RESOURCE` (o `llm.foundry_resource` en la config, que no es secreto) |
+
+Precedencia: entorno del proceso > `<workspace>/.env` > `.env` de la raíz. Una
+corrida real además necesita `db.default_server` en la config (lo usa la fase 7
+para `verify_tables`) y referencias en `input/data/`.
+
 ## Estructura del workspace
 
 ```
@@ -36,34 +51,109 @@ mi_migracion/
 
 ## Uso
 
+Hay tres frentes y **uno solo** ejecuta: CLI y MCP son clientes delgados de
+`MigrationSession`, la misma sesión in-process. Elegir frente no cambia lo que
+corre, solo cómo se contestan las entrevistas.
+
 ### CLI
+
+`--workspace` es una opción, no un posicional; sin ella se usa el directorio
+actual.
 
 ```bash
 # Corrida completa (entrevistas interactivas en terminal)
-sas-migrator run mi_migracion --no-stub
+sas-migrator run --workspace mi_migracion --no-stub
 
 # Corrida determinista sin LLM ni entrevistas (CI, smoke test)
-sas-migrator run mi_migracion
+sas-migrator run --workspace mi_migracion
 
-# Reanudar donde quedó (checkpointer sqlite)
-sas-migrator resume mi_migracion
+# Reanudar donde quedó, incluida una entrevista a medio contestar
+sas-migrator resume --workspace mi_migracion
+
+# Rehacer una fase DESDE CERO (resume la continúa; rewind la reinicia)
+sas-migrator rewind --phase 6 --workspace mi_migracion
 
 # Estado de fases y gates
-sas-migrator status mi_migracion
+sas-migrator status --workspace mi_migracion
 
 # Iteración post-migración (Fase 9)
-sas-migrator iterate mi_migracion "corregir el redondeo de montos" --nodes CodeTask-3
+sas-migrator iterate --workspace mi_migracion \
+  --describe "corregir el redondeo de montos" --nodes CodeTask-3
+```
+
+`resume` vs `rewind`: las respuestas de entrevista viven en el checkpointer, no
+en `state/`. `resume` retoma donde iba; `rewind --phase N` descarta el tramo y
+vuelve a preguntar desde el inicio de la fase N (las fases anteriores no se
+recalculan: sus artefactos en `state/` quedan). `rewind` respalda el checkpoint
+en `.bak` salvo `--no-backup`.
+
+Cualquier corrida no interactiva (CI, replay de una migración) acepta un guion
+YAML de respuestas — con `default: recommended`, las tarjetas no listadas toman
+el camino recomendado:
+
+```bash
+sas-migrator run --workspace mi_migracion --no-stub --answers-file respuestas.yaml
+```
+
+```yaml
+default: recommended
+answers:
+  B2-scope:queries:                    # las consultas de inspección, todas juntas
+    Q-B2-4-Query-abc123: "Excluir de la migración"
+  B1-initial:
+    Q-001: "Síntesis mensual de cuentas nacionales"
 ```
 
 ### Chat (MCP)
 
 ```bash
-sas-migrator serve mi_migracion   # servidor MCP por stdio
+sas-migrator serve --workspace mi_migracion   # servidor MCP por stdio
 ```
 
-Tools: `start_migration`, `status`, `get_pending_question`, `answer`,
-`approve_plan`, `authorize_execution`, `iterate`. La ejecución de notebooks
-**siempre** exige autorización explícita (default recomendado: NO ejecutar).
+Un servidor por workspace. Tools: `start_migration`, `status`,
+`get_pending_question`, `answer`, `approve_plan`, `authorize_execution`,
+`iterate`. La ejecución de notebooks **siempre** exige autorización explícita
+(default recomendado: NO ejecutar).
+
+Es el frente que conviene para la entrevista post-análisis: las tarjetas llegan
+como JSON tipado (con el SQL de cada consulta en `context`) y se contestan en
+lenguaje natural en vez de tipear números. Para registrarlo en un host MCP:
+
+```json
+{
+  "mcpServers": {
+    "sas-migrator": {
+      "command": "D:/Projects/sas-migrator-v2/.venv/Scripts/sas-migrator.exe",
+      "args": ["serve", "--workspace", "D:/Migraciones/mi_proyecto"]
+    }
+  }
+}
+```
+
+`answer` toma la tarjeta entera de una: `card_id` más una lista
+`[{question_id, value}]`. Una tarjeta que agrupa N nodos —las consultas de
+Enterprise Guide— se responde en **una** llamada con N pares, no en N llamadas.
+
+### Python in-process
+
+Lo que envuelven los otros dos. Sirve para scriptear una corrida entera o
+inspeccionar el estado sin levantar nada:
+
+```python
+from pathlib import Path
+from sas_migrator.service import MigrationSession
+
+s = MigrationSession(Path("mi_migracion"))
+result = s.start(stub_mode=False)          # .resume() / .rewind_to_phase(6)
+while (card := s.pending()) is not None:
+    result = s.answer({
+        "card_id": card.card_id,
+        "answers": [{"question_id": q.id, "value": q.recommended_default}
+                    for q in card.questions],
+        "free_text": "",
+    })
+print(result.status, result.phase, result.gate_errors)
+```
 
 ## Fases y gates
 
