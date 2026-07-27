@@ -21,6 +21,38 @@ python -m venv .venv
 El extra `llm` (SDK de Anthropic) solo hace falta para corridas reales; los
 tests y el modo stub no lo usan.
 
+### Dejar `sas-migrator` a mano
+
+`pip install -e` deja el ejecutable en `.venv\Scripts\sas-migrator.exe`, que
+solo está en el PATH con el venv activo. Tres formas, de más simple a más
+cómoda:
+
+```powershell
+# 1. Activar el venv (por sesión de terminal)
+D:\Projects\sas-migrator-v2\.venv\Scripts\Activate.ps1
+sas-migrator --help
+
+# 2. Sin activar nada: ruta completa al exe (sirve en scripts y tareas)
+D:\Projects\sas-migrator-v2\.venv\Scripts\sas-migrator.exe --help
+
+# 3. Global y aislado, disponible desde cualquier carpeta (recomendado)
+python -m pip install --user pipx
+pipx install --editable "D:\Projects\sas-migrator-v2[graph,cli,mcp,db,notebook,llm]"
+```
+
+`--editable` en pipx mantiene el comando apuntando al repo: `git pull` y el
+comando queda actualizado, sin reinstalar. Solo hay que reinstalar si cambian
+los entry points de `pyproject.toml`.
+
+El workspace por defecto es el directorio actual, así que con el comando en el
+PATH lo habitual es pararse en la migración y omitir `--workspace`:
+
+```powershell
+cd D:\Migraciones\mi_proyecto
+sas-migrator run
+sas-migrator status
+```
+
 ### Credenciales
 
 Qué backend se usa lo decide `project_config.yaml` → `llm.provider`; la
@@ -57,15 +89,24 @@ corre, solo cómo se contestan las entrevistas.
 
 ### CLI
 
-`--workspace` es una opción, no un posicional; sin ella se usa el directorio
-actual.
+Seis comandos, y no hay más. `--workspace` es una opción, no un posicional;
+sin ella se usa el directorio actual.
+
+| Comando | Para qué |
+|---|---|
+| `run` | Corrida completa desde la fase 0 |
+| `resume` | Retomar donde quedó, incluida una entrevista a medio contestar |
+| `rewind` | Rehacer una fase desde cero |
+| `status` | Fase actual, gates y entrevista pendiente |
+| `iterate` | Iteración post-migración (fase 9) |
+| `serve` | Servidor MCP por stdio sobre el workspace |
 
 ```bash
-# Corrida completa (entrevistas interactivas en terminal)
-sas-migrator run --workspace mi_migracion --no-stub
+# Corrida real: entrevistas + LLM. Es el default — migrar no exige un flag.
+sas-migrator run --workspace mi_migracion
 
 # Corrida determinista sin LLM ni entrevistas (CI, smoke test)
-sas-migrator run --workspace mi_migracion
+sas-migrator run --workspace mi_migracion --stub
 
 # Reanudar donde quedó, incluida una entrevista a medio contestar
 sas-migrator resume --workspace mi_migracion
@@ -81,6 +122,10 @@ sas-migrator iterate --workspace mi_migracion \
   --describe "corregir el redondeo de montos" --nodes CodeTask-3
 ```
 
+`run` anuncia su modo en la primera línea (`▶ modo REAL` / `▶ modo STUB`) y se
+detiene en la primera pregunta de entrevista: una corrida arrancada por error
+no gasta más que las fases 0–1.
+
 `resume` vs `rewind`: las respuestas de entrevista viven en el checkpointer, no
 en `state/`. `resume` retoma donde iba; `rewind --phase N` descarta el tramo y
 vuelve a preguntar desde el inicio de la fase N (las fases anteriores no se
@@ -92,7 +137,7 @@ YAML de respuestas — con `default: recommended`, las tarjetas no listadas toma
 el camino recomendado:
 
 ```bash
-sas-migrator run --workspace mi_migracion --no-stub --answers-file respuestas.yaml
+sas-migrator run --workspace mi_migracion --answers-file respuestas.yaml
 ```
 
 ```yaml

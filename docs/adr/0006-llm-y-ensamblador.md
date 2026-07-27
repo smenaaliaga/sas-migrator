@@ -27,8 +27,11 @@
    (needs_human), jamás un notebook roto. El camino stub usa el MISMO
    ensamblador — CI y el golden de determinismo lo cubren siempre.
 4. **`stub_mode` gobierna un solo eje**: LLM stub vs real (fases 2/3/6) y
-   entrevistas stub vs reales (fases 1/4/5) van juntos. `--no-stub` = corrida
-   real completa; los tests inyectan `FakeCaller` vía `llm.runtime.set_caller`
+   entrevistas stub vs reales (fases 1/4/5) van juntos. La corrida real es el
+   default de los tres frentes y `--stub` la excepción de CI (al escribirse
+   este ADR la CLI usaba el flag inverso, `--no-stub`, y era la única de los
+   tres que arrancaba en stub); los tests inyectan `FakeCaller` vía
+   `llm.runtime.set_caller`
    (el FakeCaller valida cada respuesta contra el output_model — un fake que
    viola el contrato falla el test).
 5. **Dos tablas de patrones, un solo prefijo cacheado**: SAS→pandas y

@@ -49,7 +49,7 @@ dev = [
 ]
 
 [project.scripts]
-sas-migrator = "sas_migrator.cli.main:app"
+sas-migrator = "sas_migrator.cli.main:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/sas_migrator"]

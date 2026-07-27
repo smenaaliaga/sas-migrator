@@ -31,6 +31,18 @@ def _utf8_stdout() -> None:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 
+def main() -> None:
+    """Entry point de la consola — reconfigura stdout ANTES de que Click hable.
+
+    Hacerlo dentro de cada comando dejaba afuera lo primero que se tipea:
+    `sas-migrator --help` reventaba con UnicodeEncodeError en una consola
+    cp1252, porque la flecha del help del grupo se renderiza sin pasar por
+    ningún comando.
+    """
+    _utf8_stdout()
+    app()
+
+
 def _session(workspace: Path):
     from sas_migrator.service import MigrationSession
 
@@ -105,15 +117,26 @@ def run(
     workspace: Path = typer.Option(Path.cwd(), help="Raíz del workspace (input/, state/, output/)"),
     egp: Path = typer.Option(None, help="Ruta al .egp (default: único .egp en input/egp/)"),
     stub: bool = typer.Option(
-        True, help="Stubs deterministas (CI). --no-stub = entrevistas reales."
+        False, help="Stubs deterministas sin LLM ni entrevistas (CI, smoke test)."
     ),
     answers_file: Path = typer.Option(
-        None, help="Guion YAML de respuestas para --no-stub (ver cli/render.py)"
+        None, help="Guion YAML de respuestas (ver cli/render.py)"
     ),
 ) -> None:
-    """Corre la migración completa desde la fase 0."""
-    _utf8_stdout()
+    """Corre la migración completa desde la fase 0.
+
+    Por defecto es una corrida REAL: entrevistas y LLM. `--stub` es el modo
+    determinista de CI. El default era el inverso, y contradecía a los otros
+    dos frentes de la misma sesión (`MigrationSession.start` y la tool MCP
+    `start_migration` ya arrancaban en real): migrar es lo que hace esta
+    herramienta, y era lo único que exigía un flag.
+    """
     session = _session(workspace)
+    typer.echo(
+        "▶ modo STUB: sin LLM ni entrevistas (determinista)"
+        if stub
+        else "▶ modo REAL: entrevistas y LLM — se detiene en la primera pregunta"
+    )
     try:
         result = session.start(egp, stub_mode=stub)
     except FileNotFoundError as exc:
@@ -130,7 +153,6 @@ def resume(
 ) -> None:
     """Reanuda una migración interrumpida desde el checkpoint (incluida una
     entrevista a mitad de camino)."""
-    _utf8_stdout()
     session = _session(workspace)
     result = _drive(session, session.resume(), _load_script(answers_file))
     _report(result)
@@ -149,7 +171,6 @@ def rewind(
     donde iba (las respuestas viven en el checkpointer), `rewind` la reinicia.
     Las fases anteriores no se recalculan — sus artefactos en `state/` quedan.
     """
-    _utf8_stdout()
     ws = workspace.resolve()
     if backup:
         import shutil
@@ -177,7 +198,6 @@ def status(
     workspace: Path = typer.Option(Path.cwd(), help="Raíz del workspace"),
 ) -> None:
     """Muestra fase actual, gates y entrevista pendiente."""
-    _utf8_stdout()
     from sas_migrator.service import SessionStatus
 
     ws = workspace.resolve()
@@ -207,7 +227,6 @@ def iterate(
     ),
 ) -> None:
     """Itera sobre una migración completada (Fase 9, sub-grafo con gate)."""
-    _utf8_stdout()
     session = _session(workspace)
     node_ids = [n.strip() for n in nodes.split(",") if n.strip()]
     result = session.iterate(describe, request_type=request_type, affected_nodes=node_ids)
@@ -227,11 +246,10 @@ def serve(
     workspace: Path = typer.Option(Path.cwd(), help="Raíz del workspace"),
 ) -> None:
     """Levanta el servidor MCP (stdio) sobre este workspace."""
-    _utf8_stdout()
     from sas_migrator.mcp_server.server import serve_workspace
 
     serve_workspace(workspace.resolve())
 
 
 if __name__ == "__main__":
-    app()
+    main()

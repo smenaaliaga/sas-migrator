@@ -300,8 +300,9 @@ sin re-validación.
 SASMIG_REAL_EGP=C:/ruta/proyecto.egp pytest tests/integration -q
 #   → nodos, flujos, residuo, nodos macro-dependientes → backlog JSON
 
-# Migración real (entrevistas + LLM + pausa antes de tocar la BD):
-sas-migrator run --workspace D:\Migraciones\mi_proyecto --no-stub
+# Migración real (entrevistas + LLM + pausa antes de tocar la BD) — el default:
+sas-migrator run --workspace D:\Migraciones\mi_proyecto
+# (`--stub` es el modo determinista sin LLM ni entrevistas, para CI)
 
 # Estado / reanudar (checkpointer sqlite, sobrevive cortes):
 sas-migrator status --workspace D:\Migraciones\mi_proyecto

@@ -175,6 +175,25 @@ def test_cli_no_stub_with_answers_file_completes_all_phases(tmp_path: Path) -> N
     assert "completed" in status.output
 
 
+def test_run_sin_flags_es_corrida_real(tmp_path: Path, monkeypatch) -> None:
+    """Migrar de verdad no puede ser lo que exige un flag.
+
+    Los otros dos frentes de la misma sesión (`MigrationSession.start` y la
+    tool MCP `start_migration`) ya arrancaban en real; la CLI era la excepción.
+    """
+    ws = make_workspace(tmp_path)
+    visto: dict[str, object] = {}
+
+    def _fake_start(self, egp=None, *, stub_mode=True):
+        visto["stub_mode"] = stub_mode
+        raise SystemExit(0)
+
+    monkeypatch.setattr(MigrationSession, "start", _fake_start)
+    result = CliRunner().invoke(app, ["run", "--workspace", str(ws)])
+    assert visto["stub_mode"] is False
+    assert "modo REAL" in result.output, "el modo se anuncia antes de gastar nada"
+
+
 def test_cli_status_without_migration(tmp_path: Path) -> None:
     ws = make_workspace(tmp_path)
     runner = CliRunner()
