@@ -70,6 +70,12 @@ class LlmConfig(BaseModel):
     model: str = "claude-opus-5"
     max_tokens: int = 16000
     max_validation_retries: int = 3
+    # Reintentos de TRANSPORTE (429, 5xx, 529 Overloaded) que hace el SDK con
+    # backoff exponencial. Su default es 2, pensado para una petición suelta:
+    # una fase que traduce decenas de nodos durante horas atraviesa ventanas de
+    # sobrecarga del proveedor, y un 529 sin reintentar corta la corrida entera.
+    # No tiene nada que ver con max_validation_retries (respuestas mal formadas).
+    max_transport_retries: int = 8
     # Cómo se obtiene el objeto estructurado:
     #   native → output_config.format (structured outputs del API)
     #   tool   → tool use no-strict + validación Pydantic local

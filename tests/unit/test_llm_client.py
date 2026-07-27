@@ -260,7 +260,11 @@ def test_foundry_provider_uses_foundry_client(monkeypatch) -> None:
 
     caller = AnthropicCaller(LlmConfig(provider="foundry", foundry_resource="mi-recurso"))
 
-    assert built == {"api_key": "azure-key", "resource": "mi-recurso"}
+    assert built == {
+        "api_key": "azure-key",
+        "resource": "mi-recurso",
+        "max_retries": LlmConfig().max_transport_retries,
+    }
     # la superficie de llamada no cambia entre proveedores
     assert caller.call(task="t", system_blocks=[], user_content="c",
                        output_model=Demo) == Demo(x=1)
@@ -408,3 +412,25 @@ def test_llm_config_defaults_and_yaml(tmp_path) -> None:
     cfg = load_project_config(tmp_path)
     assert cfg.llm.model == "claude-sonnet-5"
     assert cfg.llm.max_validation_retries == 2
+
+
+def test_reintentos_de_transporte_configurables_y_altos_por_defecto() -> None:
+    """Un 529 pasajero no puede cortar una fase que traduce decenas de nodos."""
+    from sas_migrator.core.config import LlmConfig
+    from sas_migrator.llm.client import AnthropicCaller
+
+    assert LlmConfig().max_transport_retries > 2, "el default del SDK es corto"
+
+    capturado = {}
+
+    class _FakeAnthropic:
+        def __init__(self, **kwargs):
+            capturado.update(kwargs)
+
+    class _FakeSDK:
+        Anthropic = _FakeAnthropic
+
+    AnthropicCaller._build_client(
+        _FakeSDK, LlmConfig(provider="anthropic", max_transport_retries=7)
+    )
+    assert capturado["max_retries"] == 7

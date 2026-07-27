@@ -83,7 +83,7 @@ class AnthropicCaller:
             # login`). Exigir la variable rechazaría setups válidos; que decida el
             # SDK y traducimos su error a uno accionable.
             try:
-                return anthropic.Anthropic()
+                return anthropic.Anthropic(max_retries=config.max_transport_retries)
             except Exception as exc:
                 raise RuntimeError(
                     "No se pudo autenticar contra la API de Anthropic "
@@ -113,7 +113,10 @@ class AnthropicCaller:
                     "entorno. Es el <resource> de "
                     "https://<resource>.services.ai.azure.com"
                 )
-            return client_cls(api_key=api_key, resource=resource)
+            return client_cls(
+                api_key=api_key, resource=resource,
+                max_retries=config.max_transport_retries,
+            )
 
         raise RuntimeError(  # pragma: no cover - Literal lo impide en config válida
             f"llm.provider desconocido: {config.provider!r} (anthropic | foundry)"
