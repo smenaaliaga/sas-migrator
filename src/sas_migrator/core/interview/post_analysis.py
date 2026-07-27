@@ -233,77 +233,126 @@ def build_scope_exclusion_confirm_card(
 
 
 def build_native_node_cards(state_dir: Path) -> list[InterviewCard]:
-    """Una tarjeta por nodo nativo de EG sin código SAS — nunca en silencio."""
+    """Nodos de EG sin código SAS en el .egp — nunca se omiten en silencio.
+
+    Dos formas distintas porque son dos decisiones distintas. Una tarea nativa
+    sin código exige que el usuario DESCRIBA qué hace: es una tarjeta por nodo,
+    con su texto libre propio. Una consulta de inspección ya trae su SQL a la
+    vista y la decisión es la misma pregunta repetida N veces — van todas en
+    UNA tarjeta, que se lee y se contesta de corrido en vez de hacer al usuario
+    reconstruir el contexto del Query Builder siete veces seguidas.
+    """
     index = load_json(Path(state_dir) / "nodes_index.json") or {}
     natives = [
         n
         for n in index.get("nodes", [])
         if n.get("native_task") or n.get("requires_manual_review")
     ]
+    queries = sorted(
+        (n for n in natives if n.get("query_preview")), key=lambda x: x["id"]
+    )
+    others = sorted(
+        (n for n in natives if not n.get("query_preview")), key=lambda x: x["id"]
+    )
+
     cards: list[InterviewCard] = []
-    for i, n in enumerate(sorted(natives, key=lambda x: x["id"]), start=1):
+    query_card = _build_query_card(state_dir, queries)
+    if query_card is not None:
+        cards.append(query_card)
+
+    for i, n in enumerate(others, start=1):
         label = n.get("label") or n["id"]
         flujo = n.get("pfd_label") or n.get("pfd_id") or "?"
-        if n.get("query_preview"):
-            title = f"Consulta de inspección: {label}"
-            text = (
-                f"El nodo '{label}' ({n['id']}) es una consulta que Enterprise "
-                "Guide armó para mirar datos: su salida no la lee ningún otro "
-                "nodo. ¿La excluimos, o la traducimos igual?"
-            )
-            default = "Excluir de la migración"
-            evidence = [
-                f"nodes_index.json: {n['id']} — flujo {flujo}",
-                "su salida no es entrada de ningún nodo: excluirla no corta la cadena",
-                *_query_sql_evidence(state_dir, n["id"]),
-            ]
-        else:
-            title = f"Tarea nativa de EG: {label}"
-            text = (
-                f"El nodo '{label}' ({n['id']}) es una tarea de Enterprise "
-                "Guide sin código SAS extraíble. ¿Lo excluimos, o lo "
-                "traducimos a mano con tu descripción de lo que hace?"
-            )
-            default = "Traducir a mano"
-            evidence = [
-                f"nodes_index.json: {n['id']} — tipo {n.get('node_type', '?')}, "
-                f"flujo {flujo}",
-                "el extractor no encontró código; excluirlo pierde el paso",
-            ]
         cards.append(
             _card(
                 f"B2-scope:native:{n['id']}",
                 "B2-scope",
-                title,
+                f"Tarea nativa de EG: {label}",
                 questions=[
                     Question(
                         id=f"Q-B2-4-{n['id']}",
-                        text=text,
+                        text=(
+                            f"El nodo '{label}' ({n['id']}) es una tarea de "
+                            "Enterprise Guide sin código SAS extraíble. ¿Lo "
+                            "excluimos, o lo traducimos a mano con tu "
+                            "descripción de lo que hace?"
+                        ),
                         question_type=QuestionType.SINGLE_CHOICE,
                         options=list(NATIVE_OPTIONS),
-                        recommended_default=default,
-                        evidence=evidence,
+                        recommended_default="Traducir a mano",
+                        evidence=[
+                            f"nodes_index.json: {n['id']} — tipo "
+                            f"{n.get('node_type', '?')}, flujo {flujo}",
+                            "el extractor no encontró código; excluirlo pierde el paso",
+                        ],
                     )
                 ],
-                progress=CardProgress(index=i, total=len(natives)),
+                progress=CardProgress(index=i, total=len(others)),
             )
         )
     return cards
 
 
-def _query_sql_evidence(state_dir: Path, node_id: str, max_lines: int = 6) -> list[str]:
-    """Primeras líneas del SQL del nodo — decidir a ciegas no es decidir."""
-    node = load_json(Path(state_dir) / "nodes" / f"{node_id}.json") or {}
-    code = (node.get("code") or "").strip()
+def _build_query_card(state_dir: Path, queries: list[dict]) -> InterviewCard | None:
+    """Las consultas de inspección, todas en una tarjeta, cada una con su SQL."""
+    if not queries:
+        return None
+    questions = []
+    for n in queries:
+        label = n.get("label") or n["id"]
+        flujo = n.get("pfd_label") or n.get("pfd_id") or "?"
+        evidence = [f"nodes_index.json: {n['id']} — flujo {flujo}"]
+        if _from_last_run(state_dir, n["id"]):
+            evidence.append("SQL recuperado del log de la ÚLTIMA ejecución en EG")
+        questions.append(
+            Question(
+                id=f"Q-B2-4-{n['id']}",
+                text=f"{label} ({n['id']})",
+                question_type=QuestionType.SINGLE_CHOICE,
+                options=list(NATIVE_OPTIONS),
+                recommended_default="Excluir de la migración",
+                context=_query_sql(state_dir, n["id"]),
+                evidence=evidence,
+            )
+        )
+    return _card(
+        "B2-scope:queries",
+        "B2-scope",
+        f"Consultas de inspección de Enterprise Guide ({len(queries)})",
+        transition=(
+            "Estas consultas se armaron en la GUI de Enterprise Guide, así que "
+            "no dejan código en el .egp: el SQL de abajo es el que EG generó al "
+            "ejecutarlas. Ninguna de sus salidas la lee otro nodo, por eso "
+            "excluirlas no corta la cadena — pero la decisión es tuya, una por "
+            "una."
+        ),
+        questions=questions,
+        progress=CardProgress(index=1, total=1),
+    )
+
+
+def _query_node(state_dir: Path, node_id: str) -> dict:
+    return load_json(Path(state_dir) / "nodes" / f"{node_id}.json") or {}
+
+
+def _from_last_run(state_dir: Path, node_id: str) -> bool:
+    return bool(_query_node(state_dir, node_id).get("metadata", {}).get("code_from_last_run"))
+
+
+def _query_sql(state_dir: Path, node_id: str, max_lines: int = 14) -> str:
+    """El SQL del nodo como bloque — decidir a ciegas no es decidir.
+
+    Va en ``context`` y no en ``evidence`` porque es código: la evidencia son
+    líneas sueltas con referencia a artefacto, y un SELECT troceado en viñetas
+    pierde justo lo que hay que leer (la indentación que EG generó).
+    """
+    code = (_query_node(state_dir, node_id).get("code") or "").strip()
     if not code:
-        return []
-    lines = [ln.strip() for ln in code.splitlines() if ln.strip()]
-    shown = [f"SQL: {ln}" for ln in lines[:max_lines]]
+        return ""
+    lines = code.splitlines()
     if len(lines) > max_lines:
-        shown.append(f"SQL: … (+{len(lines) - max_lines} líneas)")
-    if node.get("metadata", {}).get("code_from_last_run"):
-        shown.append("SQL recuperado del log de la ÚLTIMA ejecución en EG")
-    return shown
+        lines = [*lines[:max_lines], f"… (+{len(code.splitlines()) - max_lines} líneas)"]
+    return "\n".join(lines)
 
 
 # ── B3: pre-procesamiento ───────────────────────────────────────────────────

@@ -112,22 +112,22 @@ def test_low_confidence_mapping_becomes_pending_question(tmp_path: Path) -> None
     assert low_q.required is False, "los matches de baja confianza no bloquean"
 
 
-def test_query_de_inspeccion_pregunta_con_el_sql_y_recomienda_excluir(
-    tmp_path: Path,
-) -> None:
-    """Decidir sobre una consulta exige ver su SQL, no solo su ID."""
+def _state_con_consultas(tmp_path: Path, n_queries: int = 2) -> Path:
     state = _state(
         tmp_path,
         nodes_index={
             "nodes": [
-                {
-                    "id": "Query-1",
-                    "label": "Query Builder 3",
-                    "node_type": "QUERY",
-                    "pfd_label": "Salidas",
-                    "requires_manual_review": True,
-                    "query_preview": True,
-                },
+                *(
+                    {
+                        "id": f"Query-{i}",
+                        "label": f"Query Builder {i}",
+                        "node_type": "QUERY",
+                        "pfd_label": "Salidas",
+                        "requires_manual_review": True,
+                        "query_preview": True,
+                    }
+                    for i in range(1, n_queries + 1)
+                ),
                 {
                     "id": "ImportTask-1",
                     "label": "Importar Excel",
@@ -138,25 +138,52 @@ def test_query_de_inspeccion_pregunta_con_el_sql_y_recomienda_excluir(
         },
     )
     (state / "nodes").mkdir()
-    (state / "nodes" / "Query-1.json").write_text(
-        json.dumps(
-            {
-                "code": "PROC SQL;\n  CREATE TABLE WORK.QUERY_FOR_X AS\n"
-                "  SELECT DISTINCT t1.REGION FROM SRC.C t1;\nQUIT;",
-                "metadata": {"code_from_last_run": True},
-            }
-        ),
-        encoding="utf-8",
-    )
+    for i in range(1, n_queries + 1):
+        (state / "nodes" / f"Query-{i}.json").write_text(
+            json.dumps(
+                {
+                    "code": "PROC SQL;\n  CREATE TABLE WORK.QUERY_FOR_X AS\n"
+                    f"  SELECT DISTINCT t1.REGION FROM SRC.C{i} t1;\nQUIT;",
+                    "metadata": {"code_from_last_run": True},
+                }
+            ),
+            encoding="utf-8",
+        )
+    return state
+
+
+def test_query_de_inspeccion_pregunta_con_el_sql_y_recomienda_excluir(
+    tmp_path: Path,
+) -> None:
+    """Decidir sobre una consulta exige ver su SQL, no solo su ID."""
+    state = _state_con_consultas(tmp_path, n_queries=1)
 
     cards = post_analysis.build_native_node_cards(state)
-    preview = next(c for c in cards if c.card_id.endswith("Query-1"))
-    question = preview.questions[0]
+    consultas = next(c for c in cards if c.card_id == "B2-scope:queries")
+    question = consultas.questions[0]
+    assert question.id == "Q-B2-4-Query-1"
     assert question.recommended_default == "Excluir de la migración"
-    assert any("CREATE TABLE WORK.QUERY_FOR_X" in e for e in question.evidence)
+    assert "CREATE TABLE WORK.QUERY_FOR_X" in question.context
     assert any("ÚLTIMA ejecución" in e for e in question.evidence)
 
     # La tarea nativa sin código conserva su default opuesto: excluirla pierde
     # un paso que nadie puede reconstruir.
     nativa = next(c for c in cards if c.card_id.endswith("ImportTask-1"))
     assert nativa.questions[0].recommended_default == "Traducir a mano"
+
+
+def test_las_consultas_de_inspeccion_van_todas_en_una_tarjeta(tmp_path: Path) -> None:
+    """El Query Builder se explica una vez, no una vez por nodo."""
+    state = _state_con_consultas(tmp_path, n_queries=4)
+
+    cards = post_analysis.build_native_node_cards(state)
+    consultas = [c for c in cards if c.card_id == "B2-scope:queries"]
+    assert len(consultas) == 1, "las consultas no se preguntan de a una"
+    card = consultas[0]
+    assert [q.id for q in card.questions] == [f"Q-B2-4-Query-{i}" for i in range(1, 5)]
+    # Cada pregunta trae SU propio SQL: agrupar no es fusionar.
+    assert [q.context.count("SRC.C") for q in card.questions] == [1, 1, 1, 1]
+    assert "Enterprise Guide" in card.transition, "el contexto compartido va en la tarjeta"
+    assert "(4)" in card.title
+    # La tarea nativa sigue teniendo tarjeta propia: pide una descripción.
+    assert any(c.card_id == "B2-scope:native:ImportTask-1" for c in cards)

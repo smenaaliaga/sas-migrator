@@ -129,13 +129,18 @@ def _scope_decisions(state_dir: Path, collected: Collected) -> tuple[set[str], d
                         ignored.update(flow.get("node_ids", []))
             if _value_of(ans, "Q-B2-2") == "Excluirlos":
                 ignored.update(post_analysis._orphan_nodes(state_dir))
-        elif card.card_id.startswith("B2-scope:native:"):
-            nid = card.card_id.split("B2-scope:native:", 1)[1]
-            choice = _value_of(ans, card.questions[0].id)
-            if choice == "Excluir de la migración":
-                ignored.add(nid)
-            elif choice == "Traducir a mano":
-                notes[nid] = ans.free_text.strip() or "(a traducir a mano; sin descripción)"
+        elif card.card_id.startswith("B2-scope:native:") or card.card_id == "B2-scope:queries":
+            # El node_id viaja en el id de la pregunta, no en el de la tarjeta:
+            # la tarjeta de consultas agrupa N nodos y la de tarea nativa, uno.
+            for question in card.questions:
+                nid = question.id.removeprefix("Q-B2-4-")
+                choice = _value_of(ans, question.id)
+                if choice == "Excluir de la migración":
+                    ignored.add(nid)
+                elif choice == "Traducir a mano":
+                    notes[nid] = (
+                        ans.free_text.strip() or "(a traducir a mano; sin descripción)"
+                    )
     return ignored, notes
 
 

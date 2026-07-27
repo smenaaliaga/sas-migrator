@@ -55,9 +55,10 @@ def _prompt_card(card: dict) -> dict:
         typer.echo(FREE_TEXT_HINT)
     answers: list[dict] = []
     free_parts: list[str] = []
-    for q in card.get("questions", []):
+    questions = card.get("questions", [])
+    for i, q in enumerate(questions, start=1):
         typer.echo("")
-        typer.echo(render_question(q))
+        typer.echo(render_question(q, i, len(questions)))
         raw = typer.prompt(f"  {q['id']} >", default="", show_default=False)
         value = parse_answer(q, raw)
         if value is not None:

@@ -7,12 +7,49 @@ Enter. Testeado por snapshot para proteger el formato por regresión.
 
 from __future__ import annotations
 
+import textwrap
 from typing import Any
 
 CardDict = dict[str, Any]
 
 
 FREE_TEXT_HINT = "  (texto libre también vale: se registra como comentario/contrapropuesta)"
+
+# Ancho de la regla y de los enunciados. Un enunciado de 200 caracteres en una
+# sola línea es ilegible en cualquier terminal: se pliega, no se trunca.
+WIDTH = 78
+# El cuerpo de una pregunta (SQL, evidencia, opciones) cuelga a la derecha del
+# enunciado; el prompt vuelve al margen para que la línea que se escribe no se
+# confunda con lo que se está leyendo.
+BODY = "      "
+
+
+def _wrap(text: str, initial: str, subsequent: str) -> list[str]:
+    """Pliega respetando los saltos de línea que el texto ya traía."""
+    out: list[str] = []
+    for i, para in enumerate(text.splitlines() or [""]):
+        first = initial if i == 0 else subsequent
+        if not para.strip():
+            continue
+        out.extend(
+            textwrap.wrap(
+                para,
+                width=WIDTH,
+                initial_indent=first,
+                subsequent_indent=subsequent,
+                break_long_words=False,
+                break_on_hyphens=False,
+            )
+            or [first.rstrip()]
+        )
+    return out
+
+
+def _rule(title: str, tag: str) -> str:
+    """Regla de título con el progreso anclado a la derecha."""
+    left = f"── {title} "
+    right = f" {tag} ──" if tag else "──"
+    return left + "─" * max(2, WIDTH - len(left) - len(right)) + right
 
 
 def render_card_header(card: CardDict) -> str:
@@ -21,39 +58,48 @@ def render_card_header(card: CardDict) -> str:
     if card.get("validation_error"):
         lines.append(f"⚠ Respuesta no válida: {card['validation_error']}")
         lines.append("")
+    progress = card.get("progress") or {}
+    tag = f"[{progress['index']}/{progress['total']}]" if progress.get("total") else ""
+    lines.append(_rule(card.get("title", ""), tag))
     if card.get("transition"):
-        lines.append(card["transition"])
-    progress = card.get("progress")
-    title = card.get("title", "")
-    if progress and progress.get("total"):
-        title += f"  [{progress['index']}/{progress['total']}]"
-    lines.append(f"── {title} " + "─" * max(0, 60 - len(title)))
+        lines.extend(_wrap(card["transition"], "  ", "  "))
     return "\n".join(lines)
 
 
-def render_question(question: CardDict) -> str:
-    """Una pregunta: enunciado, evidencia, opciones numeradas y el default."""
-    lines = [question["text"]]
+def render_question(
+    question: CardDict, number: int | None = None, total: int | None = None
+) -> str:
+    """Una pregunta: enunciado, código, evidencia, opciones y el default.
+
+    ``number``/``total`` numeran la pregunta dentro de una tarjeta que agrupa
+    varias (las consultas de inspección): sin la posición a la vista, siete
+    preguntas seguidas se leen como una sola pared de texto.
+    """
+    prefix = f"{number}/{total} · " if number and total and total > 1 else ""
+    lines = _wrap(question["text"], "  " + prefix, "  " + " " * len(prefix))
+    for code_line in (question.get("context") or "").splitlines():
+        lines.append(f"{BODY}│ {code_line}".rstrip())
     for ev in question.get("evidence", []):
-        lines.append(f"    · {ev}")
+        lines.extend(_wrap(ev, f"{BODY}· ", f"{BODY}  "))
     options = question.get("options", [])
     recommended = question.get("recommended_default")
     for i, opt in enumerate(options, start=1):
         marker = "  (Recomendado)" if opt == recommended else ""
-        lines.append(f"  {i}. {opt}{marker}")
+        lines.append(f"{BODY}{i}. {opt}{marker}")
     if recommended and recommended not in options:
-        lines.append(f"  [Enter = {recommended}]")
+        lines.append(f"{BODY}[Enter = {recommended}]")
     elif recommended:
-        lines.append(f"  [Enter = opción recomendada: {recommended}]")
+        lines.append(f"{BODY}[Enter = opción recomendada: {recommended}]")
     return "\n".join(lines)
 
 
 def render_card(card: CardDict) -> str:
     """Texto de una tarjeta completa para la terminal."""
     lines = [render_card_header(card)]
-    for q in card.get("questions", []):
+    questions = card.get("questions", [])
+    for i, q in enumerate(questions, start=1):
         lines.append("")
-        lines.append(render_question(q))
+        lines.append(render_question(q, i, len(questions)))
     if card.get("allow_free_text"):
         lines.append("")
         lines.append(FREE_TEXT_HINT)
