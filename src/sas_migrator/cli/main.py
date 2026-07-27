@@ -121,6 +121,42 @@ def resume(
 
 
 @app.command()
+def rewind(
+    phase: int = typer.Option(..., help="Fase a rehacer desde cero (0-8)"),
+    workspace: Path = typer.Option(Path.cwd(), help="Raíz del workspace"),
+    answers_file: Path = typer.Option(None, help="Guion YAML de respuestas"),
+    backup: bool = typer.Option(True, help="Copia el checkpoint antes de rebobinar"),
+) -> None:
+    """Rebobina al inicio de una fase y la vuelve a correr desde cero.
+
+    Para rehacer una entrevista ya contestada a medias: `resume` la continúa
+    donde iba (las respuestas viven en el checkpointer), `rewind` la reinicia.
+    Las fases anteriores no se recalculan — sus artefactos en `state/` quedan.
+    """
+    _utf8_stdout()
+    ws = workspace.resolve()
+    if backup:
+        import shutil
+
+        from sas_migrator.service.session import CHECKPOINT_FILE
+
+        src = ws / "state" / CHECKPOINT_FILE
+        if src.exists():
+            dst = src.with_suffix(src.suffix + ".bak")
+            shutil.copy2(src, dst)
+            typer.echo(f"↩ checkpoint respaldado en {dst.name}")
+
+    session = _session(ws)
+    try:
+        result = session.rewind_to_phase(phase)
+    except (ValueError, LookupError) as exc:
+        typer.echo(f"Error: {exc}")
+        raise typer.Exit(code=2) from exc
+    result = _drive(session, result, _load_script(answers_file))
+    _report(result)
+
+
+@app.command()
 def status(
     workspace: Path = typer.Option(Path.cwd(), help="Raíz del workspace"),
 ) -> None:

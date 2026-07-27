@@ -73,6 +73,35 @@ def test_session_interview_flow_and_status(tmp_path: Path) -> None:
     assert any("Migración base completa" in m for m in all_messages)
 
 
+def test_rewind_reinicia_la_entrevista_que_resume_continuaria(tmp_path: Path) -> None:
+    """Rebobinar descarta los `__resume__` de la fase; reanudar los replica."""
+    session = MigrationSession(make_workspace(tmp_path))
+    result = session.start(stub_mode=False)
+    first_card = result.pending_card.card_id
+
+    # Se contesta la primera tarjeta: el checkpointer ya guarda esa respuesta,
+    # aunque la fase 1 todavía no escribió nada en state/.
+    session.answer(default_card_answers(result.pending_card.model_dump(mode="json")))
+
+    # Un proceso nuevo NO vuelve a esa tarjeta: la respuesta ya está guardada.
+    pending_tras_responder = MigrationSession(session.workspace).status().pending_card
+    assert pending_tras_responder is None or pending_tras_responder.card_id != first_card
+
+    rewound = MigrationSession(session.workspace).rewind_to_phase(1)
+    assert rewound.status == SessionStatus.WAITING_USER
+    assert rewound.pending_card.card_id == first_card, "la fase 1 vuelve a la 1ª tarjeta"
+
+
+def test_rewind_rechaza_fase_desconocida_y_fase_no_alcanzada(tmp_path: Path) -> None:
+    session = MigrationSession(make_workspace(tmp_path))
+    session.start(stub_mode=False)  # queda esperando en la fase 1
+
+    with pytest.raises(ValueError):
+        session.rewind_to_phase(99)
+    with pytest.raises(LookupError):
+        session.rewind_to_phase(7)  # nunca se llegó
+
+
 def test_session_status_not_started(tmp_path: Path) -> None:
     ws = make_workspace(tmp_path)
     assert MigrationSession(ws).status().status == SessionStatus.NOT_STARTED

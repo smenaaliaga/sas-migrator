@@ -101,6 +101,34 @@ class MigrationSession:
         result = self.graph.invoke(None, self._config())
         return self._to_result(result)
 
+    def rewind_to_phase(self, phase: int) -> SessionResult:
+        """Descarta lo hecho desde el inicio de ``phase`` y la re-ejecuta.
+
+        Las respuestas ya entregadas a los ``interrupt()`` de una entrevista no
+        viven en ``state/`` (el nodo escribe recién al final) sino como writes
+        ``__resume__`` del checkpointer: reanudar sin más las replica y la
+        entrevista sigue donde iba. Rebobinar es reanudar desde el checkpoint
+        ANTERIOR al nodo de la fase — esos resumes quedan en la rama vieja y el
+        nodo vuelve a preguntar desde la primera tarjeta.
+        """
+        from sas_migrator.graph.builder import PHASES
+
+        node = next((name for name, _fn, ph in PHASES if ph == phase), None)
+        if node is None:
+            raise ValueError(f"fase desconocida: {phase} (esperado 0-{PHASES[-1][2]})")
+
+        history = list(self.graph.get_state_history(self._config()))
+        for i, snap in enumerate(history):
+            if node in (snap.next or ()) and i + 1 < len(history):
+                # invoke() sobre el config del padre bifurca desde ahí: el gate
+                # anterior se re-evalúa (barato) y la fase arranca limpia.
+                result = self.graph.invoke(None, history[i + 1].config)
+                return self._to_result(result)
+        raise LookupError(
+            f"no hay checkpoint anterior a {node}: la fase {phase} nunca se alcanzó "
+            "en este workspace"
+        )
+
     def answer(self, payload: dict[str, Any]) -> SessionResult:
         """Entrega respuestas (forma CardAnswers) al interrupt activo y avanza
         hasta el próximo interrupt, gate bloqueado o el final."""
