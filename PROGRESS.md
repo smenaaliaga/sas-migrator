@@ -51,6 +51,14 @@
   `analyze.py`); módulos v1 sin consumidor eliminados
   (`extractors/summarize_flows.py`, `generation_status.py` — la reanudación
   v2 es por checkpointer a granularidad de nodo del grafo, no por script).
+- **Validación con .egp reales y poda del cross-check legacy**: dos proyectos
+  productivos por el harness — `Síntesis_M_CR18.egp` (84 nodos/18 flujos,
+  cazó el bug del BOM) y `sas.egp` (175 nodos/17 flujos, pipeline completo
+  done=True). Barrido de ~440 nombres en desacuerdo v1-vs-v2: **cero misses
+  del parser v2** — todo eran falsos positivos del regex v1 (SET de SQL como
+  SET de DATA step, código comentado, dirección de UPDATE, matrices IML).
+  Con esa evidencia se jubiló `_extract_datasets_legacy` y
+  `parser_upgrade_report.json`; `enrich_state` queda solo con placement.
 
 **Pendiente del DoD**: correr el harness con el `.egp` productivo real
 (`SASMIG_REAL_EGP=... pytest tests/integration -q`) y convertir el backlog en

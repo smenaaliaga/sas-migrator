@@ -1,7 +1,6 @@
 from sas_migrator.core.extractors.egp import (
     _classify_code,
     _extract_datasets,
-    _extract_datasets_legacy,
 )
 from sas_migrator.core.models.graph import NodeType
 
@@ -29,12 +28,3 @@ def test_extract_datasets_uses_parser_v2_qualified_view() -> None:
     # CREATE TABLE era invisible para el regex v1; el parser v2 lo recupera.
     assert outputs == ["WORK.JOINED", "WORK.OUT"]
     assert libraries == ["SRC"]
-
-
-def test_extract_datasets_legacy_survives_as_cross_check() -> None:
-    inputs, outputs, libraries = _extract_datasets_legacy(SAMPLE)
-
-    assert "src.in_table" in inputs
-    assert "work.out" in outputs
-    assert "work.joined" not in outputs  # la pérdida que motiva el chequeo cruzado
-    assert "src" in libraries

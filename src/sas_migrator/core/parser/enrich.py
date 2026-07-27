@@ -1,11 +1,14 @@
 """Enriquecimiento del análisis con el parser v2 + placement.
 
-Corre después de build_indexes (Fase 2). Los inputs/outputs de los nodos ya
-son la vista v2 (el extractor los deriva de parse_sas_code); aquí se agrega la
-decisión de placement al índice y se deja un reporte comparativo contra el
-extractor legacy por regex — la evidencia medible de qué recupera el parser
-nuevo, y el chequeo cruzado de desacuerdos (algo que v1 veía y v2 no = flag
-de revisión).
+Corre después de build_indexes (Fase 2): parsea cada nodo, clasifica su
+placement con evidencia y actualiza nodes_index.json.
+
+Nota histórica: hasta la validación con .egp reales, aquí vivía un chequeo
+cruzado contra el extractor regex del v1 (parser_upgrade_report.json). Dos
+proyectos productivos barridos con CERO misses del parser v2 —todos los
+desacuerdos eran falsos positivos del regex— lo jubilaron; el harness de
+integración (tests/integration) sigue siendo la puerta de entrada de cada
+.egp nuevo.
 """
 
 from __future__ import annotations
@@ -13,7 +16,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from sas_migrator.core.extractors.egp import _extract_datasets_legacy
 from sas_migrator.core.parser.placement import classify_placement, project_db_librefs
 from sas_migrator.core.parser.statements import (
     NodeParse,
@@ -31,11 +33,7 @@ def _dump_json(path: Path, data) -> None:
 
 
 def enrich_state(state_dir: Path) -> dict:
-    """Parsea cada nodo, clasifica placement y actualiza nodes_index.json.
-
-    Devuelve el resumen del reporte comparativo (también escrito a
-    state/parser_upgrade_report.json).
-    """
+    """Parsea cada nodo, clasifica placement y actualiza nodes_index.json."""
     state_dir = Path(state_dir)
     nodes_dir = state_dir / "nodes"
     index_path = state_dir / "nodes_index.json"
@@ -45,11 +43,9 @@ def enrich_state(state_dir: Path) -> dict:
     db_engines = resolve_db_engines(state_dir.parent)
 
     parses: dict[str, NodeParse] = {}
-    codes: dict[str, str] = {}
     for node_file in sorted(nodes_dir.glob("*.json")):
         node = _load_json(node_file)
-        codes[node["id"]] = node.get("code") or ""
-        parses[node["id"]] = parse_sas_code(codes[node["id"]])
+        parses[node["id"]] = parse_sas_code(node.get("code") or "")
 
     db_libs = project_db_librefs(parses, db_engines)
     # Sumar librefs ya detectados como BD por db_evidence (LIBNAME en metadata,
@@ -62,14 +58,10 @@ def enrich_state(state_dir: Path) -> dict:
             if name and libref_entry.get("source") == "libname_statement":
                 db_libs.add(name)
 
-    comparison: list[dict] = []
     placements: dict[str, int] = {}
-    recovered_nodes = 0
-    disagreement_nodes = 0
-
+    enriched = 0
     for entry in index.get("nodes", []):
-        nid = entry["id"]
-        parse = parses.get(nid)
+        parse = parses.get(entry["id"])
         if parse is None:
             continue
         decision = classify_placement(parse, db_libs, db_engines)
@@ -77,50 +69,12 @@ def enrich_state(state_dir: Path) -> dict:
         entry["placement_reasons"] = decision.reasons
         entry["macro_refs"] = parse.macro_refs
         placements[decision.placement] = placements.get(decision.placement, 0) + 1
-
-        # chequeo cruzado contra el extractor legacy (regex v1), normalizado
-        # al mismo formato LIB.TABLA con WORK explícito
-        legacy_in, legacy_out, _ = _extract_datasets_legacy(codes.get(nid, ""))
-        v1_in = {x.upper() if "." in x else f"WORK.{x.upper()}" for x in legacy_in}
-        v1_out = {x.upper() if "." in x else f"WORK.{x.upper()}" for x in legacy_out}
-        v2_in = {f"{r.libref}.{r.table}" for r in parse.inputs}
-        v2_out = {f"{r.libref}.{r.table}" for r in parse.outputs}
-        gained_in = sorted(v2_in - v1_in)
-        gained_out = sorted(v2_out - v1_out)
-        # Lo que el regex veía y el parser no: desacuerdo → flag de revisión.
-        # (Suele ser un falso positivo del regex, p. ej. `FROM CONNECTION`.)
-        lost_in = sorted(v1_in - v2_in)
-        lost_out = sorted(v1_out - v2_out)
-        if gained_in or gained_out:
-            recovered_nodes += 1
-        if lost_in or lost_out:
-            disagreement_nodes += 1
-        comparison.append(
-            {
-                "node_id": nid,
-                "v1_inputs": sorted(v1_in),
-                "v1_outputs": sorted(v1_out),
-                "v2_inputs": sorted(v2_in),
-                "v2_outputs": sorted(v2_out),
-                "recovered_inputs": gained_in,
-                "recovered_outputs": gained_out,
-                "lost_inputs": lost_in,
-                "lost_outputs": lost_out,
-                "placement": decision.placement,
-            }
-        )
+        enriched += 1
 
     _dump_json(index_path, index)
 
-    summary = {
-        "nodes_total": len(comparison),
-        "nodes_with_recovered_io": recovered_nodes,
-        "nodes_with_lost_io": disagreement_nodes,
+    return {
+        "nodes_total": enriched,
         "placements": dict(sorted(placements.items())),
         "db_librefs": sorted(db_libs),
     }
-    _dump_json(
-        state_dir / "parser_upgrade_report.json",
-        {"summary": summary, "nodes": comparison},
-    )
-    return summary

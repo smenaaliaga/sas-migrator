@@ -4,8 +4,8 @@ No corre en CI normal: se activa con la variable de entorno SASMIG_REAL_EGP
 apuntando al .egp productivo. Tres niveles, cada uno con más requisitos:
 
 1. **Extracción** (solo el .egp): parser v2 sobre cada nodo real — nunca
-   crashea, contabilidad del residuo cierra, y los desacuerdos v1-vs-v2 se
-   vuelcan a un backlog JSON (SASMIG_REAL_EGP_REPORT o junto al .egp).
+   crashea, placement válido, contabilidad del residuo cierra; resumen al
+   backlog JSON (SASMIG_REAL_EGP_REPORT o junto al .egp).
 2. **Pipeline estructural** (solo el .egp): las 9 fases en stub_mode sobre la
    estructura real — gates, placement, plan, ensamblador y golden de
    determinismo aguantan un proyecto real, no solo el sintético.
@@ -25,11 +25,7 @@ from pathlib import Path
 
 import pytest
 
-from sas_migrator.core.extractors.egp import (
-    _extract_datasets_legacy,
-    build_flow_summary,
-    extract_egp,
-)
+from sas_migrator.core.extractors.egp import build_flow_summary, extract_egp
 from sas_migrator.core.parser.placement import classify_placement
 from sas_migrator.core.parser.statements import parse_sas_code
 
@@ -70,29 +66,16 @@ def test_extraction_and_parser_invariants(tmp_path: Path) -> None:
 
     assert graph.nodes, "el .egp real no aportó ningún nodo"
 
-    disagreements = []
+    macro_dependent = []
     for node in graph.nodes:
-        code = node.code or ""
-        parse = parse_sas_code(code)  # nunca debe crashear (fuzz + real)
+        parse = parse_sas_code(node.code or "")  # nunca debe crashear (fuzz + real)
         decision = classify_placement(parse, db_librefs=set())
         assert decision.placement in {
             "sql_passthrough", "sql_pushdown", "pandas", "hybrid",
             "ambiguous", "utility",
         }
-
-        legacy_in, legacy_out, _ = _extract_datasets_legacy(code)
-        v2_in = {r.split(".")[-1] for r in node.inputs}
-        v2_out = {r.split(".")[-1] for r in node.outputs}
-        missing_in = [d for d in legacy_in if d.split(".")[-1].upper() not in v2_in]
-        missing_out = [d for d in legacy_out if d.split(".")[-1].upper() not in v2_out]
-        if missing_in or missing_out:
-            disagreements.append({
-                "node_id": node.id,
-                "label": node.label,
-                "legacy_inputs_not_in_v2": missing_in,
-                "legacy_outputs_not_in_v2": missing_out,
-                "macro_refs": parse.macro_refs,
-            })
+        if parse.macro_refs:
+            macro_dependent.append({"node_id": node.id, "macro_refs": parse.macro_refs})
 
     summary = build_flow_summary(graph)
     residue = graph.metadata.get("extraction_residue_summary", {})
@@ -101,7 +84,7 @@ def test_extraction_and_parser_invariants(tmp_path: Path) -> None:
         "nodes": len(graph.nodes),
         "flows": len(summary.flows),
         "residue": residue,
-        "v1_vs_v2_disagreements": disagreements,
+        "macro_dependent_nodes": macro_dependent,
     })
     assert residue.get("unexplained_count", 0) == 0, residue
     print(f"\nbacklog → {report}")

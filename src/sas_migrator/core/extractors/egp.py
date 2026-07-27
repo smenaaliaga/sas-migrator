@@ -101,46 +101,6 @@ def _detect_constructs(code: str) -> list[str]:
     return constructs
 
 
-_DS_PATTERN = re.compile(
-    r"""(?:
-        (?:SET|MERGE|UPDATE)\s+([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)?)  # DATA step inputs
-      | FROM\s+([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)?)                  # SQL FROM
-      | DATA\s+([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)?)                  # DATA step output
-      | OUT\s*=\s*([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)?)               # PROC OUT=
-      | LIBNAME\s+([A-Za-z_]\w+)                                  # LIBNAME reference
-    )""",
-    re.IGNORECASE | re.VERBOSE,
-)
-
-
-def _extract_datasets_legacy(code: str) -> tuple[list[str], list[str], list[str]]:
-    """Extractor v1 por regex. Ya no alimenta los nodos: sobrevive solo como
-    chequeo cruzado contra el parser v2 (desacuerdos → parser_upgrade_report)."""
-    inputs: list[str] = []
-    outputs: list[str] = []
-    libraries: list[str] = []
-
-    for m in _DS_PATTERN.finditer(code):
-        if m.group(1):
-            inputs.append(m.group(1))
-        elif m.group(2):
-            inputs.append(m.group(2))
-        elif m.group(3):
-            ds = m.group(3)
-            if ds.upper() not in ("_NULL_", "_WEBOUT"):
-                outputs.append(ds)
-        elif m.group(4):
-            outputs.append(m.group(4))
-        elif m.group(5):
-            libraries.append(m.group(5))
-
-    return (
-        sorted(set(inputs)),
-        sorted(set(outputs)),
-        sorted(set(libraries)),
-    )
-
-
 def _extract_datasets(code: str) -> tuple[list[str], list[str], list[str]]:
     """Inputs/outputs/librerías de un nodo, vía el parser v2 (statement-dirigido).
 

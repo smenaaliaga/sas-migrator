@@ -1,5 +1,5 @@
-"""Integración del parser v2 al pipeline: placement en nodes_index y
-reporte comparativo v1 vs v2 sobre el .egp sintético completo.
+"""Integración del parser v2 al pipeline: placement en nodes_index sobre el
+.egp sintético completo.
 """
 
 from __future__ import annotations
@@ -35,17 +35,12 @@ def test_every_index_node_has_placement_with_evidence(tmp_path: Path) -> None:
 
 def test_parser_v2_recovers_create_table_output(tmp_path: Path) -> None:
     """CodeTask-1 del .egp sintético crea WORK.VENTAS_AGG vía CREATE TABLE —
-    invisible para el extractor v1, recuperado por el parser v2."""
+    invisible para el regex del v1, recuperado por el parser v2 (la vista v2
+    es la única fuente de inputs/outputs de los nodos)."""
     ws = _run(tmp_path)
-    report = json.loads(
-        (ws / "state" / "parser_upgrade_report.json").read_text(encoding="utf-8")
-    )
-    task1 = next(n for n in report["nodes"] if n["node_id"] == "CodeTask-1")
-    assert "WORK.VENTAS_AGG" in task1["v2_outputs"]
-    assert "WORK.VENTAS_AGG" in task1["recovered_outputs"], (
-        "la comparativa debe registrar lo que v1 perdía"
-    )
-    assert report["summary"]["nodes_with_recovered_io"] >= 1
+    graph = json.loads((ws / "state" / "flow_graph.json").read_text(encoding="utf-8"))
+    task1 = next(n for n in graph["nodes"] if n["id"] == "CodeTask-1")
+    assert "WORK.VENTAS_AGG" in task1["outputs"]
 
 
 def test_enrich_uses_custom_db_engines_from_project_config(tmp_path: Path) -> None:
