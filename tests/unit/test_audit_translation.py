@@ -88,3 +88,76 @@ def test_unignored_node_without_mapping_blocks_coverage(tmp_path, monkeypatch):
         i["node_id"] == "CodeTask-2" and i["category"] == "coverage"
         for i in report["issues"]
     )
+
+
+# ── Semántica de escritura: espejo del SAS, no invención ────────────────────
+
+def _write_pair(tmp_path: Path, sas_code: str, py_source: str) -> None:
+    state = tmp_path / "state"
+    (state / "nodes").mkdir(parents=True)
+    output = tmp_path / "output"
+    output.mkdir()
+    (state / "nodes_index.json").write_text(
+        json.dumps({"nodes": [{"id": "CT-1", "label": "Escritura"}]}), encoding="utf-8"
+    )
+    (state / "nodes" / "CT-1.json").write_text(
+        json.dumps({"id": "CT-1", "code": sas_code}), encoding="utf-8"
+    )
+    notebook = {
+        "cells": [
+            {"cell_type": "markdown", "source": ["## Escritura\n"]},
+            {"cell_type": "code", "source": [py_source]},
+        ]
+    }
+    (output / "NB-01_w.ipynb").write_text(json.dumps(notebook), encoding="utf-8")
+    (state / "sas_python_mapping.json").write_text(json.dumps({"mappings": [{
+        "node_id": "CT-1", "node_label": "Escritura",
+        "notebook_path": "output/NB-01_w.ipynb", "cell_index": 1,
+    }]}), encoding="utf-8")
+
+
+def _semantic_details(tmp_path, monkeypatch) -> list[str]:
+    report = _run_audit(tmp_path, monkeypatch)
+    return [i["detail"] for i in report["issues"] if i["category"] == "semantic"]
+
+
+def test_sas_append_with_invented_delete_is_high(tmp_path, monkeypatch):
+    _write_pair(
+        tmp_path,
+        "proc append base=tablas.bd data=work.nuevo force; run;",
+        "with engine.begin() as c:\n"
+        "    c.execute(text('DELETE FROM dbo.BD'))\n"
+        "nuevo.to_sql('BD', engine, if_exists='append', index=False)\n",
+    )
+    details = _semantic_details(tmp_path, monkeypatch)
+    assert any("ACUMULA" in d for d in details), details
+
+
+def test_sas_append_translated_as_append_is_clean(tmp_path, monkeypatch):
+    _write_pair(
+        tmp_path,
+        "proc append base=tablas.bd data=work.nuevo force; run;",
+        "nuevo.to_sql('BD', engine, if_exists='append', index=False)\n",
+    )
+    assert _semantic_details(tmp_path, monkeypatch) == []
+
+
+def test_sas_replace_translated_as_bare_append_is_flagged(tmp_path, monkeypatch):
+    _write_pair(
+        tmp_path,
+        "proc sql; create table tablas.resumen as select * from work.r; quit;",
+        "r.to_sql('RESUMEN', engine, if_exists='append', index=False)\n",
+    )
+    details = _semantic_details(tmp_path, monkeypatch)
+    assert any("REEMPLAZA" in d for d in details), details
+
+
+def test_sas_replace_translated_as_delete_plus_append_is_clean(tmp_path, monkeypatch):
+    _write_pair(
+        tmp_path,
+        "proc sql; create table tablas.resumen as select * from work.r; quit;",
+        "with engine.begin() as c:\n"
+        "    c.execute(text('DELETE FROM dbo.RESUMEN'))\n"
+        "r.to_sql('RESUMEN', engine, if_exists='append', index=False)\n",
+    )
+    assert _semantic_details(tmp_path, monkeypatch) == []

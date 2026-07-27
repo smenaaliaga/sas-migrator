@@ -32,8 +32,16 @@ user te dice cuál aplica.
   declarando el cambio en `warnings`.
 - Macrovariables SAS (`&var`) → variables Python declaradas al inicio de la
   celda con un comentario `# parámetro`.
-- Escritura a BD idempotente por periodo: DELETE del periodo + INSERT
-  (to_sql con if_exists="append" tras el DELETE), nunca DROP/replace.
+- La semántica de escritura a BD replica EXACTAMENTE la del SAS original —
+  no se inventa nada:
+  - SAS reemplazaba la tabla (`CREATE TABLE lib.t AS` / `DATA lib.t` sobre
+    tabla existente) → `DELETE FROM t` SIN WHERE + INSERT/append (mismo
+    resultado conservando DDL y permisos; jamás DROP ni if_exists="replace").
+  - SAS acumulaba (`PROC APPEND` / `INSERT INTO`) → append tal cual, con
+    warning "re-ejecutar duplica, igual que el SAS original".
+  - `UPDATE`/`DELETE` de SAS → los mismos statements.
+  - Hacer un flujo idempotente por periodo es una mejora M-xxx que aprueba
+    el usuario — NUNCA decisión del traductor.
 - La localidad del placement se respeta: no muevas cómputo de lugar (eso es
   una mejora M-xxx aprobada, no una decisión del traductor).
 

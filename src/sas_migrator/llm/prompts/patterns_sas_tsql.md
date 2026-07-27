@@ -24,15 +24,18 @@ jamás f-strings.
 | outer union corr | `UNION ALL` con columnas alineadas explícitas |
 | `CALCULATED alias` | repetir la expresión o usar CTE/subquery (T-SQL no permite alias en WHERE) |
 
-## Escritura idempotente (pushdown/hybrid)
+## Semántica de escritura (espejo del SAS, no invención)
 
 ```
-DELETE FROM BASE.dbo.T WHERE periodo = :periodo;
-INSERT INTO BASE.dbo.T (...) SELECT ... WHERE periodo = :periodo;
+-- SAS reemplazaba (CREATE TABLE sobre tabla existente):
+DELETE FROM BASE.dbo.T;
+INSERT INTO BASE.dbo.T (...) SELECT ...;
+
+-- SAS acumulaba (PROC APPEND / INSERT INTO): append tal cual + warning.
 ```
 
 - `sql_pushdown`: TODO el cómputo va en el SQL (joins, agregaciones, CASE) —
   pandas solo dispara la ejecución y verifica conteos. Nada de leer la tabla
   completa para procesarla en pandas.
-- `hybrid`: el `WHERE` del extract filtra al mínimo necesario (periodo,
-  claves); el resto del cómputo en pandas; la escritura vuelve idempotente.
+- `hybrid`: el `WHERE` del extract filtra al mínimo necesario; el resto del
+  cómputo en pandas; la escritura replica la semántica SAS del nodo.

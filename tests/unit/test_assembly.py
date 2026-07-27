@@ -174,3 +174,13 @@ def test_relative_paths_urls_and_formats_are_fine() -> None:
         'api = "https://api.ejemplo.cl/v1/datos"\n',
     ])
     assert check_node_translation(ok) is None
+
+
+def test_drop_table_and_replace_write_fail() -> None:
+    assert check_node_translation(
+        _nt("A", ["engine.execute('DROP TABLE dbo.X')\n"])
+    ).reason == "forbidden_pattern"
+    failure = check_node_translation(
+        _nt("A", ["df.to_sql('X', engine, if_exists='replace')\n"])
+    )
+    assert failure.reason == "forbidden_pattern" and "DDL" in failure.detail

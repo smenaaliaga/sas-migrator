@@ -36,7 +36,10 @@ from sas_migrator.core.models.translation import (
 )
 
 BASELINE_IMPORTS = ("import pandas as pd", "import numpy as np")
-FORBIDDEN_SUBSTRINGS = ("to_parquet", "duckdb")
+# drop table / if_exists=replace: destruyen DDL (permisos, índices) — el
+# reemplazo estilo SAS se replica con DELETE FROM sin WHERE + INSERT.
+FORBIDDEN_SUBSTRINGS = ("to_parquet", "duckdb", "drop table")
+_REPLACE_WRITE = re.compile(r"if_exists\s*=\s*['\"]replace['\"]")
 _SQL_WORDS = ("select ", "insert ", "update ", "delete ")
 
 # Scanner de secretos (hardening Etapa 6): antes era una regla de prompt —
@@ -119,6 +122,12 @@ def check_node_translation(nt: NodeTranslation) -> NodeAssemblyFailure | None:
                 return NodeAssemblyFailure(
                     nt.node_id, "forbidden_pattern", f"patrón prohibido '{token}'"
                 )
+        if _REPLACE_WRITE.search(lowered):
+            return NodeAssemblyFailure(
+                nt.node_id, "forbidden_pattern",
+                "to_sql(if_exists='replace') destruye DDL — el reemplazo estilo "
+                "SAS es DELETE FROM sin WHERE + append",
+            )
         for pattern in _SECRET_PATTERNS:
             m = pattern.search(src)
             if m:

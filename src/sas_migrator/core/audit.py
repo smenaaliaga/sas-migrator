@@ -142,6 +142,15 @@ def find_features_sas(sas_code: str, heuristics: dict[str, list[str]]) -> dict[s
         "si3_url": any(marker in low for marker in heuristics["domain_markers"]),
         "macro_user_pass": bool(re.search(r"&(user|password)\b", sas_code, flags=re.IGNORECASE)),
         "proc_import": bool(re.search(r"\bPROC\s+IMPORT\b", sas_code, flags=re.IGNORECASE)),
+        # Semántica de escritura del SAS original (espejo, no invención):
+        "db_append": bool(re.search(
+            r"\bPROC\s+APPEND\b|\bAPPEND\s+BASE\s*=|\bINSERT\s+INTO\b",
+            sas_code, flags=re.IGNORECASE,
+        )),
+        "db_delete": bool(re.search(r"\bDELETE\s+FROM\b", sas_code, flags=re.IGNORECASE)),
+        "sql_create_table": bool(re.search(
+            r"\bCREATE\s+TABLE\b", sas_code, flags=re.IGNORECASE
+        )),
         "proc_compare": bool(re.search(r"\bPROC\s+COMPARE\b", sas_code, flags=re.IGNORECASE)),
         "proc_gplot": bool(re.search(r"\bPROC\s+GPLOT\b", sas_code, flags=re.IGNORECASE)),
         "proc_gchart": bool(re.search(r"\bPROC\s+GCHART\b", sas_code, flags=re.IGNORECASE)),
@@ -160,6 +169,10 @@ def find_features_py(py_text: str, heuristics: dict[str, list[str]]) -> dict[str
         )
         or any(marker in low for marker in heuristics["sql_from_markers"]),
         "read_file": ("read_excel(" in low) or ("read_csv(" in low),
+        "delete_from": "delete from" in low,
+        "append_write": ('if_exists="append"' in low) or ("if_exists='append'" in low)
+        or ("insert into" in low),
+        "select_into": bool(re.search(r"\bselect\b[\s\S]*\binto\s+[\w.\[\]]+", low)),
         "compare_like": (
             ("compare" in low)
             or ("assert" in low)
@@ -454,6 +467,45 @@ def run_audit(state_dir: Path, output_dir: Path) -> int:
                     detail=(
                         "PROC HTTP appears to be replaced by SQL read of SI3.BCENTRAL "
                         "(potential semantic drift)"
+                    ),
+                )
+            )
+
+        # Semántica de escritura: la traducción replica la del SAS — no inventa.
+        if sas_f["db_append"] and not sas_f["db_delete"] and py_f_cell["delete_from"]:
+            issues.append(
+                Issue(
+                    severity="high",
+                    category="semantic",
+                    node_id=nid,
+                    node_label=node_label,
+                    notebook_path=nb_rel,
+                    detail=(
+                        "El SAS original ACUMULA (PROC APPEND/INSERT INTO sin DELETE) "
+                        "pero la traducción agrega DELETE FROM — cambia la semántica de "
+                        "escritura. Idempotencia por periodo es una mejora M-xxx que "
+                        "aprueba el usuario, no una decisión del traductor."
+                    ),
+                )
+            )
+        if (
+            sas_f["sql_create_table"]
+            and not sas_f["db_append"]
+            and py_f_cell["append_write"]
+            and not py_f_cell["delete_from"]
+            and not py_f_cell["select_into"]
+        ):
+            issues.append(
+                Issue(
+                    severity="medium",
+                    category="semantic",
+                    node_id=nid,
+                    node_label=node_label,
+                    notebook_path=nb_rel,
+                    detail=(
+                        "El SAS original REEMPLAZA la tabla (CREATE TABLE) pero la "
+                        "traducción hace append sin DELETE previo — re-ejecutar "
+                        "duplicaría filas que SAS no duplicaba."
                     ),
                 )
             )
