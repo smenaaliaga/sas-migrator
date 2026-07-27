@@ -181,3 +181,30 @@ def test_cli_status_without_migration(tmp_path: Path) -> None:
     result = runner.invoke(app, ["status", "--workspace", str(ws)])
     assert result.exit_code == 0
     assert "Sin migración iniciada" in result.output
+
+
+def test_cada_pregunta_se_muestra_pegada_a_su_prompt(monkeypatch) -> None:
+    """Volcar la tarjeta entera obliga a emparejar IDs con enunciados lejanos."""
+    from sas_migrator.cli import main as cli_main
+
+    card = {
+        "card_id": "C", "title": "T", "transition": "", "validation_error": None,
+        "allow_free_text": True, "progress": {"index": 1, "total": 1},
+        "questions": [
+            {"id": "Q-1", "text": "PRIMERA?", "question_type": "single_choice",
+             "options": ["a", "b"], "recommended_default": "a", "evidence": []},
+            {"id": "Q-2", "text": "SEGUNDA?", "question_type": "single_choice",
+             "options": ["c", "d"], "recommended_default": "c", "evidence": []},
+        ],
+    }
+    salida: list[str] = []
+    monkeypatch.setattr(cli_main.typer, "echo", lambda msg="": salida.append(str(msg)))
+    monkeypatch.setattr(cli_main.typer, "prompt", lambda text, **kw: salida.append(text) or "")
+
+    cli_main._prompt_card(card)
+
+    plano = "\n".join(salida)
+    # El enunciado de cada pregunta precede a SU prompt, y el de la segunda no
+    # aparece hasta que la primera fue contestada.
+    assert plano.index("PRIMERA?") < plano.index("Q-1 >") < plano.index("SEGUNDA?")
+    assert plano.index("SEGUNDA?") < plano.index("Q-2 >")

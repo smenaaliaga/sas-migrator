@@ -15,7 +15,13 @@ from pathlib import Path
 import typer
 import yaml
 
-from sas_migrator.cli.render import answers_from_script, parse_answer, render_card
+from sas_migrator.cli.render import (
+    FREE_TEXT_HINT,
+    answers_from_script,
+    parse_answer,
+    render_card_header,
+    render_question,
+)
 
 app = typer.Typer(help="Migrador SAS EG → Python (v2, LangGraph)")
 
@@ -37,12 +43,21 @@ def _echo_messages(result) -> None:
 
 
 def _prompt_card(card: dict) -> dict:
-    """Pregunta una tarjeta en terminal; Enter = default recomendado."""
+    """Pregunta una tarjeta en terminal; Enter = default recomendado.
+
+    De a una: cada pregunta se muestra pegada a su prompt. Volcar la tarjeta
+    entera y después encadenar los prompts deja al usuario emparejando IDs
+    (`Q-B2-1 >`) con enunciados que quedaron pantallas más arriba.
+    """
     typer.echo("")
-    typer.echo(render_card(card))
+    typer.echo(render_card_header(card))
+    if card.get("allow_free_text"):
+        typer.echo(FREE_TEXT_HINT)
     answers: list[dict] = []
     free_parts: list[str] = []
     for q in card.get("questions", []):
+        typer.echo("")
+        typer.echo(render_question(q))
         raw = typer.prompt(f"  {q['id']} >", default="", show_default=False)
         value = parse_answer(q, raw)
         if value is not None:

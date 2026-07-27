@@ -12,8 +12,11 @@ from typing import Any
 CardDict = dict[str, Any]
 
 
-def render_card(card: CardDict) -> str:
-    """Texto de una tarjeta para la terminal."""
+FREE_TEXT_HINT = "  (texto libre también vale: se registra como comentario/contrapropuesta)"
+
+
+def render_card_header(card: CardDict) -> str:
+    """Encabezado de la tarjeta: error de validación, transición y título."""
     lines: list[str] = []
     if card.get("validation_error"):
         lines.append(f"⚠ Respuesta no válida: {card['validation_error']}")
@@ -25,25 +28,35 @@ def render_card(card: CardDict) -> str:
     if progress and progress.get("total"):
         title += f"  [{progress['index']}/{progress['total']}]"
     lines.append(f"── {title} " + "─" * max(0, 60 - len(title)))
+    return "\n".join(lines)
+
+
+def render_question(question: CardDict) -> str:
+    """Una pregunta: enunciado, evidencia, opciones numeradas y el default."""
+    lines = [question["text"]]
+    for ev in question.get("evidence", []):
+        lines.append(f"    · {ev}")
+    options = question.get("options", [])
+    recommended = question.get("recommended_default")
+    for i, opt in enumerate(options, start=1):
+        marker = "  (Recomendado)" if opt == recommended else ""
+        lines.append(f"  {i}. {opt}{marker}")
+    if recommended and recommended not in options:
+        lines.append(f"  [Enter = {recommended}]")
+    elif recommended:
+        lines.append(f"  [Enter = opción recomendada: {recommended}]")
+    return "\n".join(lines)
+
+
+def render_card(card: CardDict) -> str:
+    """Texto de una tarjeta completa para la terminal."""
+    lines = [render_card_header(card)]
     for q in card.get("questions", []):
         lines.append("")
-        lines.append(q["text"])
-        for ev in q.get("evidence", []):
-            lines.append(f"    · {ev}")
-        options = q.get("options", [])
-        recommended = q.get("recommended_default")
-        for i, opt in enumerate(options, start=1):
-            marker = "  (Recomendado)" if opt == recommended else ""
-            lines.append(f"  {i}. {opt}{marker}")
-        if not options and recommended:
-            lines.append(f"  [Enter = {recommended}]")
-        elif recommended and recommended not in options:
-            lines.append(f"  [Enter = {recommended}]")
-        elif recommended:
-            lines.append(f"  [Enter = opción recomendada: {recommended}]")
+        lines.append(render_question(q))
     if card.get("allow_free_text"):
         lines.append("")
-        lines.append("  (texto libre también vale: se registra como comentario/contrapropuesta)")
+        lines.append(FREE_TEXT_HINT)
     return "\n".join(lines)
 
 
