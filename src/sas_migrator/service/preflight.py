@@ -210,6 +210,29 @@ def check_credential(workspace: Path) -> list[Check]:
 
     var = "ANTHROPIC_API_KEY" if provider == "anthropic" else "ANTHROPIC_FOUNDRY_API_KEY"
     checks: list[Check] = [Check("llm.provider", OK, f"{provider} · modelo {config.llm.model}")]
+    # Peculiaridades del proveedor/modelo que se descubren caras en producción:
+    # mejor un WARN acá que un cache_read=0 medido después de 95 llamadas.
+    if provider == "foundry":
+        checks.append(
+            Check(
+                "llm (foundry)",
+                WARN,
+                "prompt caching es beta en Foundry y no hay Batch API",
+                "Si el cache no rinde (ver `status`), consultá la habilitación "
+                "del recurso de Azure; el flujo funciona igual, solo más caro.",
+            )
+        )
+    if "haiku" in config.llm.model.lower():
+        checks.append(
+            Check(
+                "llm.model",
+                WARN,
+                "Haiku exige prefijos ≥4096 tokens para cachear",
+                "Un system corto no cachea y cada nodo re-paga el prompt entero. "
+                "El system de traducción con few-shot ya supera el mínimo; para "
+                "el resto de tareas considerá un modelo con mínimo 1024.",
+            )
+        )
     if os.environ.get(var):
         checks.append(Check(var, OK, "definida"))
     else:

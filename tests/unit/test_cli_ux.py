@@ -75,6 +75,26 @@ def test_doctor_no_confunde_advertencia_con_bloqueo(tmp_path: Path) -> None:
     )
 
 
+def test_doctor_advierte_peculiaridades_de_foundry_y_haiku(tmp_path: Path, monkeypatch) -> None:
+    """cache_read=0 se midió DESPUÉS de 95 llamadas: estas advertencias valen
+    un WARN antes de gastar."""
+    from sas_migrator.service.preflight import check_credential
+
+    ws = make_workspace(tmp_path)
+    (ws / "project_config.yaml").write_text(
+        "llm:\n  provider: foundry\n  model: claude-haiku-4-5-20251001\n"
+        "  foundry_resource: r\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("sas_migrator.llm.runtime.caller_injected", lambda: False)
+    monkeypatch.setattr("sas_migrator.llm.env.load_env", lambda ws=None: None)
+    monkeypatch.setenv("ANTHROPIC_FOUNDRY_API_KEY", "k")
+    checks = check_credential(ws)
+    warns = " ".join(c.detail for c in checks if c.status == WARN)
+    assert "Foundry" in warns or "caching" in warns
+    assert "4096" in warns
+
+
 def test_preflight_sin_directorio_no_sigue_chequeando(tmp_path: Path) -> None:
     report = run_checks(tmp_path / "no-existe")
     assert [c.status for c in report.checks] == [FAIL]
