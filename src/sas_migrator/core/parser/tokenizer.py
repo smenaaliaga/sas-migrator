@@ -53,6 +53,73 @@ def strip_block_comments(code: str) -> str:
     return "".join(out)
 
 
+def mask_noncode(code: str) -> str:
+    """El código con comentarios y strings BLANQUEADOS, misma longitud.
+
+    Para buscar fronteras (``^PROC|^DATA``) con offsets que sigan valiendo
+    sobre el original: un ``/* proc sort viejo */``, un ``* proc means...;``
+    de statement o un ``'PROC'`` dentro de un string no son bloques y no deben
+    producir un corte. Los saltos de línea se conservan (los regex ^ los usan).
+    """
+    out = list(code)
+    i, n = 0, len(code)
+    in_string: str | None = None
+    in_stmt_comment = False
+    stmt_start = True  # ¿el próximo token no-blanco abre un statement?
+    while i < n:
+        ch = code[i]
+        if in_string:
+            if ch != "\n":
+                out[i] = " "
+            if ch == in_string:
+                if i + 1 < n and code[i + 1] == in_string:  # comilla duplicada
+                    out[i + 1] = " "
+                    i += 2
+                    continue
+                in_string = None
+            i += 1
+            continue
+        if in_stmt_comment:
+            if ch == ";":
+                in_stmt_comment = False
+                stmt_start = True
+            elif ch != "\n":
+                out[i] = " "
+            i += 1
+            continue
+        if ch == "/" and i + 1 < n and code[i + 1] == "*":
+            end = code.find("*/", i + 2)
+            stop = n if end == -1 else end + 2
+            for j in range(i, stop):
+                if code[j] != "\n":
+                    out[j] = " "
+            i = stop
+            continue
+        if ch in ("'", '"'):
+            in_string = ch
+            out[i] = " "
+            i += 1
+            continue
+        if ch == ";":
+            stmt_start = True
+            i += 1
+            continue
+        if stmt_start and ch == "%" and i + 1 < n and code[i + 1] == "*":
+            in_stmt_comment = True
+            out[i] = out[i + 1] = " "
+            i += 2
+            continue
+        if stmt_start and ch == "*":
+            in_stmt_comment = True
+            out[i] = " "
+            i += 1
+            continue
+        if not ch.isspace():
+            stmt_start = False
+        i += 1
+    return "".join(out)
+
+
 def split_statements(code: str) -> list[str]:
     """Divide en statements por ';' fuera de strings. Aplica strip a cada uno."""
     code = strip_block_comments(code)

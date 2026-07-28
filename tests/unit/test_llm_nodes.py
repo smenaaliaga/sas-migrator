@@ -495,3 +495,36 @@ def test_merge_conserva_orden_dedupea_imports_y_baja_la_confianza() -> None:
     assert merged.confidence == Confidence.LOW, "no más confiable que su peor tramo"
     assert any("NODO PARTIDO" in w for w in merged.warnings)
     assert any("[parte 1/2] ojo con a" == w for w in merged.warnings)
+
+
+def test_merge_conserva_la_traceability_de_todas_las_partes() -> None:
+    from sas_migrator.core.models.translation import NodeTranslation, Traceability
+    from sas_migrator.llm.phases import merge_translations
+
+    p1 = NodeTranslation(node_id="N", cells=["a = 1\n"], traceability=Traceability(
+        sas_construct="PROC SQL CREATE TABLE", business_rule="arma la base"))
+    p2 = NodeTranslation(node_id="N", cells=["b = 2\n"], traceability=Traceability(
+        sas_construct="DATA step MERGE", business_rule="cruza con clientes"))
+    merged = merge_translations([p1, p2])
+    assert merged.traceability.sas_construct == "PROC SQL CREATE TABLE + DATA step MERGE"
+    assert merged.traceability.business_rule == "arma la base / cruza con clientes"
+
+
+def test_split_ignora_proc_en_comentarios_y_strings() -> None:
+    """Un PROC comentado o dentro de un string no es una frontera de bloque:
+    cortar ahí partía una sentencia al medio."""
+    from sas_migrator.llm.phases import split_sas_blocks
+
+    bloque1 = (
+        "DATA b;\n"
+        "  /* PROC SORT viejo, no usar */\n"
+        "  SET a;\n"
+        "  x = 'PROC MEANS en un string';\n"
+        "* PROC TRANSPOSE comentado de statement;\n"
+        "RUN;\n"
+    )
+    bloque2 = "PROC SORT DATA=b;\n  BY z;\nRUN;\n"
+    code = bloque1 + bloque2
+    trozos = split_sas_blocks(code, len(code) - 1)  # obliga a partir
+    assert "".join(trozos) == code
+    assert trozos == [bloque1, bloque2], "el único corte válido es el PROC real"

@@ -114,14 +114,19 @@ _SAS_BLOCK_START = re.compile(r"^[ \t]*(?:PROC|DATA)\b", re.IGNORECASE | re.MULT
 def split_sas_blocks(code: str, limit: int) -> list[str]:
     """Parte el código en trozos de ``<= limit`` cortando SOLO entre bloques.
 
-    Devuelve ``[]`` si un bloque individual ya excede el techo: en ese caso no
-    hay corte honesto posible y el nodo debe ir a needs_human, no traducirse a
-    medias.
+    Las fronteras se buscan sobre ``mask_noncode(code)`` (misma longitud, con
+    comentarios y strings blanqueados): un ``/* proc sort viejo */`` o un
+    ``'PROC'`` dentro de un string no son bloques — cortar ahí partía una
+    sentencia al medio. Devuelve ``[]`` si un bloque individual ya excede el
+    techo: sin corte honesto posible, el nodo va a needs_human, no se traduce
+    a medias.
     """
     if len(code) <= limit:
         return [code] if code else []
 
-    cortes = [m.start() for m in _SAS_BLOCK_START.finditer(code)]
+    from sas_migrator.core.parser.tokenizer import mask_noncode
+
+    cortes = [m.start() for m in _SAS_BLOCK_START.finditer(mask_noncode(code))]
     if not cortes or cortes[0] > limit:
         return []  # ni el preámbulo entra: sin frontera utilizable
     bloques = [
@@ -344,11 +349,27 @@ def merge_translations(partes: list[NodeTranslation]) -> NodeTranslation:
     for i, parte in enumerate(partes, start=1):
         warnings.extend(f"[parte {i}/{len(partes)}] {w}" for w in parte.warnings)
 
+    # Trazabilidad de TODOS los tramos, no solo del primero: el mapping y la
+    # auditoría leen esto — quedarse con la parte 1 escondía qué más hace el nodo.
+    def _unicos(valores: list[str]) -> list[str]:
+        vistos: list[str] = []
+        for v in valores:
+            v = v.strip()
+            if v and v not in vistos:
+                vistos.append(v)
+        return vistos
+
+    from sas_migrator.core.models.translation import Traceability
+
+    construct = " + ".join(_unicos([p.traceability.sas_construct for p in partes]))
+    regla = " / ".join(_unicos([p.traceability.business_rule for p in partes]))
+
     return base.model_copy(update={
         "imports": imports,
         "cells": [c for parte in partes for c in parte.cells],
         "confidence": peor,
         "warnings": warnings,
+        "traceability": Traceability(sas_construct=construct, business_rule=regla),
     })
 
 
