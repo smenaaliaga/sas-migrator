@@ -136,10 +136,21 @@ def summarize(state_dir: Path) -> dict:
         total += 1
         entry = by_task.setdefault(
             rec.get("task", "?"),
-            {"calls": 0, "ok": 0, "needs_human": 0, "errors": 0, "duration_ms": 0},
+            {
+                "calls": 0, "ok": 0, "needs_human": 0, "errors": 0,
+                "duration_ms": 0, "input_tokens": 0, "output_tokens": 0,
+                "cache_read_tokens": 0, "cache_creation_tokens": 0,
+            },
         )
         entry["calls"] += 1
         entry["duration_ms"] += int(rec.get("duration_ms", 0))
+        # Cache observable: sin esto, "el caching rinde 0" se descubre mirando
+        # el JSONL a mano — acá queda agregado por task.
+        usage = rec.get("usage") or {}
+        entry["input_tokens"] += usage.get("input_tokens") or 0
+        entry["output_tokens"] += usage.get("output_tokens") or 0
+        entry["cache_read_tokens"] += usage.get("cache_read_input_tokens") or 0
+        entry["cache_creation_tokens"] += usage.get("cache_creation_input_tokens") or 0
         outcome = str(rec.get("outcome", ""))
         if outcome == "ok":
             entry["ok"] += 1

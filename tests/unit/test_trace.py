@@ -32,6 +32,19 @@ def _call(caller, task: str = "translation"):
     )
 
 
+def test_summarize_agrega_tokens_y_cache_por_task(tmp_path: Path) -> None:
+    """cache_read=0 en produccion se descubrió leyendo el JSONL a mano; ahora
+    el resumen lo agrega por task."""
+    state = tmp_path / "state"
+    caller = TracingCaller(_PricedInner(), state)
+    _call(caller)
+    _call(caller)
+    entry = summarize(state)["by_task"]["translation"]
+    assert entry["input_tokens"] == 2_000_000
+    assert entry["output_tokens"] == 20_000
+    assert entry["cache_read_tokens"] == 0 and entry["cache_creation_tokens"] == 0
+
+
 # ── costos y presupuesto ────────────────────────────────────────────────────
 
 class _PricedInner:
