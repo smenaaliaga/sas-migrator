@@ -435,6 +435,11 @@ def resume(
 
     Las respuestas viven en el checkpoint, no en state/: retomar no repite lo
     que ya contestaste. Para volver a preguntar desde cero, `rewind`.
+
+    Sobre un gate bloqueado, `resume` RE-EVALÚA el gate (los needs_human que
+    marcaste resolved, el artefacto que corregiste) sin re-ejecutar la fase;
+    si el arreglo exige rehacer la fase (p. ej. re-traducir nodos), eso es
+    `rewind --phase N`.
     """
     ws = _resolve_ws(workspace)
     session = _session(ws)
@@ -682,10 +687,14 @@ def status(
     elif items:
         _next_step(
             "sas-migrator resume",
-            "después de marcar los needs_human como resolved en el YAML.",
+            "re-evalúa el gate después de marcar los needs_human como resolved.",
         )
     else:
-        _next_step("sas-migrator resume", "reintenta la fase bloqueada.")
+        _next_step(
+            "sas-migrator resume",
+            "re-evalúa el gate bloqueado; si hay que rehacer la fase, "
+            "`rewind --phase N`.",
+        )
 
 
 # ── Integración ──────────────────────────────────────────────────────────────

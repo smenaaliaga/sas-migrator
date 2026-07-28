@@ -97,7 +97,43 @@ class MigrationSession:
         return self._to_result(result)
 
     def resume(self) -> SessionResult:
-        """Continúa desde el checkpoint (tras un reinicio del proceso)."""
+        """Continúa desde el checkpoint (tras un reinicio del proceso).
+
+        Si la corrida terminó en ``gate_blocked``, "continuar" significa
+        re-evaluar el gate (los needs_human ya resueltos, el artefacto
+        corregido): antes esto era un no-op sobre un checkpoint terminal — el
+        comando prometía reintentar y devolvía el mismo BLOCKED sin ejecutar
+        nada.
+        """
+        snapshot = self.graph.get_state(self._config())
+        gate = (snapshot.values or {}).get("last_gate") or {}
+        terminal = not (snapshot.next or ()) and not snapshot.tasks
+        if terminal and gate.get("passed") is False:
+            return self.retry_gate()
+        result = self.graph.invoke(None, self._config())
+        return self._to_result(result)
+
+    def retry_gate(self) -> SessionResult:
+        """Re-evalúa el gate que bloqueó y, si pasa, la corrida sigue.
+
+        Mecánica: ``update_state(as_node=<nodo de la fase>)`` crea un
+        checkpoint nuevo como si la fase acabara de terminar — SIN
+        re-ejecutarla — con ``next=(gateN,)`` y sin writes viejos colgando;
+        ``invoke(None)`` ejecuta el gate fresco (post-P0.5 los gates son
+        puros: re-evaluarlos es barato). Esto NO agrega aristas ni ciclos a
+        la topología: el gate sigue siendo el único camino a la fase
+        siguiente. Para RE-EJECUTAR la fase (p. ej. re-traducir nodos
+        faltantes), ``rewind_to_phase``.
+        """
+        from sas_migrator.graph.builder import PHASES
+
+        snapshot = self.graph.get_state(self._config())
+        gate = (snapshot.values or {}).get("last_gate") or {}
+        if gate.get("passed") is not False:
+            raise LookupError("no hay gate bloqueado que reintentar")
+        phase = int(gate["phase"])
+        phase_node = next(name for name, _fn, ph in PHASES if ph == phase)
+        self.graph.update_state(self._config(), None, as_node=phase_node)
         result = self.graph.invoke(None, self._config())
         return self._to_result(result)
 
