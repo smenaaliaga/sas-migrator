@@ -115,9 +115,9 @@ def test_unresolvable_import_fails() -> None:
         _nt("A", ["x = 1\n"], imports=["import paquete_inexistente_xyz"])
     )
     assert failure.reason == "unresolvable_import"
-    # también dentro de las celdas
+    # dentro de una celda además viola el contrato de ubicación
     failure2 = check_node_translation(_nt("A", ["import otro_fantasma_zz\nx = 1\n"]))
-    assert failure2.reason == "unresolvable_import"
+    assert failure2.reason == "import_in_cell"
 
 
 def test_allowlist_no_depende_del_entorno_del_migrador() -> None:
@@ -128,7 +128,7 @@ def test_allowlist_no_depende_del_entorno_del_migrador() -> None:
     assert check_node_translation(nt).reason == "unresolvable_import"
     assert check_node_translation(nt, ["libreria_del_cliente_zz"]) is None
     # la stdlib pasa siempre, sin declararla
-    assert check_node_translation(_nt("A", ["import json\nx = 1\n"], imports=[])) is None
+    assert check_node_translation(_nt("A", ["x = 1\n"], imports=["import json"])) is None
     # los default (contrato de prompts + auditoría) pasan sin config
     assert check_node_translation(
         _nt("A", ["x = 1\n"], imports=["import requests", "import matplotlib"])
@@ -150,6 +150,58 @@ def test_requirements_txt_documenta_el_entorno_destino(tmp_path: Path) -> None:
 
 def test_empty_translation_fails() -> None:
     assert check_node_translation(_nt("A", ["   \n"])).reason == "empty_translation"
+
+
+def test_swallowed_exception_y_su_falso_positivo() -> None:
+    """El hueco real de producción: except tipado cuyo cuerpo solo imprime."""
+    tragado = _nt("A", [
+        "try:\n    x = int('a')\nexcept ValueError as e:\n    print(e)\n"
+    ])
+    assert check_node_translation(tragado).reason == "swallowed_exception"
+    solo_pass = _nt("A", [
+        "try:\n    x = int('a')\nexcept ValueError:\n    pass\n"
+    ])
+    assert check_node_translation(solo_pass).reason == "swallowed_exception"
+    # falso positivo curado: loguear Y re-lanzar es manejo legítimo
+    relanza = _nt("A", [
+        "try:\n    x = int('a')\nexcept ValueError as e:\n    print(e)\n    raise\n"
+    ])
+    assert check_node_translation(relanza) is None
+    # asignar un default explícito también es una decisión, no un silencio
+    con_manejo = _nt("A", [
+        "try:\n    x = int('a')\nexcept ValueError:\n    x = 0\n"
+    ])
+    assert check_node_translation(con_manejo) is None
+
+
+def test_drop_table_en_comentario_no_es_drop_table() -> None:
+    """3 nodos reales cayeron por comentarios que mencionaban drop table."""
+    comentario = _nt("A", [
+        "# jamás hacer drop table acá: el reemplazo es DELETE+append\nx = 1\n"
+    ])
+    assert check_node_translation(comentario) is None
+    real = _nt("A", ['sql = "DROP TABLE dbo.resumen"\nx = 1\n'])
+    failure = check_node_translation(real)
+    assert failure.reason == "forbidden_pattern" and "DROP TABLE" in failure.detail
+    # to_parquet comentado tampoco cuenta
+    assert check_node_translation(_nt("A", ["# sin to_parquet\nx = 1\n"])) is None
+
+
+def test_row_by_row_con_escape_auditable() -> None:
+    loop = (
+        "for _, row in df.iterrows():\n"
+        "    conn.execute(stmt, row['id'])\n"
+    )
+    assert check_node_translation(_nt("A", [loop])).reason == "row_by_row_write"
+    # la válvula exige MOTIVO; el marcador queda greppeable para el revisor
+    con_escape = _nt("A", [
+        "# sas-migrator: permitir-loop-filas — SP legado exige una llamada por fila\n"
+        + loop
+    ])
+    assert check_node_translation(con_escape) is None
+    # marcador sin motivo no vale
+    sin_motivo = _nt("A", ["# sas-migrator: permitir-loop-filas\n" + loop])
+    assert check_node_translation(sin_motivo).reason == "row_by_row_write"
 
 
 def test_check_all_reporta_todas_las_fallas_en_una_pasada() -> None:
@@ -212,7 +264,8 @@ def test_secret_api_key_and_token_fail() -> None:
 
 
 def test_secret_env_lookup_is_fine() -> None:
-    ok = _nt("A", ["import os\npwd = os.environ.get('DB_PASSWORD')\nx = 1\n"])
+    ok = _nt("A", ["pwd = os.environ.get('DB_PASSWORD')\nx = 1\n"],
+             imports=["import os"])
     assert check_node_translation(ok) is None
 
 
@@ -231,12 +284,11 @@ def test_absolute_paths_fail() -> None:
 
 def test_relative_paths_urls_and_formats_are_fine() -> None:
     ok = _nt("A", [
-        'from pathlib import Path\n'
         'salida = Path("salidas") / "resumen.csv"\n'
         'df.to_csv(salida, index=False)\n'
         'fecha = x.strftime("%d/%m/%Y")\n'
         'api = "https://api.ejemplo.cl/v1/datos"\n',
-    ])
+    ], imports=["from pathlib import Path"])
     assert check_node_translation(ok) is None
 
 

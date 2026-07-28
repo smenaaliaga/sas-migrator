@@ -48,6 +48,11 @@ from sas_migrator.core.validation.symbols import undefined_in_cells
 
 BASELINE_IMPORTS = ("import pandas as pd", "import numpy as np")
 
+# Válvula de escape AUDITABLE para el chequeo de escritura fila a fila: hay
+# casos legítimos (SPs por fila, APIs sin batch). El comentario deja rastro
+# greppeable y el motivo a la vista del revisor; sin motivo no vale.
+_ESCAPE_ROW_LOOP = re.compile(r"#\s*sas-migrator:\s*permitir-loop-filas\s*[—-]\s*\S")
+
 # Default de librerías de terceros permitidas en el código DESTINO. La fuente
 # de verdad configurable es `translation.allowed_imports` (project_config.yaml);
 # este frozenset la espeja para los callers sin config (stubs, tests). Validar
@@ -58,8 +63,12 @@ DEFAULT_ALLOWED_IMPORTS = frozenset({
     "scipy", "sqlalchemy",
 })
 # drop table / if_exists=replace: destruyen DDL (permisos, índices) — el
-# reemplazo estilo SAS se replica con DELETE FROM sin WHERE + INSERT.
-FORBIDDEN_SUBSTRINGS = ("to_parquet", "duckdb", "drop table")
+# reemplazo estilo SAS se replica con DELETE FROM sin WHERE + INSERT. Se
+# buscan sobre el fuente SIN comentarios: tres nodos reales cayeron porque un
+# comentario decía "no usar drop table". La forma exigida (\b y \s+) evita
+# que "backdrop_tables" cuente.
+FORBIDDEN_SUBSTRINGS = ("to_parquet", "duckdb")
+_DROP_TABLE = re.compile(r"(?i)\bdrop\s+table\b")
 _REPLACE_WRITE = re.compile(r"if_exists\s*=\s*['\"]replace['\"]")
 # Forma de sentencia, no palabra suelta: un print(f"insert completado: {n}")
 # contiene "insert " y no es SQL. Se exige el par verbo+cláusula.
@@ -80,7 +89,7 @@ _SECRET_PATTERNS = (
 @dataclass
 class NodeAssemblyFailure:
     node_id: str
-    reason: str  # syntax_error | unresolvable_import | forbidden_pattern | strategy_mismatch | empty_translation | secret_detected | absolute_path | placeholder_stub | bare_except | self_assignment | empty_frame_guard | sql_no_op | row_by_row_write | undefined_name
+    reason: str  # syntax_error | unresolvable_import | import_in_cell | forbidden_pattern | strategy_mismatch | empty_translation | secret_detected | absolute_path | placeholder_stub | bare_except | swallowed_exception | self_assignment | empty_frame_guard | sql_no_op | row_by_row_write | undefined_name
     detail: str
 
 
@@ -166,6 +175,29 @@ def _placeholder_comment(src: str) -> str | None:
     return None
 
 
+def _strip_comments(src: str) -> str:
+    """El fuente sin comentarios, para los chequeos de substring.
+
+    Un comentario que dice "no usar drop table" no es un DROP TABLE. Si el
+    fuente no tokeniza (celda con syntax error — ya reportada aparte), se
+    devuelve tal cual: mejor un falso positivo que un falso negativo.
+    """
+    import io
+    import tokenize
+
+    try:
+        tokens = list(tokenize.generate_tokens(io.StringIO(src).readline))
+    except (tokenize.TokenError, IndentationError, SyntaxError):
+        return src
+    lines = src.splitlines(keepends=True)
+    for tok in tokens:
+        if tok.type == tokenize.COMMENT:  # un comentario nunca abarca 2 líneas
+            row, scol = tok.start[0] - 1, tok.start[1]
+            line = lines[row]
+            lines[row] = line[:scol] + line[tok.end[1]:]
+    return "".join(lines)
+
+
 def _is_empty_frame_call(node: ast.AST) -> bool:
     if not isinstance(node, ast.Call) or node.args or node.keywords:
         return False
@@ -226,6 +258,42 @@ def _bare_except(tree: ast.AST) -> int | None:
     """``except:`` sin tipo — convierte un fallo real en un dato faltante."""
     for node in ast.walk(tree):
         if isinstance(node, ast.ExceptHandler) and node.type is None:
+            return node.lineno
+    return None
+
+
+def _is_noise_stmt(stmt: ast.stmt) -> bool:
+    """¿La sentencia solo hace ruido (print/log/pass) sin re-lanzar ni marcar?"""
+    if isinstance(stmt, ast.Pass):
+        return True
+    if isinstance(stmt, ast.Expr):
+        if isinstance(stmt.value, ast.Constant):
+            return True  # docstring/comentario disfrazado
+        call = stmt.value
+        if isinstance(call, ast.Call):
+            func = call.func
+            if isinstance(func, ast.Name) and func.id == "print":
+                return True
+            if isinstance(func, ast.Attribute):
+                root = func.value
+                if isinstance(root, ast.Name) and root.id in ("logging", "logger", "log"):
+                    return True
+    return False
+
+
+def _swallowed_exception(tree: ast.AST) -> int | None:
+    """``except Exception as e: print(e)`` — el hueco silencioso REAL de
+    producción (CodeTask-jo2ncH7bTsseLYP8): el handler tiene tipo, así que
+    ``bare_except`` no lo ve, pero su cuerpo solo imprime y sigue — todos los
+    chequeos pasan y el nodo entrega datos incompletos sin fallar.
+
+    Falso positivo curado: un handler que re-lanza (``raise``), retorna, o
+    asigna algo (marca el fallo en un dato) NO se marca.
+    """
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ExceptHandler) or node.type is None:
+            continue
+        if node.body and all(_is_noise_stmt(s) for s in node.body):
             return node.lineno
     return None
 
@@ -329,11 +397,20 @@ def check_node_translation_all(
 
     sources = list(nt.imports) + list(nt.cells)
     for src in sources:
-        lowered = src.lower()
+        # Substrings prohibidos sobre el fuente SIN comentarios (un comentario
+        # que menciona drop table no es un DROP TABLE). Los secretos, sobre el
+        # fuente CRUDO: una credencial en un comentario sigue siendo un leak.
+        code_only = _strip_comments(src).lower()
         for token in FORBIDDEN_SUBSTRINGS:
-            if token in lowered:
+            if token in code_only:
                 add("forbidden_pattern", f"patrón prohibido '{token}'")
-        if _REPLACE_WRITE.search(lowered):
+        if _DROP_TABLE.search(code_only):
+            add(
+                "forbidden_pattern",
+                "DROP TABLE destruye DDL (permisos, índices) — el reemplazo "
+                "estilo SAS es DELETE FROM sin WHERE + append",
+            )
+        if _REPLACE_WRITE.search(code_only):
             add(
                 "forbidden_pattern",
                 "to_sql(if_exists='replace') destruye DDL — el reemplazo estilo "
@@ -361,17 +438,33 @@ def check_node_translation_all(
     # Una celda con error de sintaxis se reporta y se excluye del análisis AST;
     # las demás celdas se siguen chequeando — el retry recibe el panorama entero.
     trees: list[ast.AST] = []
+    cell_trees: list[tuple[int, ast.AST]] = []
     for i, cell in enumerate(nt.cells):
         try:
-            trees.append(ast.parse(cell))
+            tree = ast.parse(cell)
         except SyntaxError as exc:
             add("syntax_error", f"celda {i}: {exc.msg} (línea {exc.lineno})")
+            continue
+        trees.append(tree)
+        cell_trees.append((i, tree))
     for line in nt.imports:
         try:
             trees.append(ast.parse(line))
         except SyntaxError as exc:
             add("syntax_error", f"import inválido '{line}': {exc.msg}")
 
+    # El contrato dice que los imports van en `imports` (el ensamblador los
+    # agrega a la celda de configuración, deduplicados). Un import dentro de
+    # una celda escapa a ese dedupe y a la allowlist visible del requirements.
+    for i, tree in cell_trees:
+        if any(isinstance(n, (ast.Import, ast.ImportFrom)) for n in ast.walk(tree)):
+            add(
+                "import_in_cell",
+                f"celda {i}: import dentro de la celda — va en el campo "
+                "`imports` del NodeTranslation, no en el código",
+            )
+
+    escape_row_loop = any(_ESCAPE_ROW_LOOP.search(c) for c in nt.cells)
     roots: set[str] = set()
     for tree in trees:
         sql = _fstring_sql(tree)
@@ -406,13 +499,22 @@ def check_node_translation_all(
                 f"'WHERE 1=1' sin predicados: {sql} — el filtro del SAS original "
                 "se perdió y la consulta trae la tabla entera",
             )
+        lineno = _swallowed_exception(tree)
+        if lineno is not None:
+            add(
+                "swallowed_exception",
+                f"except cuyo cuerpo solo imprime/loguea/pasa (línea {lineno}): el "
+                "fallo real se vuelve un dato faltante silencioso. Re-lanzar, "
+                "capturar la excepción esperada con manejo real, o dejar propagar",
+            )
         call = _row_by_row_write(tree)
-        if call is not None:
+        if call is not None and not escape_row_loop:
             add(
                 "row_by_row_write",
                 f"'{call}' dentro de un loop de iterrows(): un round-trip por fila. "
                 "El APPEND de SAS se traduce con una escritura masiva (to_sql fuera "
-                "del loop)",
+                "del loop). Caso legítimo (SP por fila, API sin batch): comentario "
+                "'# sas-migrator: permitir-loop-filas — <motivo>' en la celda",
             )
         roots |= _import_root_names(tree)
 
