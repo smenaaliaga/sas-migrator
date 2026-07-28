@@ -13,12 +13,14 @@ db:
   trust_server_certificate: false
 
 audit:
-  # Marcadores de dominio para la auditoría de traducción (opcionales).
-  # Ejemplo: dominios de APIs que el flujo SAS consulta vía PROC HTTP.
-  domain_markers: []
-  # Nombres de engines SQL esperados en el código generado.
-  sql_engine_markers: []
-  # Marcadores de manejo de secretos aceptados.
+  # Los endpoints que el flujo consulta y las tablas que puebla NO se declaran
+  # acá: la auditoría los lee del propio SAS (el URL= del PROC HTTP y el destino
+  # de PROC APPEND/INSERT/CREATE TABLE). Las reglas de deriva —el traductor
+  # cambió el endpoint, o reemplazó la llamada a la API por un SELECT de la
+  # tabla que esa API debía poblar— corren solas, sin configurar nada.
+  #
+  # Acá va solo lo que el SAS no dice:
+  # Formas de manejar secretos que aceptas donde el SAS usaba &user/&password.
   env_secret_markers: ["os.environ", "dotenv"]
   # DataFrames cuya inicialización debe verificarse en runtime.
   runtime_df_checks: []

@@ -11,7 +11,7 @@ import pytest
 
 import sas_migrator.core.analysis.analyze as ga
 import sas_migrator.core.audit as audit_mod
-from sas_migrator.core.config import ProjectConfig, load_project_config
+from sas_migrator.core.config import AuditConfig, ProjectConfig, load_project_config
 from sas_migrator.core.db.engine import connection_string, resolve_server
 from sas_migrator.core.reset import reset_workspace
 
@@ -21,7 +21,7 @@ def test_config_defaults_are_neutral() -> None:
     cfg = ProjectConfig()
     assert cfg.db.default_server == ""
     assert cfg.db.trust_server_certificate is False
-    assert cfg.audit.domain_markers == []
+    assert cfg.audit.env_secret_markers == ["os.environ", "dotenv"]
     assert cfg.audit.runtime_df_checks == []
 
 
@@ -32,13 +32,13 @@ def test_config_missing_file_yields_defaults(tmp_path: Path) -> None:
 def test_config_loads_from_workspace(tmp_path: Path) -> None:
     (tmp_path / "project_config.yaml").write_text(
         "db:\n  default_server: srv.example.local\n  trust_server_certificate: true\n"
-        "audit:\n  domain_markers: [api.example.com]\n",
+        "audit:\n  runtime_df_checks: [df_resumen]\n",
         encoding="utf-8",
     )
     cfg = load_project_config(tmp_path)
     assert cfg.db.default_server == "srv.example.local"
     assert cfg.db.trust_server_certificate is True
-    assert cfg.audit.domain_markers == ["api.example.com"]
+    assert cfg.audit.runtime_df_checks == ["df_resumen"]
 
 
 # ── engine / resolución de servidor ──────────────────────────────────────────
@@ -75,29 +75,35 @@ def test_audit_default_heuristics_have_no_client_markers() -> None:
     joined = json.dumps(audit_mod.DEFAULT_HEURISTICS)
     for marker in ("si3", "bcentral", "sieterestws", "df_bd_ctsi", "bcch"):
         assert marker not in joined
-    assert audit_mod.DEFAULT_HEURISTICS["domain_markers"] == []
+
+
+def test_audit_no_longer_takes_domain_or_table_markers() -> None:
+    """Endpoints y tablas se infieren del SAS: declararlos dejó de ser posible."""
+    for key in ("domain_markers", "sql_engine_markers", "sql_from_markers"):
+        assert key not in audit_mod.DEFAULT_HEURISTICS
+        assert key not in AuditConfig.model_fields
 
 
 def test_audit_heuristics_load_from_project_config(tmp_path: Path) -> None:
     (tmp_path / "project_config.yaml").write_text(
-        "audit:\n  domain_markers: [api.cliente.cl]\n", encoding="utf-8"
+        "audit:\n  runtime_df_checks: [df_pib]\n", encoding="utf-8"
     )
     state = tmp_path / "state"
     state.mkdir()
     heur = audit_mod.load_heuristics(state)
-    assert heur["domain_markers"] == ["api.cliente.cl"]
+    assert heur["runtime_df_checks"] == ["df_pib"]
 
 
 def test_audit_heuristics_state_yaml_overrides_project_config(tmp_path: Path) -> None:
     (tmp_path / "project_config.yaml").write_text(
-        "audit:\n  domain_markers: [api.cliente.cl]\n", encoding="utf-8"
+        "audit:\n  runtime_df_checks: [df_pib]\n", encoding="utf-8"
     )
     state = tmp_path / "state"
     state.mkdir()
     (state / "audit_heuristics.yaml").write_text(
-        "domain_markers: [otro.cliente.cl]\n", encoding="utf-8"
+        "runtime_df_checks: [df_cnt]\n", encoding="utf-8"
     )
-    assert audit_mod.load_heuristics(state)["domain_markers"] == ["otro.cliente.cl"]
+    assert audit_mod.load_heuristics(state)["runtime_df_checks"] == ["df_cnt"]
 
 
 # ── reset con workspace explícito ────────────────────────────────────────────

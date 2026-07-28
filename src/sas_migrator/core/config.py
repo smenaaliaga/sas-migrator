@@ -34,17 +34,16 @@ class DBConfig(BaseModel):
 
 
 class AuditConfig(BaseModel):
-    """Marcadores de dominio para la auditoría de traducción.
+    """Lo que la auditoría de traducción no puede leer del SAS.
 
-    Vacíos por default: los chequeos dependientes de dominio (URLs del cliente,
-    nombres de engine, DataFrames esperados) solo aplican si el proyecto los
-    declara. Los chequeos genéricos (PROC HTTP→requests, secretos, etc.) no
-    dependen de esto.
+    Los endpoints que el flujo consulta y las tablas que puebla NO se declaran:
+    se infieren nodo por nodo del ``URL=`` y del destino de escritura del propio
+    código SAS (``core.audit.extract_http_hosts`` / ``extract_dest_tables``), de
+    modo que las reglas de deriva corren en cualquier proyecto sin configurar
+    nada. Acá queda solo lo que el SAS no dice: qué formas de manejar secretos
+    aceptas y qué DataFrames quieres vigilar en runtime.
     """
 
-    domain_markers: list[str] = Field(default_factory=list)
-    sql_engine_markers: list[str] = Field(default_factory=list)
-    sql_from_markers: list[str] = Field(default_factory=list)
     env_secret_markers: list[str] = Field(
         default_factory=lambda: ["os.environ", "dotenv"]
     )

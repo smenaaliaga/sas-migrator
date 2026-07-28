@@ -124,8 +124,14 @@ casos de eval / fixes. Requiere que el usuario aporte su `.egp`.
   system cacheado.
 - **Auditoría placement-aware**: pushdown sin full-table-read+pandas pesado
   (high), pandas sin SQL dinámico (high), hybrid con WHERE (medium), utility
-  sin I/O (low). Categoría nueva `placement`; `sql_from_markers` entró a
-  AuditConfig.
+  sin I/O (low). Categoría nueva `placement`.
+- **Deriva de origen sin configurar nada**: los valores contra los que compara
+  la auditoría se infieren del propio SAS — el host del `URL=` y la tabla que
+  el nodo puebla (`extract_http_hosts` / `extract_dest_tables`). Detecta que el
+  traductor cambió el endpoint, o que reemplazó la llamada HTTP por un SELECT de
+  la tabla que esa llamada debía poblar. `domain_markers`, `sql_engine_markers`
+  y `sql_from_markers` salieron de AuditConfig: eran declaración manual de algo
+  que está escrito en el código, y sin declararlas las reglas no corrían.
 - **Eval set** (`tests/evals/`): 6 casos SAS→propiedades esperadas; modo
   recorded SIEMPRE en CI (harness + estáticos + ensamblador, sin fingir
   modelo) y modo live con `ANTHROPIC_API_KEY`.

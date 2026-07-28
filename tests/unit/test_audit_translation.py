@@ -163,7 +163,7 @@ def test_sas_replace_translated_as_delete_plus_append_is_clean(tmp_path, monkeyp
     assert _semantic_details(tmp_path, monkeypatch) == []
 
 
-# ── dominio declarado: el traductor no puede cambiar el endpoint ─────────────
+# ── endpoint inferido del SAS: el traductor no puede cambiarlo ───────────────
 
 _SAS_HTTP = (
     'FILENAME resp TEMP;\n'
@@ -171,38 +171,73 @@ _SAS_HTTP = (
 )
 
 
-def _declare_domain(tmp_path: Path) -> None:
-    (tmp_path / "state" / "audit_heuristics.yaml").write_text(
-        "domain_markers: [api.cliente.cl]\n", encoding="utf-8"
-    )
-
-
-def test_http_to_declared_domain_is_clean(tmp_path, monkeypatch):
+def test_http_to_same_host_is_clean(tmp_path, monkeypatch):
     _write_pair(
         tmp_path,
         _SAS_HTTP,
         'r = requests.get("https://api.cliente.cl/ws", params={"serie": "X"})\n',
     )
-    _declare_domain(tmp_path)
     assert _semantic_details(tmp_path, monkeypatch) == []
 
 
-def test_http_to_other_domain_is_flagged(tmp_path, monkeypatch):
+def test_http_to_other_host_is_flagged_without_any_config(tmp_path, monkeypatch):
+    """El host sale del URL= del propio nodo: no hay nada que declarar."""
     _write_pair(
         tmp_path,
         _SAS_HTTP,
         'r = requests.get("https://otro.endpoint.com/v2", params={"serie": "X"})\n',
     )
-    _declare_domain(tmp_path)
     details = _semantic_details(tmp_path, monkeypatch)
-    assert any("declared domain" in d for d in details), details
+    assert any("api.cliente.cl" in d and "endpoint" in d for d in details), details
 
 
-def test_endpoint_rule_is_inert_without_declared_markers(tmp_path, monkeypatch):
-    """Sin domain_markers la regla no existe: no inventa hallazgos."""
+def test_macro_built_url_infers_no_host(tmp_path, monkeypatch):
+    """Sin host literal no se infiere nada: mejor callar que dar un falso positivo."""
     _write_pair(
         tmp_path,
-        _SAS_HTTP,
-        'r = requests.get("https://otro.endpoint.com/v2")\n',
+        'PROC HTTP URL = "&base./ws?serie=X" METHOD = "get" OUT = resp; RUN;',
+        'r = requests.get(f"{BASE}/ws", params={"serie": "X"})\n',
+    )
+    assert _semantic_details(tmp_path, monkeypatch) == []
+
+
+def test_extract_http_hosts_reads_url_from_sas() -> None:
+    assert audit.extract_http_hosts(_SAS_HTTP) == ["api.cliente.cl"]
+    assert audit.extract_http_hosts('FILENAME f URL "https://a.cl:443/x";') == ["a.cl"]
+    assert audit.extract_http_hosts('PROC HTTP URL="&base./x";') == []
+
+
+def test_extract_dest_tables_ignores_work() -> None:
+    code = (
+        "proc append base=tablas.pib data=work.nuevo; run;\n"
+        "proc sql; create table work.tmp as select * from x; quit;"
+    )
+    assert audit.extract_dest_tables(code) == ["tablas.pib"]
+
+
+# ── la API reemplazada por un SELECT de la tabla que ella misma puebla ───────
+
+_SAS_HTTP_TO_TABLE = (
+    'PROC HTTP URL = "https://api.cliente.cl/ws?serie=X" METHOD = "get" OUT = resp; RUN;\n'
+    "PROC APPEND BASE = tablas.pib DATA = work.serie FORCE; RUN;"
+)
+
+
+def test_http_replaced_by_read_of_own_destination_is_flagged(tmp_path, monkeypatch):
+    _write_pair(
+        tmp_path,
+        _SAS_HTTP_TO_TABLE,
+        'df = pd.read_sql("SELECT * FROM dbo.PIB", engine)\n',
+    )
+    details = _semantic_details(tmp_path, monkeypatch)
+    assert any("tablas.pib" in d and "populates" in d for d in details), details
+
+
+def test_http_kept_while_writing_its_table_is_clean(tmp_path, monkeypatch):
+    _write_pair(
+        tmp_path,
+        _SAS_HTTP_TO_TABLE,
+        'r = requests.get("https://api.cliente.cl/ws", params={"serie": "X"})\n'
+        'serie.to_sql("PIB", engine, if_exists="append", index=False)\n',
     )
     assert _semantic_details(tmp_path, monkeypatch) == []

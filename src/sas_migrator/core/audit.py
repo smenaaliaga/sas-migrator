@@ -6,8 +6,11 @@ This script checks:
    cell exists. Nodes excluded by the user (state/ignored_nodes.yaml or
    translation_plan.ignored_nodes) are reported but never block coverage.
 2) Traceability anchors: notebook contains node label or homolog marker.
-3) Semantic heuristics for high-risk constructs (e.g. PROC HTTP). Project-specific
-   markers are configurable via state/audit_heuristics.yaml (optional).
+3) Semantic heuristics for high-risk constructs (e.g. PROC HTTP). Los valores
+   contra los que se compara se infieren del propio SAS — el host del URL= y la
+   tabla destino del nodo — así que no hay nada que declarar por proyecto. Solo
+   la política de secretos y los DataFrames a vigilar salen de
+   state/audit_heuristics.yaml (opcional).
 
 Outputs:
 - state/node_translation_audit.json
@@ -42,14 +45,11 @@ def load_json(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-# Heurísticas dependientes de dominio — neutras por default y sobreescribibles
-# vía state/audit_heuristics.yaml (o project_config.yaml: sección audit). Los
-# chequeos que dependen de marcadores vacíos simplemente no aplican; los
-# genéricos (PROC HTTP→requests, IMPORT→read_csv, secretos) no dependen de esto.
+# Lo que el proyecto declara. Los valores que se pueden LEER del SAS (hosts que
+# consulta, tablas que puebla) no viven acá: se infieren nodo por nodo, para que
+# las reglas de deriva corran en cualquier proyecto sin configurar nada. Acá
+# queda solo lo que el SAS no dice: política de secretos y qué DataFrames vigilar.
 DEFAULT_HEURISTICS: dict[str, list[str]] = {
-    "domain_markers": [],
-    "sql_engine_markers": [],
-    "sql_from_markers": [],
     "env_secret_markers": ["os.environ", "dotenv"],
     "runtime_df_checks": [],
 }
@@ -135,11 +135,80 @@ def cells_text(nb: dict[str, Any]) -> list[str]:
     return out
 
 
+# ── Lo que el propio SAS declara ────────────────────────────────────────────
+# El endpoint que consulta el nodo y la tabla que puebla están escritos en su
+# código. Extraerlos evita que el proyecto tenga que declararlos a mano y hace
+# que las reglas de deriva apliquen desde el primer nodo de cualquier migración.
+
+# Cubre `PROC HTTP URL="..."` y `FILENAME f URL "..."` (este sin `=`).
+_URL_RE = re.compile(r"""\burl\s*=?\s*(["'])(.+?)\1""", flags=re.IGNORECASE)
+_SCHEME_HOST_RE = re.compile(r"^[a-z][a-z0-9+.\-]*://([^/\s?\"']+)", flags=re.IGNORECASE)
+
+_DEST_TABLE_RES = (
+    re.compile(r"\bPROC\s+APPEND\b[\s\S]{0,200}?\bBASE\s*=\s*([A-Za-z_][\w.]*)", flags=re.IGNORECASE),
+    re.compile(r"\bINSERT\s+INTO\s+([A-Za-z_][\w.]*)", flags=re.IGNORECASE),
+    re.compile(r"\bCREATE\s+TABLE\s+([A-Za-z_][\w.]*)", flags=re.IGNORECASE),
+)
+
+
+def extract_http_hosts(sas_code: str) -> list[str]:
+    """Hosts que el nodo consulta por HTTP, leídos del URL= de su propio código.
+
+    Una URL armada con macro variables (``&base./ws``) no aporta host literal y
+    se descarta: mejor no inferir que inferir mal y reportar un falso positivo.
+    """
+    hosts: list[str] = []
+    for _, raw in _URL_RE.findall(sas_code):
+        match = _SCHEME_HOST_RE.match(raw.strip())
+        if not match:
+            continue
+        host = match.group(1).split("@")[-1].split(":")[0].strip().lower()
+        if not host or "&" in host or "%" in host:
+            continue
+        if host not in hosts:
+            hosts.append(host)
+    return hosts
+
+
+def extract_dest_tables(sas_code: str) -> list[str]:
+    """Tablas persistentes que el nodo escribe (APPEND BASE=, INSERT, CREATE).
+
+    ``work.*`` queda fuera: es scratch de la sesión SAS, no un destino que otro
+    nodo pueda leer.
+    """
+    tables: list[str] = []
+    for regex in _DEST_TABLE_RES:
+        for name in regex.findall(sas_code):
+            table = name.strip().strip(".").lower()
+            if not table or table == "work" or table.startswith("work."):
+                continue
+            if table not in tables:
+                tables.append(table)
+    return tables
+
+
+def py_mentions_host(py_text: str, hosts: list[str]) -> bool:
+    low = py_text.lower()
+    return any(host in low for host in hosts)
+
+
+def py_reads_table(py_text: str, tables: list[str]) -> bool:
+    """¿El Python hace un SELECT ... FROM sobre alguna de esas tablas?
+
+    Se compara por nombre simple: el esquema cambia al migrar (``tablas.PIB`` en
+    SAS → ``dbo.PIB`` en SQL Server) pero la tabla es la misma.
+    """
+    low = py_text.lower()
+    for table in tables:
+        bare = re.escape(table.split(".")[-1])
+        if re.search(rf"""\bfrom\s+["'`\[]?(?:\w+["'`\]]?\.["'`\[]?)?{bare}\b""", low):
+            return True
+    return False
+
+
 def find_features_sas(sas_code: str, heuristics: dict[str, list[str]]) -> dict[str, bool]:
-    low = sas_code.lower()
     return {
         "proc_http": bool(re.search(r"\bPROC\s+HTTP\b", sas_code, flags=re.IGNORECASE)),
-        "domain_marker": any(marker in low for marker in heuristics["domain_markers"]),
         "macro_user_pass": bool(re.search(r"&(user|password)\b", sas_code, flags=re.IGNORECASE)),
         "proc_import": bool(re.search(r"\bPROC\s+IMPORT\b", sas_code, flags=re.IGNORECASE)),
         # Semántica de escritura del SAS original (espejo, no invención):
@@ -162,13 +231,7 @@ def find_features_py(py_text: str, heuristics: dict[str, list[str]]) -> dict[str
     low = py_text.lower()
     return {
         "requests_like": ("requests." in low) or ("httpx." in low) or ("urllib" in low),
-        "domain_marker": any(marker in low for marker in heuristics["domain_markers"]),
         "env_secret": any(marker in low for marker in heuristics["env_secret_markers"]),
-        "sql_si3": (
-            any(marker in low for marker in heuristics["sql_engine_markers"])
-            and ("read_sql" in low)
-        )
-        or any(marker in low for marker in heuristics["sql_from_markers"]),
         "read_file": ("read_excel(" in low) or ("read_csv(" in low),
         "delete_from": "delete from" in low,
         "append_write": ('if_exists="append"' in low) or ("if_exists='append'" in low)
@@ -341,6 +404,31 @@ def run_audit(state_dir: Path, output_dir: Path) -> int:
             nb_cache[key] = load_json(path)
         return nb_cache[key]
 
+    # Cache del código SAS por nodo: se lee en el pre-pass y se reusa en el loop.
+    sas_by_id: dict[str, str] = {}
+
+    def _sas_code(node_id: str) -> str:
+        if node_id not in sas_by_id:
+            node_file = state_dir / "nodes" / f"{node_id}.json"
+            try:
+                sas_by_id[node_id] = str(load_json(node_file).get("code", ""))
+            except Exception:
+                sas_by_id[node_id] = ""
+        return sas_by_id[node_id]
+
+    # Pre-pass: qué tablas puebla el flujo a partir de una llamada HTTP. Se mira
+    # el proyecto entero porque el nodo que llama a la API y el que escribe el
+    # resultado no siempre son el mismo; leer cualquiera de esas tablas en vez de
+    # llamar a la API es la deriva que interesa detectar.
+    http_dest_tables: list[str] = []
+    for nid in map_by_id:
+        code = _sas_code(nid)
+        if not re.search(r"\bPROC\s+HTTP\b", code, flags=re.IGNORECASE):
+            continue
+        for table in extract_dest_tables(code):
+            if table not in http_dest_tables:
+                http_dest_tables.append(table)
+
     for nid, m in map_by_id.items():
         node = node_by_id.get(nid)
         nb_rel = m.get("notebook_path", "")
@@ -432,8 +520,7 @@ def run_audit(state_dir: Path, output_dir: Path) -> int:
             )
             continue
 
-        node_doc = load_json(node_file)
-        sas_code = str(node_doc.get("code", ""))
+        sas_code = _sas_code(nid)
         sas_f = find_features_sas(sas_code, heuristics)
         py_f_cell = find_features_py(mapped_text, heuristics)
         py_f_nb = find_features_py(all_text, heuristics)
@@ -453,13 +540,16 @@ def run_audit(state_dir: Path, output_dir: Path) -> int:
                 )
             )
 
-        # El SAS llama a un dominio declarado y el Python sí hace HTTP, pero a
-        # otro lado: el traductor cambió el endpoint. Solo aplica si el proyecto
-        # declaró domain_markers; sin marcadores la regla no existe.
+        # El SAS pega a un host y el Python sí hace HTTP, pero a otro lado: el
+        # traductor cambió el endpoint. El host sale del URL= del propio nodo.
+        sas_hosts = extract_http_hosts(sas_code)
         if (
-            sas_f["domain_marker"]
+            sas_hosts
             and (py_f_cell["requests_like"] or py_f_nb["requests_like"])
-            and not (py_f_cell["domain_marker"] or py_f_nb["domain_marker"])
+            and not (
+                py_mentions_host(mapped_text, sas_hosts)
+                or py_mentions_host(all_text, sas_hosts)
+            )
         ):
             issues.append(
                 Issue(
@@ -469,17 +559,23 @@ def run_audit(state_dir: Path, output_dir: Path) -> int:
                     node_label=node_label,
                     notebook_path=nb_rel,
                     detail=(
-                        "SAS node calls a declared domain (audit.domain_markers) "
+                        f"SAS node calls {', '.join(sas_hosts)} (URL= del PROC HTTP) "
                         "but the Python HTTP call does not mention it — endpoint "
                         "may have been changed or invented"
                     ),
                 )
             )
 
+        # El nodo llamaba a la API y la traducción lee la tabla que esa misma
+        # API debía poblar: corre sin fallar y entrega datos de la corrida previa.
         if (
             sas_f["proc_http"]
-            and (py_f_cell["sql_si3"] or py_f_nb["sql_si3"])
+            and http_dest_tables
             and not (py_f_cell["requests_like"] or py_f_nb["requests_like"])
+            and (
+                py_reads_table(mapped_text, http_dest_tables)
+                or py_reads_table(all_text, http_dest_tables)
+            )
         ):
             issues.append(
                 Issue(
@@ -489,8 +585,9 @@ def run_audit(state_dir: Path, output_dir: Path) -> int:
                     node_label=node_label,
                     notebook_path=nb_rel,
                     detail=(
-                        "PROC HTTP appears to be replaced by a SQL read of a "
-                        "declared source (audit.sql_from_markers) — semantic drift"
+                        "PROC HTTP appears to be replaced by a SQL read of "
+                        f"{', '.join(http_dest_tables)} — the table the HTTP flow "
+                        "itself populates — semantic drift"
                     ),
                 )
             )
