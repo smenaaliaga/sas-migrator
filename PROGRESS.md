@@ -13,7 +13,47 @@
 | **3 — Human-in-the-loop + MCP** | ✅ Completada | Entrevistas como `interrupt()` con payloads tipados, CLI interactiva, servidor MCP, 5 ADRs. **173 tests.** |
 | **4 — Nodos LLM + ensamblador** | ✅ Completada | LLM real en fases 2/3/6 con retry→needs_human, ensamblador determinista, audit placement-aware, eval set. **222 tests (+6 evals live con API key).** |
 | **5 — Ejecución, validación e iteración** | ✅ Completada | nbclient tras la pausa sagrada, cascada dialect-agnóstica + diagnóstico LLM, doc-writer, Fase 9 con gate. DoD e2e vs BD de prueba. **249 tests (+6 evals live, +1 LocalDB en CI).** |
-| **6 — Golden real + hardening** | ✅ Scaffold completo | Trazas LLM, scanner de secretos, fuzz del parser, evals 6→12, harness `.egp` real + nightly, README. **308 tests.** Falta solo correr el harness con el `.egp` productivo del usuario. |
+| **6 — Golden real + hardening** | ✅ Completada | Trazas LLM, scanner de secretos, fuzz del parser, evals 6→12, harness `.egp` real + nightly, README. El DoD se saldó con dos `.egp` productivos (84 y 175 nodos) — ver "Validación con .egp reales" abajo. |
+| **7 — Plan de mejoras integral (P0-P3)** | ✅ Completada | Confiabilidad (P0), completitud de la traducción (P1), optimización (P2) y deuda (P3). **~460 tests unitarios.** Ver sección propia abajo y `docs/ARQUITECTURA.md`. |
+
+## Etapa 7 — Plan de mejoras integral (rama query-log-y-rewind)
+
+Motivado por la corrida real de `Síntesis_M_CR18` (fase 6 bloqueada: 20/75
+nodos sin notebook) y una revisión completa del sistema. Además de los
+comandos que dan nombre a la rama (rewind, query log del Query Builder,
+doctor, reset, backend Foundry, entrevista de a una pregunta, resiliencia a
+529/kills), se ejecutó el plan P0-P3:
+
+- **P0 Confiabilidad**: escrituras atómicas únicas (`fsio`), gates que no
+  crashean con JSON corrupto y son predicados puros, needs_human idempotente,
+  `resume` re-evalúa el gate bloqueado, fase 7 en 3 sub-nodos (interrupt
+  aislado + ejecución idempotente por hash), fase 9 reanudable
+  (thread `iteration-NNN`), `indexes.build()` sin `SystemExit`, cliente LLM
+  honesto (usage fresco, `max_tokens` truncado → NeedsHuman, topes por tarea).
+- **P1 Completitud**: el traductor recibe TODO el contexto (datasets del plan,
+  conexiones, mejoras M-xxx, review notes, qué deja cada dependencia); system
+  en 3 bloques con few-shot y cache escalonado; allowlist declarativa de
+  imports (+`output/requirements.txt`); `NodeTranslation` con contrato fuerte
+  (`cells` min 1, strategy Literal); retry con memoria y TODAS las fallas;
+  chequeos nuevos (`swallowed_exception`, `import_in_cell`, drop-table sin
+  falsos positivos de comentarios, escape auditable de loops); split por
+  tokenizador; `json_excerpt` (nunca JSON roto al modelo); **verificador LLM**
+  (`translation.verify`, sidecar `translation_review.json`, audit medium,
+  confianza en `status`); doctor consciente del proveedor.
+- **P2 Optimización**: `llm/costs.py` + `max_run_cost_usd` (BudgetExceeded
+  reanudable, acumulado del trace), modelo/max_tokens por tarea, caller
+  cacheado por workspace, paralelismo opt-in (`max_workers`, notebooks
+  byte-idénticos), cache observable (ADR-0010 documenta los descartes:
+  Batch API, Send API).
+- **P3 Deuda**: loader único de conexiones, fases con fuente única
+  (`PHASE_LABELS` + test de biyección), config estricta (clave desconocida =
+  error con nombre), deps con piso y techo (cazó el par incompatible
+  langgraph-checkpoint 4.x), tests de cascada que cazaron el bug NaN-vs-NaN,
+  docs que mentían corregidas. Diferido a conciencia: split mecánico de
+  `audit.py`/`egp.py` (ver `docs/ARQUITECTURA.md` §13).
+
+**Documento nuevo**: `docs/ARQUITECTURA.md` — arquitectura exhaustiva con
+diagramas (grafo, capa LLM, secuencia de traducción), módulo por módulo.
 
 ## Etapa 6 — qué se hizo
 
@@ -60,9 +100,9 @@
   Con esa evidencia se jubiló `_extract_datasets_legacy` y
   `parser_upgrade_report.json`; `enrich_state` queda solo con placement.
 
-**Pendiente del DoD**: correr el harness con el `.egp` productivo real
-(`SASMIG_REAL_EGP=... pytest tests/integration -q`) y convertir el backlog en
-casos de eval / fixes. Requiere que el usuario aporte su `.egp`.
+**DoD saldado**: el harness corrió con dos `.egp` productivos (ver
+"Validación con .egp reales" arriba). El trabajo continuo es hacer crecer el
+eval set de 12 hacia 30-50 con los bugs que aparezcan en producción.
 
 ## Etapa 5 — qué se hizo
 
