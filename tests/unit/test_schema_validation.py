@@ -40,6 +40,45 @@ def test_load_schema_reports_missing_file(tmp_path, monkeypatch) -> None:
         schema_validation.load_schema("missing")
 
 
+def test_unreadable_artifact_is_gate_error_not_crash(tmp_path) -> None:
+    """Un JSON truncado (kill a mitad de escritura) bloquea el gate con motivo
+    legible — no propaga JSONDecodeError. El gate existe para contar qué está
+    mal; crashear es no contarlo."""
+    truncado = tmp_path / "sas_python_mapping.json"
+    truncado.write_text('{"mappings": [', encoding="utf-8")
+
+    errors = schema_validation.validate_artifact_file(truncado, "sas_python_mapping")
+
+    assert len(errors) == 1
+    assert "ilegible" in errors[0]
+    assert "JSONDecodeError" in errors[0]
+
+
+def test_gate_blocks_on_unreadable_artifact(tmp_path, monkeypatch) -> None:
+    """El mismo escenario a nivel check_gate: bloqueado, no excepción."""
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
+    (state_dir / "sas_python_mapping.json").write_text('{"mappings": [', encoding="utf-8")
+    monkeypatch.setattr(schema_validation, "_phase6_generation_errors", lambda _: [])
+    monkeypatch.setattr(schema_validation, "_phase6_semantic_audit_errors", lambda _: [])
+
+    passed, errors = schema_validation.check_gate(6, state_dir)
+
+    assert not passed
+    assert any("ilegible" in e for e in errors)
+
+
+def test_yaml_ilegible_tambien_es_error_de_gate(tmp_path) -> None:
+    """El caso YAML: un tab donde no va (edición a mano) es motivo, no traceback."""
+    roto = tmp_path / "approved_improvements.yaml"
+    roto.write_text("improvements:\n\t- id: M-001", encoding="utf-8")
+
+    errors = schema_validation.validate_artifact_file(roto, "improvements")
+
+    assert len(errors) == 1
+    assert "ilegible" in errors[0]
+
+
 def test_phase6_semantic_gate_blocks_high_issues(tmp_path, monkeypatch) -> None:
     state_dir = tmp_path / "state"
     state_dir.mkdir()

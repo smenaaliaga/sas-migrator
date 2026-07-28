@@ -59,15 +59,30 @@ def validate_artifact(data: dict | list, schema_name: str) -> list[str]:
 
 
 def validate_artifact_file(artifact_path: str | Path, schema_name: str) -> list[str]:
-    """Validate a JSON or YAML file on disk against a named JSON Schema."""
+    """Validate a JSON or YAML file on disk against a named JSON Schema.
+
+    Un artefacto ilegible (JSON truncado por un kill, YAML editado a mano con
+    un typo, encoding roto) es un GATE BLOQUEADO con motivo legible — nunca
+    una excepción sin manejar: el gate existe justamente para contar qué está
+    mal. Contrastar con ``_load_any``, que devuelve None a propósito porque
+    sus consumidores (chequeos de sustancia) tratan "ilegible" como "sin
+    contenido".
+    """
     path = Path(artifact_path)
     if not path.exists():
         return [f"Artifact file not found: {path}"]
-    text = path.read_text(encoding="utf-8")
-    if path.suffix.lower() in (".yaml", ".yml"):
-        data = yaml.safe_load(text)
-    else:
-        data = json.loads(text)
+    try:
+        text = path.read_text(encoding="utf-8")
+        if path.suffix.lower() in (".yaml", ".yml"):
+            data = yaml.safe_load(text)
+        else:
+            data = json.loads(text)
+    except (json.JSONDecodeError, yaml.YAMLError, UnicodeDecodeError, OSError) as exc:
+        return [
+            f"{path.name}: archivo ilegible ({exc.__class__.__name__}: {exc}) — "
+            "puede haber quedado truncado por un corte; regenerá la fase o "
+            "restaurá el artefacto"
+        ]
     return validate_artifact(data, schema_name)
 
 
@@ -104,7 +119,13 @@ GATE_REQUIREMENTS: dict[int, list[tuple[str, str]]] = {
 
 
 def _load_any(path: Path) -> Any:
-    """Carga JSON o YAML de disco; None si no existe o es ilegible."""
+    """Carga JSON o YAML de disco; None si no existe o es ilegible.
+
+    La asimetría con ``validate_artifact_file`` es deliberada: los chequeos de
+    sustancia usan esto para artefactos OPCIONALES (si no se puede leer, el
+    chequeo que dependía de él no corre); la validación de schema, en cambio,
+    reporta el archivo ilegible como error de gate.
+    """
     if not path.exists():
         return None
     try:

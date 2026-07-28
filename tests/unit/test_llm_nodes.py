@@ -290,6 +290,27 @@ def test_stale_bad_translation_on_disk_is_retranslated(ws: Path) -> None:
     assert regenerada["cells"], "el .json vacío se reemplazó por una traducción real"
 
 
+def test_corrupt_translation_json_is_retranslated(ws: Path, capsys) -> None:
+    """Un .json ilegible en translations/ (kill a mitad de escritura, edición a
+    mano) no crashea la fase: se saltea con aviso y el nodo se re-traduce."""
+    state = ws / "state"
+    trans_dir = state / "translations"
+    shutil.rmtree(trans_dir, ignore_errors=True)
+    trans_dir.mkdir(parents=True)
+    (trans_dir / "CodeTask-2.json").write_text(
+        '{"node_id": "CodeTask-2", "cells": [', encoding="utf-8"
+    )
+
+    runtime.set_caller(FakeCaller({"translation": _translation_fake}))
+    counts = phases.run_translation(state, ws / "output", ws)
+
+    assert counts["translated"] == counts["targets"]
+    assert unresolved(state, phase=6) == []
+    regenerada = json.loads((trans_dir / "CodeTask-2.json").read_text(encoding="utf-8"))
+    assert regenerada["cells"], "el .json corrupto se reemplazó por una traducción real"
+    assert "se re-traduce" in capsys.readouterr().err
+
+
 # ── Pipeline completo con LLM fake + entrevistas ────────────────────────────
 
 def test_full_pipeline_llm_fake_and_interviews(tmp_path: Path) -> None:

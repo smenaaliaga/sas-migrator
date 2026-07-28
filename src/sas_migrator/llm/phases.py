@@ -405,16 +405,31 @@ def _load_valid_translations(trans_dir: Path) -> dict[str, NodeTranslation]:
 
     Retomar una corrida no debe heredar la basura de corridas viejas: un .json
     que no pasa el gate no se registra, así el nodo se vuelve a traducir en vez
-    de quedar cacheado como hecho. No se borra el archivo — sirve para mirar qué
-    salió mal, y la próxima traducción lo sobrescribe.
+    de quedar cacheado como hecho. Lo mismo con un .json ilegible o inválido
+    (kill a mitad de escritura, edición a mano): se saltea con aviso y el nodo
+    se re-traduce — es auto-sanador, no amerita needs_human. No se borra el
+    archivo — sirve para mirar qué salió mal, y la próxima traducción lo
+    sobrescribe.
     """
+    import sys
+
+    from pydantic import ValidationError
+
     from sas_migrator.core.assembly.notebook import check_node_translation
 
     translations: dict[str, NodeTranslation] = {}
     if not trans_dir.exists():
         return translations
     for path in sorted(trans_dir.glob("*.json")):
-        nt = NodeTranslation.model_validate(_load_json(path))
+        try:
+            nt = NodeTranslation.model_validate(_load_json(path))
+        except (json.JSONDecodeError, ValidationError, UnicodeDecodeError) as exc:
+            print(
+                f"traducción ilegible en {path.name} "
+                f"({exc.__class__.__name__}) — se re-traduce",
+                file=sys.stderr,
+            )
+            continue
         if check_node_translation(nt) is None:
             translations[nt.node_id] = nt
     return translations
