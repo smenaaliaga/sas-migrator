@@ -103,13 +103,12 @@ class AnthropicCaller:
                 )
             api_key = os.environ.get("ANTHROPIC_FOUNDRY_API_KEY")
             if not api_key:
-                from sas_migrator.llm.env import describe_sources
+                from sas_migrator.llm.env import describe_sources, user_env_hint
 
                 raise RuntimeError(
                     "Falta ANTHROPIC_FOUNDRY_API_KEY. Es la key del recurso de "
                     "Azure AI Foundry (portal → Keys and Endpoint).\n"
-                    f"{describe_sources()}\n"
-                    "Ponela en <workspace>/.env, o exportala al entorno."
+                    f"{describe_sources()}\n{user_env_hint()}"
                 )
             resource = os.environ.get("ANTHROPIC_FOUNDRY_RESOURCE") or config.foundry_resource
             if not resource:

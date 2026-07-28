@@ -1,4 +1,4 @@
-"""Carga de credenciales desde `.env` — el único punto donde entran secretos.
+r"""Carga de credenciales desde `.env` — el único punto donde entran secretos.
 
 Las credenciales no viven en `project_config.yaml` (ese archivo se commitea):
 viajan por variables de entorno. Este módulo solo agrega la comodidad de leer
@@ -9,8 +9,15 @@ Precedencia (la primera que define una variable gana):
 1. El entorno del proceso — un `ANTHROPIC_API_KEY` ya exportado siempre manda,
    así que CI y `$env:...` puntual no se ven pisados por ningún archivo.
 2. `<workspace>/.env` — por si una migración usa una cuenta distinta.
-3. `.env` buscado hacia arriba desde el directorio actual (el del repo, caso
-   normal: una sola key para todas las migraciones).
+3. `.env` buscado hacia arriba desde el directorio actual (el del repo, cuando
+   se corre desde ahí).
+4. `~/.sas-migrator/.env` — la credencial de la MÁQUINA, último recurso.
+
+El nivel 4 existe por el comando instalado global: `find_dotenv` sube desde el
+cwd, y parado en `D:\Migraciones\proyecto` esa cadena nunca pasa por el repo
+—son ramas hermanas del árbol—. Sin un lugar independiente del cwd, instalar
+con pipx obliga a duplicar la key en cada workspace. Va último para que el
+workspace y el repo siempre puedan pisarlo.
 
 `python-dotenv` viene con el extra `llm`. Sin él esto es un no-op silencioso:
 quien exporta las variables a mano no necesita la dependencia.
@@ -19,6 +26,9 @@ quien exporta las variables a mano no necesita la dependencia.
 from __future__ import annotations
 
 from pathlib import Path
+
+# Credencial a nivel máquina, independiente del directorio de trabajo.
+USER_ENV = Path.home() / ".sas-migrator" / ".env"
 
 _loaded: set[Path] = set()
 # Qué se miró y si estaba — sin esto, "falta la key" no dice dónde ponerla.
@@ -52,6 +62,10 @@ def load_env(workspace: Path | str | None = None) -> None:
     if found:
         load_dotenv(found, override=False)
 
+    _consulted.append((str(USER_ENV), USER_ENV.is_file()))
+    if USER_ENV.is_file():
+        load_dotenv(USER_ENV, override=False)
+
 
 def describe_sources() -> str:
     """De dónde se intentó leer, para pegar en un error de credencial faltante.
@@ -68,3 +82,10 @@ def describe_sources() -> str:
         for path, ok in _consulted
     ]
     return ".env consultados:\n" + "\n".join(lines)
+
+
+def user_env_hint() -> str:
+    """Cómo dejar la credencial una sola vez para todas las migraciones."""
+    return (
+        f"Para una key por máquina (sirve desde cualquier carpeta): {USER_ENV}"
+    )

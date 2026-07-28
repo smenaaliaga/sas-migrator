@@ -70,20 +70,27 @@ credencial viene del entorno, nunca de la config. Copiar `.env.example` a
 | `anthropic` | `ANTHROPIC_API_KEY` |
 | `foundry` | `ANTHROPIC_FOUNDRY_API_KEY` + `ANTHROPIC_FOUNDRY_RESOURCE` (o `llm.foundry_resource` en la config, que no es secreto) |
 
-Precedencia: entorno del proceso > `<workspace>/.env` > el primer `.env`
-buscando **hacia arriba desde el directorio actual**.
+Precedencia (el primero que define la variable gana):
 
-⚠ Ese tercer nivel es una trampa con el comando instalado global: parado en
-`D:\Migraciones\mi_proyecto`, la búsqueda hacia arriba **no** llega al `.env`
-del repo. Con `sas-migrator` en el PATH, la credencial va en
-`<workspace>/.env` o en el entorno del usuario:
+| # | Origen | Para qué |
+|---|---|---|
+| 1 | Entorno del proceso | CI, `$env:...` puntual |
+| 2 | `<workspace>/.env` | Una migración con cuenta propia |
+| 3 | `.env` buscando **hacia arriba desde el directorio actual** | Trabajando dentro del repo |
+| 4 | `~/.sas-migrator/.env` | **Una key para toda la máquina** |
+
+Con `sas-migrator` instalado global el nivel 3 no aplica: parado en
+`D:\Migraciones\mi_proyecto` la búsqueda sube por `Migraciones`, `D:\` — y
+nunca pasa por el repo, que es una rama hermana del árbol. Para ese caso está
+el nivel 4:
 
 ```powershell
-# por sesión de terminal
-$env:ANTHROPIC_FOUNDRY_API_KEY = "..."
-# persistente (nueva terminal para que tome efecto)
-setx ANTHROPIC_FOUNDRY_API_KEY "..."
+mkdir "$HOME\.sas-migrator" -Force
+"ANTHROPIC_FOUNDRY_API_KEY=..." | Out-File "$HOME\.sas-migrator\.env" -Encoding utf8
 ```
+
+Sirve desde cualquier carpeta y no duplica el secreto por workspace. Va último
+en la precedencia justamente para que un workspace pueda pisarlo.
 
 Si falta la credencial, el error lista los `.env` que se consultaron y si
 existían — no hay que adivinar cuál se leyó.

@@ -8,6 +8,7 @@ SDK para importarse.
 
 from __future__ import annotations
 
+import os
 import sys
 import types
 from types import SimpleNamespace
@@ -447,6 +448,8 @@ def test_credencial_faltante_dice_que_env_se_consulto(tmp_path, monkeypatch) -> 
 
     ws = tmp_path / "mi_migracion"
     ws.mkdir()
+    # Sin esto el test depende del ~/.sas-migrator/.env real de quien lo corra.
+    monkeypatch.setattr(env_mod, "USER_ENV", tmp_path / "sin-env" / ".env")
     monkeypatch.setattr(env_mod, "_loaded", set())
     monkeypatch.setattr(env_mod, "_consulted", [])
     monkeypatch.chdir(ws)
@@ -465,3 +468,47 @@ def test_credencial_faltante_dice_que_env_se_consulto(tmp_path, monkeypatch) -> 
     assert "ANTHROPIC_FOUNDRY_API_KEY" in mensaje
     assert str(ws.resolve() / ".env") in mensaje, "la ruta exacta que hay que crear"
     assert "no existe" in mensaje
+
+
+def test_env_de_maquina_resuelve_la_credencial_desde_cualquier_carpeta(
+    tmp_path, monkeypatch
+) -> None:
+    """El caso del comando global: cwd lejos del repo, key igual encontrada."""
+    from sas_migrator.llm import env as env_mod
+
+    user_env = tmp_path / "home" / ".sas-migrator" / ".env"
+    user_env.parent.mkdir(parents=True)
+    user_env.write_text("ANTHROPIC_FOUNDRY_API_KEY=k-de-maquina\n", encoding="utf-8")
+
+    ws = tmp_path / "migraciones" / "proyecto"
+    ws.mkdir(parents=True)
+    monkeypatch.setattr(env_mod, "USER_ENV", user_env)
+    monkeypatch.setattr(env_mod, "_loaded", set())
+    monkeypatch.setattr(env_mod, "_consulted", [])
+    monkeypatch.chdir(ws)
+    monkeypatch.delenv("ANTHROPIC_FOUNDRY_API_KEY", raising=False)
+
+    env_mod.load_env(ws)
+    assert os.environ["ANTHROPIC_FOUNDRY_API_KEY"] == "k-de-maquina"
+
+
+def test_el_workspace_le_gana_al_env_de_maquina(tmp_path, monkeypatch) -> None:
+    """Una migración con cuenta propia debe poder pisar el default de máquina."""
+    from sas_migrator.llm import env as env_mod
+
+    user_env = tmp_path / "home" / ".sas-migrator" / ".env"
+    user_env.parent.mkdir(parents=True)
+    user_env.write_text("ANTHROPIC_FOUNDRY_API_KEY=k-de-maquina\n", encoding="utf-8")
+
+    ws = tmp_path / "proyecto"
+    ws.mkdir()
+    (ws / ".env").write_text("ANTHROPIC_FOUNDRY_API_KEY=k-del-workspace\n", encoding="utf-8")
+
+    monkeypatch.setattr(env_mod, "USER_ENV", user_env)
+    monkeypatch.setattr(env_mod, "_loaded", set())
+    monkeypatch.setattr(env_mod, "_consulted", [])
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("ANTHROPIC_FOUNDRY_API_KEY", raising=False)
+
+    env_mod.load_env(ws)
+    assert os.environ["ANTHROPIC_FOUNDRY_API_KEY"] == "k-del-workspace"
