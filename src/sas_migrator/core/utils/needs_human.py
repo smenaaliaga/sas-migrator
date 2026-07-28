@@ -8,12 +8,18 @@ su fase bloquea hasta que alguien lo resuelva. Nunca silencio.
 from __future__ import annotations
 
 import json
+import re
+import threading
 from pathlib import Path
 
 from sas_migrator.core.models.state import NeedsHumanItem, NeedsHumanQueue
 from sas_migrator.core.utils import fsio
 
 FILENAME = "needs_human.yaml"
+
+# Serializa load-modify-save dentro del proceso: cuando la traducción se
+# paralelice por nodo, dos workers no pueden pisarse la cola.
+_LOCK = threading.Lock()
 
 
 def load_queue(state_dir: Path) -> NeedsHumanQueue:
@@ -27,6 +33,16 @@ def _save(state_dir: Path, queue: NeedsHumanQueue) -> None:
     )
 
 
+def _next_id(queue: NeedsHumanQueue) -> str:
+    """NH-{max+1}: `len+1` colisiona si alguien borró un item del medio."""
+    numbers = [
+        int(m.group(1))
+        for i in queue.items
+        if (m := re.fullmatch(r"NH-(\d+)", i.id))
+    ]
+    return f"NH-{max(numbers, default=0) + 1:03d}"
+
+
 def record(
     state_dir: Path,
     *,
@@ -37,20 +53,35 @@ def record(
     detail: str = "",
     attempts: int = 0,
 ) -> NeedsHumanItem:
-    """Agrega un item a la cola (id NH-NNN correlativo) y persiste."""
-    queue = load_queue(state_dir)
-    item = NeedsHumanItem(
-        id=f"NH-{len(queue.items) + 1:03d}",
-        phase=phase,
-        task=task,
-        node_id=node_id,
-        reason=reason,
-        detail=detail,
-        attempts=attempts,
-    )
-    queue.items.append(item)
-    _save(state_dir, queue)
-    return item
+    """Registra (o actualiza) un item en la cola y persiste.
+
+    Upsert por clave natural ``(phase, task, node_id, reason)`` sobre los items
+    NO resueltos: re-ejecutar la fase 6 con los mismos 20 nodos caídos no puede
+    duplicar la cola — el gate cuenta items, y 40 duplicados leen como 40
+    problemas. Un item ya resuelto con la misma clave no se toca: si el fallo
+    reaparece tras resolverse, eso ES un item nuevo (la historia se conserva).
+    """
+    with _LOCK:
+        queue = load_queue(state_dir)
+        key = (phase, task, node_id, reason)
+        for item in queue.items:
+            if not item.resolved and (item.phase, item.task, item.node_id, item.reason) == key:
+                item.detail = detail or item.detail
+                item.attempts = max(item.attempts, attempts)
+                _save(state_dir, queue)
+                return item
+        item = NeedsHumanItem(
+            id=_next_id(queue),
+            phase=phase,
+            task=task,
+            node_id=node_id,
+            reason=reason,
+            detail=detail,
+            attempts=attempts,
+        )
+        queue.items.append(item)
+        _save(state_dir, queue)
+        return item
 
 
 def unresolved(state_dir: Path, phase: int | None = None) -> list[NeedsHumanItem]:
