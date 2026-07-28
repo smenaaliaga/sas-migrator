@@ -157,6 +157,11 @@ class TranslationConfig(_StrictSection):
     #   low → solo los nodos cuya traducción declaró confidence=low
     #   off → sin verificador
     verify: Literal["off", "low", "all"] = "all"
+    # Logging liviano por celda en los notebooks generados (`_log` al final de
+    # las celdas con resultados importantes + output/log/<notebook>.log). Este
+    # flag es la RECOMENDACIÓN de la tarjeta B5b de la entrevista; la decisión
+    # que manda es la del usuario (state/cell_logging.yaml).
+    cell_logging: bool = False
 
     @field_validator("verify", mode="before")
     @classmethod

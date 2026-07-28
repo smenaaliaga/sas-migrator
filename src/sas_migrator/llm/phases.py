@@ -451,6 +451,7 @@ class TranslationSetup:
     allowed: list[str]
     verify_mode: str  # off | low | all
     max_workers: int = 1
+    cell_logging: bool = False  # decisión B5b, viaja en el plan
 
 
 def _translation_context(state_dir: Path, plan: dict) -> TranslationSetup:
@@ -465,19 +466,24 @@ def _translation_context(state_dir: Path, plan: dict) -> TranslationSetup:
     # Los SDK elegidos en B4c entran a la allowlist: el chequeo estático
     # unresolvable_import los acepta y requirements.txt los documenta si se usan.
     allowed = sorted(set(tcfg.allowed_imports) | set(sdk_packages(state_dir)))
+    cell_logging = bool(plan.get("cell_logging"))
     context_block = prompt_builder.build_project_context(
         connections=conns,
         improvements=_approved_improvements(state_dir),
         macro_param_values=plan.get("macro_param_values") or {},
         allowed_imports=allowed,
         api_connections=load_api_connections(state_dir),
+        cell_logging=cell_logging,
     )
     return TranslationSetup(
-        system=prompt_builder.build_translation_system(context_block),
+        system=prompt_builder.build_translation_system(
+            context_block, cell_logging=cell_logging
+        ),
         db_aliases=db_aliases,
         allowed=allowed,
         verify_mode=tcfg.verify,
         max_workers=max(1, int(cfg.llm.max_workers)),
+        cell_logging=cell_logging,
     )
 
 
@@ -829,7 +835,7 @@ def _translate_pending(
 
     mapping, failures = assemble_notebooks(
         plan, translations, Path(output_dir), db_bootstrap=bool(setup.db_aliases),
-        allowed_imports=setup.allowed,
+        allowed_imports=setup.allowed, cell_logging=setup.cell_logging,
     )
     for failure in failures:
         record_needs_human(

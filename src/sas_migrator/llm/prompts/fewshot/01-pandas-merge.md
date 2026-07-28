@@ -23,7 +23,7 @@ run;
   "strategy": "pandas",
   "imports": [],
   "cells": [
-    "cruce = clientes.merge(ventas, on=\"id_cliente\", how=\"inner\")\n"
+    "cruce = clientes.merge(ventas, on=\"id_cliente\", how=\"inner\")\n_log(\"cruce\", cruce)\n"
   ],
   "traceability": {
     "sas_construct": "DATA step MERGE con in= (intersección)",

@@ -52,6 +52,9 @@ class TranslationPlan(BaseModel):
     # Valores de las macro vars (project_config.yaml → run.macro_params); el
     # ensamblador escribe la celda de parámetros desde acá sin releer config.
     macro_param_values: dict[str, Any] = Field(default_factory=dict)
+    # Decisión B5b de la entrevista: logging liviano por celda (`_log` +
+    # output/log/<notebook>.log). Traductor y ensamblador la leen de acá.
+    cell_logging: bool = False
     ignored_nodes: list[str] = Field(default_factory=list)
     global_improvements: list[str] = Field(default_factory=list)
     assumptions: list[str] = Field(default_factory=list)

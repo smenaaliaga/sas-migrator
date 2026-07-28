@@ -18,6 +18,24 @@ def _state(tmp_path: Path, **artifacts) -> Path:
     return state
 
 
+def test_cell_logging_card_recommendation_follows_config(tmp_path: Path) -> None:
+    """B5b siempre se presenta; el config solo mueve la recomendación."""
+    state = _state(tmp_path)
+
+    card = post_analysis.build_cell_logging_card(state)  # sin config → False
+    assert card.questions[0].recommended_default == "No, notebooks sin logging"
+    assert card.questions[0].options == post_analysis.CELL_LOGGING_OPTIONS
+
+    (tmp_path / "project_config.yaml").write_text(
+        "translation:\n  cell_logging: true\n", encoding="utf-8"
+    )
+    card = post_analysis.build_cell_logging_card(state)
+    assert card.questions[0].recommended_default == "Sí, agregar logging de resultados"
+    assert card.questions[0].evidence == [
+        "project_config.yaml: translation.cell_logging = true"
+    ]
+
+
 def test_confirmed_prefix_does_not_generate_resolution_card(tmp_path: Path) -> None:
     """Un libref confirmado por LIBNAME está resuelto — no se pregunta."""
     state = _state(

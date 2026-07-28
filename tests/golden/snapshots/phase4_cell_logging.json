@@ -1,0 +1,29 @@
+{
+  "card_id": "B5b-cell-logging",
+  "interview_type": "post_analysis",
+  "phase": 4,
+  "block_id": "B5b-cell-logging",
+  "title": "Logging de resultados en los notebooks",
+  "transition": "",
+  "questions": [
+    {
+      "id": "Q-B5b-1",
+      "text": "¿Agregamos una línea de log al final de las celdas con resultados importantes? Imprime filas/shape en pantalla y lo persiste en output/log/<notebook>.log, con marca de cada corrida.",
+      "question_type": "approval",
+      "required": true,
+      "options": [
+        "Sí, agregar logging de resultados",
+        "No, notebooks sin logging"
+      ],
+      "source_finding": "",
+      "context": "",
+      "recommended_default": "No, notebooks sin logging",
+      "evidence": [
+        "project_config.yaml: translation.cell_logging = false"
+      ]
+    }
+  ],
+  "allow_free_text": true,
+  "validation_error": null,
+  "progress": null
+}

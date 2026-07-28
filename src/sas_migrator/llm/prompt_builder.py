@@ -17,13 +17,24 @@ def _read(name: str) -> str:
     return (files("sas_migrator.llm") / "prompts" / name).read_text(encoding="utf-8")
 
 
-def _read_fewshot() -> str:
+# Llamadas `_log(...)` dentro de las cells de los fewshots (texto crudo: el
+# `\n` es el escape de dos caracteres del JSON, con indentación opcional).
+# Regla de autoría: los `_log` de los fewshots jamás anidan paréntesis.
+_LOG_CALL_RE = re.compile(r"\\n(?:    )?_log\([^()]*\)")
+
+
+def _read_fewshot(cell_logging: bool = False) -> str:
     """Ejemplos curados SAS→NodeTranslation (llm/prompts/fewshot/, en orden).
 
     Cumplen doble función: enseñan el formato con casos reales del eval set, y
     engordan el prefijo cacheable — el system sin ejemplos quedaba bajo el
     mínimo cacheable de algunos modelos (4096 tokens en Haiku) y el cache
     rendía exactamente 0 en producción.
+
+    Los archivos se escriben con las llamadas `_log(...)` del feature de
+    logging por celda (decisión B5b); con ``cell_logging=False`` se stripean
+    de forma determinista — la variante OFF debe quedar idéntica a los
+    ejemplos sin feature (un test protege la invariante).
     """
     fewshot_dir = files("sas_migrator.llm") / "prompts" / "fewshot"
     parts = [
@@ -31,7 +42,12 @@ def _read_fewshot() -> str:
         for entry in sorted(fewshot_dir.iterdir(), key=lambda e: e.name)
         if entry.name.endswith(".md")
     ]
-    return "# Ejemplos de traducción (formato exacto del output)\n\n" + "\n\n".join(parts)
+    text = "# Ejemplos de traducción (formato exacto del output)\n\n" + "\n\n".join(parts)
+    if not cell_logging:
+        text = _LOG_CALL_RE.sub("", text)
+        # El binding `res = ` del ejemplo pushdown existe solo por el log.
+        text = text.replace("res = conn.exec_driver_sql", "conn.exec_driver_sql")
+    return text
 
 
 def build_analysis_system() -> list[str]:
@@ -80,7 +96,9 @@ def build_verify_user(target: dict, node_code: str, translation_json: str) -> st
     )
 
 
-def build_translation_system(project_context: str | None = None) -> list[str]:
+def build_translation_system(
+    project_context: str | None = None, *, cell_logging: bool = False
+) -> list[str]:
     """System de traducción en (hasta) TRES bloques con cache escalonado.
 
     1. Contrato + ambas tablas de patrones — idéntico entre proyectos.
@@ -96,7 +114,7 @@ def build_translation_system(project_context: str | None = None) -> list[str]:
         + _read("patterns_sas_pandas.md")
         + "\n\n"
         + _read("patterns_sas_tsql.md"),
-        _read_fewshot(),
+        _read_fewshot(cell_logging),
     ]
     if project_context:
         blocks.append(project_context)
@@ -110,6 +128,7 @@ def build_project_context(
     macro_param_values: dict,
     allowed_imports: list[str] | None = None,
     api_connections: list[dict] | None = None,
+    cell_logging: bool = False,
 ) -> str | None:
     """Bloque system con lo que el proyecto sabe y el traductor necesitaba.
 
@@ -175,6 +194,22 @@ def build_project_context(
             "stdlib de Python más: "
             + ", ".join(sorted(allowed_imports))
             + ". Cualquier otro import hace fallar el chequeo estático."
+        )
+    if cell_logging:
+        parts.append(
+            "\n## Logging liviano de resultados (aprobado por el usuario)\n"
+            "La celda de configuración del notebook define `_log(label, value=None)`"
+            " — ya existe: NO lo definas ni lo importes. Al FINAL de cada celda que"
+            " produce un resultado importante agrega UNA sola línea:\n"
+            '- DataFrame de salida (pandas/hybrid): `_log("cruce", cruce)`.\n'
+            "- Escritura SQL (pushdown/passthrough): captura el resultado del"
+            " execute y loguea su rowcount: `res = conn.exec_driver_sql(...)` →"
+            ' `_log("DELETE GOB.dbo.RESUMEN", res.rowcount)`. PROHIBIDO un query'
+            " extra (SELECT COUNT) solo para loguear.\n"
+            "- Máximo una llamada por celda; solo resultados que importan (no"
+            " variables intermedias). Nodos strategy `python` (utility) NO se"
+            " loguean. Una celda que termina en `raise NotImplementedError` no"
+            " lleva `_log`."
         )
     if len(parts) == 1:
         return None

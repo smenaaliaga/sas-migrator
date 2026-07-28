@@ -237,6 +237,9 @@ def stub_post_analysis_interview(state_dir: Path) -> None:
         decided.append(item)
     _dump_yaml(state_dir / "approved_improvements.yaml", {"improvements": decided})
 
+    # B5b: logging por celda OFF — el stub nunca aprueba en nombre del usuario.
+    _dump_yaml(state_dir / "cell_logging.yaml", {"cell_logging": {"enabled": False}})
+
 
 # ── Fase 5: aprobación del plan ──────────────────────────────────────────────
 
@@ -294,7 +297,9 @@ def stub_generate_notebooks(state_dir: Path, output_dir: Path) -> None:
     trans_dir.mkdir(exist_ok=True)
     for nid, nt in translations.items():
         _dump_json(trans_dir / f"{nid}.json", _model_dump(nt))
-    mapping, failures = assemble_notebooks(plan, translations, output_dir)
+    mapping, failures = assemble_notebooks(
+        plan, translations, output_dir, cell_logging=bool(plan.get("cell_logging"))
+    )
     if failures:  # el stub emite traducciones siempre válidas — esto es un bug
         raise RuntimeError(f"stub de traducción falló chequeos estáticos: {failures}")
     _dump_json(state_dir / "sas_python_mapping.json", _model_dump(mapping))

@@ -525,3 +525,60 @@ def test_fstring_that_builds_a_real_statement_still_fails() -> None:
     ):
         f = check_node_translation(_nt("A", [src]))
         assert f is not None and f.reason == "forbidden_pattern", src
+
+
+# ── Logging por celda (decisión B5b) ────────────────────────────────────────
+
+def test_cell_logging_on_define_helper_y_acepta_las_llamadas(tmp_path: Path) -> None:
+    translations = {"A": _nt("A", ['x = pd.DataFrame()\n_log("x", x)\n'])}
+    mapping, failures = assemble_notebooks(
+        _plan("A"), translations, tmp_path / "output", cell_logging=True
+    )
+    assert failures == [], "con el feature ON, _log es un nombre conocido"
+
+    nb = _read_nb(tmp_path / "output" / "NB-01_demo.ipynb")
+    sources = ["".join(c["source"]) for c in nb["cells"]]
+    config = sources[1]
+    assert "def _log(label, value=None):" in config
+    assert '_LOG_PATH = Path("log") / "NB-01_demo.log"' in config
+    assert "=== corrida" in config, "la marca de corrida se escribe al configurar"
+    assert "import datetime" in config and "from pathlib import Path" in config
+    assert any('_log("x", x)' in s for s in sources[2:]), "la llamada del nodo queda"
+    # stdlib del helper no contamina el contrato del entorno destino
+    reqs = (tmp_path / "output" / "requirements.txt").read_text(encoding="utf-8")
+    assert "datetime" not in reqs and "pathlib" not in reqs
+
+
+def test_cell_logging_off_stripea_llamadas_de_traducciones_cacheadas(tmp_path: Path) -> None:
+    """Resume real: state/translations/ traducido con ON, ensamblado con OFF."""
+    translations = {
+        "A": _nt("A", ['x = pd.DataFrame()\n_log("x", x)\n', '_log("solo log")\n'])
+    }
+    mapping, failures = assemble_notebooks(
+        _plan("A"), translations, tmp_path / "output"  # default OFF
+    )
+    assert failures == [], "el strip elimina la causa del undefined_name"
+
+    raw = (tmp_path / "output" / "NB-01_demo.ipynb").read_text(encoding="utf-8")
+    assert "_log" not in raw
+    nb = _read_nb(tmp_path / "output" / "NB-01_demo.ipynb")
+    sources = ["".join(c["source"]) for c in nb["cells"]]
+    assert any("x = pd.DataFrame()" in s for s in sources), "la lógica se conserva"
+    assert "def _log" not in sources[1] and "import datetime" not in sources[1]
+    by_id = {m.node_id: m for m in mapping.mappings}
+    assert by_id["A"].cell_count == 1, "la celda que era puro _log se descarta"
+
+
+def test_cell_logging_off_sin_llamadas_no_cambia_nada(tmp_path: Path) -> None:
+    translations = {"A": _nt("A", ["x = pd.DataFrame()\n"])}
+    _, failures = assemble_notebooks(_plan("A"), translations, tmp_path / "output")
+    assert failures == []
+    raw = (tmp_path / "output" / "NB-01_demo.ipynb").read_text(encoding="utf-8")
+    assert "_log" not in raw and "datetime" not in raw
+
+
+def test_except_que_solo_loguea_sigue_siendo_swallowed_exception() -> None:
+    f = check_node_translation(_nt("A", [
+        'try:\n    x = pd.read_csv("a.csv")\nexcept Exception:\n    _log("fallo")\n'
+    ]))
+    assert f is not None and f.reason == "swallowed_exception"

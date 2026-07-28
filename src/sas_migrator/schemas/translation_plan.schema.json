@@ -188,6 +188,11 @@
       "title": "Macro Param Values",
       "type": "object"
     },
+    "cell_logging": {
+      "default": false,
+      "title": "Cell Logging",
+      "type": "boolean"
+    },
     "ignored_nodes": {
       "items": {
         "type": "string"

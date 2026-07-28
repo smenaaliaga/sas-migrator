@@ -26,8 +26,8 @@ quit;
   "strategy": "sql_pushdown",
   "imports": [],
   "cells": [
-    "sql_resumen = \"\"\"\nSELECT a.id, b.region, SUM(a.monto) AS total\nFROM GOB.dbo.VENTAS a\nINNER JOIN GOB.dbo.SUCURSALES b ON a.suc = b.suc\nWHERE a.periodo = ?\nGROUP BY a.id, b.region\n\"\"\"\nresumen = pd.read_sql(sql_resumen, engine, params=(periodo,))\n",
-    "with engine.begin() as conn:\n    conn.exec_driver_sql(\"DELETE FROM GOB.dbo.RESUMEN WHERE periodo = ?\", (periodo,))\nresumen.to_sql(\"RESUMEN\", engine, schema=\"dbo\", if_exists=\"append\", index=False)\n"
+    "sql_resumen = \"\"\"\nSELECT a.id, b.region, SUM(a.monto) AS total\nFROM GOB.dbo.VENTAS a\nINNER JOIN GOB.dbo.SUCURSALES b ON a.suc = b.suc\nWHERE a.periodo = ?\nGROUP BY a.id, b.region\n\"\"\"\nresumen = pd.read_sql(sql_resumen, engine, params=(periodo,))\n_log(\"resumen\", resumen)\n",
+    "with engine.begin() as conn:\n    res = conn.exec_driver_sql(\"DELETE FROM GOB.dbo.RESUMEN WHERE periodo = ?\", (periodo,))\n    _log(\"DELETE GOB.dbo.RESUMEN\", res.rowcount)\nresumen.to_sql(\"RESUMEN\", engine, schema=\"dbo\", if_exists=\"append\", index=False)\n"
   ],
   "traceability": {
     "sas_construct": "PROC SQL CREATE TABLE con INNER JOIN y agregación",

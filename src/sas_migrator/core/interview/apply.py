@@ -180,6 +180,14 @@ def _db_decisions(state_dir: Path, collected: Collected) -> tuple[bool, list[str
     return connect, sorted(confirmed), sorted(noise)
 
 
+def _cell_logging_decision(collected: Collected) -> bool:
+    """B5b → ¿logging por celda en los notebooks? Tarjeta ausente = False."""
+    for card, ans in collected:
+        if card.card_id == "B5b-cell-logging":
+            return _value_of(ans, "Q-B5b-1") == post_analysis.CELL_LOGGING_OPTIONS[0]
+    return False
+
+
 def _write_db_connections(
     state_dir: Path, collected: Collected, confirmed: list[str]
 ) -> None:
@@ -399,6 +407,12 @@ def apply_post_analysis(state_dir: Path, collected: Collected) -> dict:
 
     # 5. B4c → api_connections.yaml (solo si hubo tarjetas de conexión externa).
     _write_api_connections(state_dir, collected)
+
+    # 6. B5b → cell_logging.yaml (preferencia de generación; la lee la Fase 5).
+    atomic_write_yaml(
+        state_dir / "cell_logging.yaml",
+        {"cell_logging": {"enabled": _cell_logging_decision(collected)}},
+    )
 
     counts = summarize_counts(state_dir, collected)
     counts["placements_resolved"] = resolved

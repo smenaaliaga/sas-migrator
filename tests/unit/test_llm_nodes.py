@@ -619,3 +619,19 @@ def test_split_ignora_proc_en_comentarios_y_strings() -> None:
     trozos = split_sas_blocks(code, len(code) - 1)  # obliga a partir
     assert "".join(trozos) == code
     assert trozos == [bloque1, bloque2], "el Ãºnico corte vÃ¡lido es el PROC real"
+
+
+def test_translation_context_propaga_cell_logging_del_plan(tmp_path):
+    """La decisión B5b viaja plan → setup → system blocks (fewshots con _log)."""
+    from sas_migrator.llm.phases import _translation_context
+
+    state = tmp_path / "state"
+    state.mkdir()
+
+    setup_off = _translation_context(state, {"cell_logging": False})
+    assert setup_off.cell_logging is False
+    assert all("_log" not in b for b in setup_off.system)
+
+    setup_on = _translation_context(state, {"cell_logging": True})
+    assert setup_on.cell_logging is True
+    assert any("_log(" in b for b in setup_on.system), "fewshots/contexto modelan _log"

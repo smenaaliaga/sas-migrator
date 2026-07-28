@@ -41,6 +41,14 @@ def test_config_loads_from_workspace(tmp_path: Path) -> None:
     assert cfg.audit.runtime_df_checks == ["df_resumen"]
 
 
+def test_config_cell_logging_default_off_y_configurable(tmp_path: Path) -> None:
+    assert load_project_config(tmp_path).translation.cell_logging is False
+    (tmp_path / "project_config.yaml").write_text(
+        "translation:\n  cell_logging: true\n", encoding="utf-8"
+    )
+    assert load_project_config(tmp_path).translation.cell_logging is True
+
+
 # ── engine / resolución de servidor ──────────────────────────────────────────
 
 def test_resolve_server_prefers_connection_value() -> None:

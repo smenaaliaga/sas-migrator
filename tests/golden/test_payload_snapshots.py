@@ -69,6 +69,13 @@ def test_snapshot_phase4_improvements(synthetic_state, snapshot) -> None:
     snapshot("phase4_improvements", [_dump(c) for c in cards])
 
 
+def test_snapshot_phase4_cell_logging(synthetic_state, snapshot) -> None:
+    snapshot(
+        "phase4_cell_logging",
+        _dump(post_analysis.build_cell_logging_card(synthetic_state)),
+    )
+
+
 def test_snapshot_phase4_closure(synthetic_state, snapshot) -> None:
     counts = {"migrate": 4, "excluded": 0, "improvements": 0, "assumptions": 1}
     snapshot("phase4_closure", _dump(post_analysis.build_closure_card(synthetic_state, counts)))
@@ -139,6 +146,7 @@ def _all_cards(state_dir):
         *post_analysis.build_placement_resolution_cards(state_dir),
         *post_analysis.build_api_connection_cards(state_dir),
         *post_analysis.build_improvement_cards(state_dir),
+        post_analysis.build_cell_logging_card(state_dir),
         post_analysis.build_closure_card(state_dir, {}),
         post_analysis.build_db_connection_card(state_dir),
         plan_approval.build_plan_card(state_dir),

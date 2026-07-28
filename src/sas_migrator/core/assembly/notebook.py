@@ -272,7 +272,7 @@ def _is_noise_stmt(stmt: ast.stmt) -> bool:
         call = stmt.value
         if isinstance(call, ast.Call):
             func = call.func
-            if isinstance(func, ast.Name) and func.id == "print":
+            if isinstance(func, ast.Name) and func.id in ("print", "_log"):
                 return True
             if isinstance(func, ast.Attribute):
                 root = func.value
@@ -677,6 +677,79 @@ def _reject_undefined_names(
     return kept, failures
 
 
+# Helper `_log` que se define en la celda de configuración cuando el usuario
+# aprobó el logging por celda (decisión B5b). El try/except tragado es
+# deliberado y vive SOLO acá: un log jamás puede convertir una corrida buena
+# en fallida. Los chequeos estáticos no analizan esta celda (solo nt.cells).
+_CELL_LOGGING_SNIPPET = '''
+# Logging liviano de resultados — aprobado en la entrevista (Fase 4)
+_LOG_PATH = Path("log") / "__LOG_FILE__"
+_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+def _log(label, value=None):
+    """Una línea por celda: imprime y persiste. Jamás rompe la corrida."""
+    try:
+        if hasattr(value, "shape"):
+            detail = f"{value.shape[0]} filas x {value.shape[1]} cols"
+        elif isinstance(value, int):
+            detail = f"{value} filas"
+        elif value is None:
+            detail = "ok"
+        else:
+            detail = str(value)
+        line = f"[{datetime.datetime.now():%Y-%m-%d %H:%M:%S}] {label}: {detail}"
+        print(line)
+        with open(_LOG_PATH, "a", encoding="utf-8") as fh:
+            fh.write(line + "\\n")
+    except Exception:
+        pass  # el log nunca puede tumbar el notebook
+with open(_LOG_PATH, "a", encoding="utf-8") as _fh:
+    _fh.write(f"\\n=== corrida {datetime.datetime.now():%Y-%m-%d %H:%M:%S} ===\\n")
+'''
+
+
+def _strip_log_calls(nt: NodeTranslation) -> NodeTranslation:
+    """Elimina las llamadas ``_log(...)`` de una traducción (feature OFF).
+
+    Defensa de coherencia para resume: ``state/translations/`` pudo generarse
+    con la decisión B5b en ON y el ensamblado correr en OFF — sin esto cada
+    ``_log`` caería como undefined_name. Se localizan por AST (statements Expr
+    cuyo call es el nombre ``_log``) y se borran sus líneas, conservando el
+    resto del texto tal cual.
+    """
+    changed = False
+    cells: list[str] = []
+    for cell in nt.cells:
+        try:
+            tree = ast.parse(cell)
+        except SyntaxError:
+            cells.append(cell)  # lo reporta el chequeo de sintaxis, no este
+            continue
+        drop: set[int] = set()
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Expr)
+                and isinstance(node.value, ast.Call)
+                and isinstance(node.value.func, ast.Name)
+                and node.value.func.id == "_log"
+            ):
+                drop.update(range(node.lineno, (node.end_lineno or node.lineno) + 1))
+        if not drop:
+            cells.append(cell)
+            continue
+        changed = True
+        kept = [
+            line
+            for i, line in enumerate(cell.splitlines(keepends=True), start=1)
+            if i not in drop
+        ]
+        new_cell = "".join(kept)
+        if new_cell.strip():
+            cells.append(new_cell)
+    if not changed or not cells:
+        return nt  # sin _log, o el nodo era puro _log: que lo diga el chequeo
+    return nt.model_copy(update={"cells": cells})
+
+
 def assemble_notebooks(
     plan: dict,
     translations: dict[str, NodeTranslation],
@@ -684,6 +757,7 @@ def assemble_notebooks(
     *,
     db_bootstrap: bool = False,
     allowed_imports: Iterable[str] | None = None,
+    cell_logging: bool = False,
 ) -> tuple[SasPythonMapping, list[NodeAssemblyFailure]]:
     """Construye los notebooks del plan y el mapping SAS→Python.
 
@@ -716,6 +790,8 @@ def assemble_notebooks(
             nt = translations.get(nid)
             if nt is None:
                 continue  # sin traducción: needs_human ya registrado aguas arriba
+            if not cell_logging:
+                nt = _strip_log_calls(nt)
             if nt.strategy and target.get("strategy") and nt.strategy != target["strategy"]:
                 failures.append(
                     NodeAssemblyFailure(
@@ -736,6 +812,11 @@ def assemble_notebooks(
             for line in ("import os", "import sqlalchemy"):
                 if line not in imports:
                     imports.append(line)
+        if cell_logging:
+            # stdlib para el helper _log; _write_requirements los filtra.
+            for line in ("import datetime", "from pathlib import Path"):
+                if line not in imports:
+                    imports.append(line)
         for nt in valid:
             for line in nt.imports:
                 line = line.strip()
@@ -753,6 +834,8 @@ def assemble_notebooks(
         known.add("faltantes")  # lo define la celda de parámetros
         if db_bootstrap:
             known.add("engine")
+        if cell_logging:
+            known.add("_log")  # lo define la celda de configuración
         valid, undefined_failures = _reject_undefined_names(valid, known)
         failures.extend(undefined_failures)
 
@@ -766,6 +849,10 @@ def assemble_notebooks(
                 "\n# Conexión a BD — la define el orquestador al ejecutar\n"
                 'engine = sqlalchemy.create_engine(os.environ["SASMIG_DB_URL"])\n'
             )
+        if cell_logging:
+            # El notebook corre con cwd=output/ (nbclient y run_all.py), así
+            # que Path("log") resuelve a output/log/.
+            config_source += _CELL_LOGGING_SNIPPET.replace("__LOG_FILE__", f"{title}.log")
 
         nb = nbformat.v4.new_notebook()
         cells = [nbformat.v4.new_markdown_cell(f"# {title}")]

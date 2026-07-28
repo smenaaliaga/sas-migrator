@@ -73,6 +73,43 @@ def test_translation_system_son_tres_bloques_con_fewshot() -> None:
     assert fewshot == prompt_builder.build_translation_system()[1], "determinista"
 
 
+# ── logging por celda (decisión B5b) ────────────────────────────────────────
+
+def test_fewshot_off_no_contiene_log_y_conserva_la_forma_original() -> None:
+    """Invariante del strip: la variante OFF es la de siempre — sin `_log`,
+    sin el binding `res = ` del pushdown. Protege evals grabados y cache."""
+    off = prompt_builder._read_fewshot(False)
+    assert "_log" not in off
+    assert "res = conn.exec_driver_sql" not in off
+    assert "conn.exec_driver_sql" in off  # la llamada sigue, sin binding
+    assert prompt_builder._read_fewshot() == off, "default = OFF"
+
+
+def test_fewshot_on_modela_log_de_shape_y_rowcount() -> None:
+    on = prompt_builder._read_fewshot(True)
+    assert '_log(\\"cruce\\", cruce)' in on            # pandas: shape del DF
+    assert "res.rowcount" in on                        # pushdown: filas del execute
+    assert on.count("SELECT COUNT") == 0, "jamás query extra solo para loguear"
+
+
+def test_project_context_con_cell_logging_agrega_la_seccion() -> None:
+    base = dict(connections=[], improvements=[], macro_param_values={})
+    off = prompt_builder.build_project_context(**base, cell_logging=False)
+    on = prompt_builder.build_project_context(**base, cell_logging=True)
+    assert off is None
+    assert "_log(label, value=None)" in on
+    assert "NO lo definas" in on
+    assert "res.rowcount" in on
+
+
+def test_translation_system_propaga_cell_logging_al_fewshot() -> None:
+    off = prompt_builder.build_translation_system()
+    on = prompt_builder.build_translation_system(cell_logging=True)
+    assert "_log" not in off[1]
+    assert "_log" in on[1]
+    assert off[0] == on[0], "el bloque contrato no cambia con el feature"
+
+
 # ── mensaje user por nodo ───────────────────────────────────────────────────
 
 def test_user_header_declara_datasets_y_macro_params() -> None:

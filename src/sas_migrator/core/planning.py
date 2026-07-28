@@ -230,11 +230,22 @@ def build(state: Path) -> dict:
     # acá por error — este archivo se commitea.
     from sas_migrator.core.config import load_project_config
 
+    cfg = load_project_config(state.parent)
     macro_param_values = {
         str(k): v
-        for k, v in load_project_config(state.parent).run.macro_params.items()
+        for k, v in cfg.run.macro_params.items()
         if not is_credential_macro(str(k))
     }
+
+    # Logging por celda: decisión de la entrevista B5b (cell_logging.yaml).
+    # Fallback a config solo para states legados sin el artefacto; el flujo
+    # normal (entrevista o stub) siempre lo escribe.
+    logging_doc = load_artifact(state / "cell_logging.yaml") or {}
+    cell_logging = bool(
+        (logging_doc.get("cell_logging") or {}).get(
+            "enabled", cfg.translation.cell_logging
+        )
+    )
 
     node_macro_params: dict[str, list[str]] = {}
     for entry in as_list(load_artifact(state / "analysis_evidence.json"), "macro_variables"):
@@ -339,6 +350,9 @@ def build(state: Path) -> dict:
         # El plan los transporta para que el ensamblador escriba la celda de
         # parámetros sin volver a leer config.
         "macro_param_values": macro_param_values,
+        # Decisión B5b: el plan la transporta para que traductor y ensamblador
+        # no relean config ni la entrevista.
+        "cell_logging": cell_logging,
         "ignored_nodes": sorted(ignored),
         "global_improvements": global_improvements,
         "assumptions": assumptions,

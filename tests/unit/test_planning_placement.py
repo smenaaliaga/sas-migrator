@@ -132,3 +132,20 @@ def test_el_modelo_no_borra_claves_del_plan_construido(tmp_path: Path) -> None:
     assert target_keys <= model_target_keys, (
         f"claves de target perdidas: {target_keys - model_target_keys}"
     )
+
+
+def test_cell_logging_viaja_en_el_plan(tmp_path: Path) -> None:
+    """La decisión B5b (cell_logging.yaml) sube al plan; sin artefacto cae al
+    config del workspace, y sin nada es False."""
+    state = _state(tmp_path, placements={"A": "pandas"})
+    assert planning.build(state)["cell_logging"] is False
+
+    (tmp_path / "project_config.yaml").write_text(
+        "translation:\n  cell_logging: true\n", encoding="utf-8"
+    )
+    assert planning.build(state)["cell_logging"] is True, "fallback a config (legado)"
+
+    (state / "cell_logging.yaml").write_text(
+        yaml.safe_dump({"cell_logging": {"enabled": False}}), encoding="utf-8"
+    )
+    assert planning.build(state)["cell_logging"] is False, "la entrevista manda sobre config"

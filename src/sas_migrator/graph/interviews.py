@@ -193,6 +193,9 @@ def run_post_analysis_interview(state_dir: Path) -> dict:
     _ask_api_block(state_dir, collected)
     _ask_improvements(state_dir, collected)
 
+    logcard = post_analysis.build_cell_logging_card(state_dir)
+    collected.append((logcard, ask(logcard)))
+
     counts = apply.summarize_counts(state_dir, collected)
     closure = post_analysis.build_closure_card(state_dir, counts)
     closure_ans = ask(closure)

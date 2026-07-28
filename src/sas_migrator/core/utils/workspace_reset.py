@@ -33,6 +33,7 @@ DECISION_ARTIFACTS = (
     "placement_decisions.yaml",
     "db_connections.yaml",
     "approved_improvements.yaml",
+    "cell_logging.yaml",
 )
 
 

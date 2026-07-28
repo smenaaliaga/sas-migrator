@@ -49,6 +49,7 @@ API_MODE_OPTIONS = [
     "Replicar la llamada HTTP con requests",
     "Usar una librería/SDK oficial (indico el paquete en texto libre)",
 ]
+CELL_LOGGING_OPTIONS = ["Sí, agregar logging de resultados", "No, notebooks sin logging"]
 IMPROVEMENT_OPTIONS = ["Aprobar", "Rechazar", "Explicar más"]
 IMPROVEMENT_DETAIL_OPTIONS = ["Aprobar", "Rechazar"]
 CLOSURE_OPTIONS = ["Sí, proceder al plan de traducción", "No, detener aquí"]
@@ -775,6 +776,43 @@ def build_improvement_detail_card(state_dir: Path, imp_id: str) -> InterviewCard
         "B5-improvements",
         f"Mejora {imp_id} (detalle): {item.get('title', '')}",
         questions=[_improvement_question(item, detail=True)],
+    )
+
+
+# ── B5b: logging por celda ──────────────────────────────────────────────────
+
+def build_cell_logging_card(state_dir: Path) -> InterviewCard:
+    """B5b: logging liviano de resultados en los notebooks generados.
+
+    Decisión global de generación (no depende de evidencia del .egp), por eso
+    la tarjeta siempre se presenta. `translation.cell_logging` del config es
+    solo la recomendación; la decisión que manda es la del usuario.
+    """
+    from sas_migrator.core.config import load_project_config
+
+    cfg = load_project_config(Path(state_dir).parent)
+    recommended = CELL_LOGGING_OPTIONS[0] if cfg.translation.cell_logging else CELL_LOGGING_OPTIONS[1]
+    return _card(
+        "B5b-cell-logging",
+        "B5b-cell-logging",
+        "Logging de resultados en los notebooks",
+        questions=[
+            Question(
+                id="Q-B5b-1",
+                text=(
+                    "¿Agregamos una línea de log al final de las celdas con resultados "
+                    "importantes? Imprime filas/shape en pantalla y lo persiste en "
+                    "output/log/<notebook>.log, con marca de cada corrida."
+                ),
+                question_type=QuestionType.APPROVAL,
+                options=list(CELL_LOGGING_OPTIONS),
+                recommended_default=recommended,
+                evidence=[
+                    "project_config.yaml: translation.cell_logging = "
+                    + str(cfg.translation.cell_logging).lower()
+                ],
+            )
+        ],
     )
 
 

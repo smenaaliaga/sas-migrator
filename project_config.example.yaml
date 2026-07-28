@@ -60,6 +60,11 @@ translation:
   # buscando semántica perdida o cambiada. all = todos los nodos (default),
   # low = solo los de confianza baja, off = sin verificador.
   verify: all
+  # Logging liviano por celda: `_log(...)` al final de las celdas con
+  # resultados importantes + persistencia en output/log/<notebook>.log.
+  # Este flag es solo la recomendación de la tarjeta B5b de la entrevista;
+  # la decisión final la toma el usuario ahí.
+  cell_logging: false
 
 run:
   # Valores de las variables macro que el SAS heredaba del entorno (autoexec

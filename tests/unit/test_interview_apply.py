@@ -85,6 +85,11 @@ def _collect_phase4(state: Path) -> list[tuple[InterviewCard, CardAnswers]]:
     for card in post_analysis.build_improvement_cards(state):
         collected.append((card, _answer(card, {card.questions[0].id: "Rechazar"})))
 
+    logcard = post_analysis.build_cell_logging_card(state)
+    collected.append(
+        (logcard, _answer(logcard, {"Q-B5b-1": "Sí, agregar logging de resultados"}))
+    )
+
     counts = apply.summarize_counts(state, collected)
     closure = post_analysis.build_closure_card(state, counts)
     collected.append(
@@ -123,6 +128,21 @@ def test_apply_post_analysis_passes_real_gate4(ws: Path) -> None:
 
     node = json.loads((state / "nodes" / "ImportTask-1.json").read_text(encoding="utf-8"))
     assert "Excel" in node["translation_notes"]
+
+    # B5b: la decisión de logging quedó persistida.
+    logdoc = yaml.safe_load((state / "cell_logging.yaml").read_text(encoding="utf-8"))
+    assert logdoc == {"cell_logging": {"enabled": True}}
+
+
+def test_cell_logging_defaults_off_without_card(ws: Path) -> None:
+    """Entrevistas legadas (sin tarjeta B5b) jamás activan el feature solas."""
+    state = ws / "state"
+    collected = []
+    for card in post_analysis.build_improvement_cards(state):
+        collected.append((card, _answer(card, {card.questions[0].id: "Rechazar"})))
+    apply.apply_post_analysis(state, collected)
+    doc = yaml.safe_load((state / "cell_logging.yaml").read_text(encoding="utf-8"))
+    assert doc == {"cell_logging": {"enabled": False}}
 
 
 def test_noise_prefix_resolves_to_local_placement(ws: Path) -> None:
