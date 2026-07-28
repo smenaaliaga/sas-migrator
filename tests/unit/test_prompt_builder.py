@@ -60,6 +60,19 @@ def test_translation_system_agrega_el_bloque_de_proyecto() -> None:
     assert base[0] == con_contexto[0]
 
 
+def test_translation_system_son_tres_bloques_con_fewshot() -> None:
+    blocks = prompt_builder.build_translation_system("# ctx")
+    assert len(blocks) == 3
+    contrato, fewshot, ctx = blocks
+    assert "patrones" in contrato.lower() or "NodeTranslation" in contrato
+    assert "Ejemplos de traducción" in fewshot
+    # un ejemplo por strategy principal, con el anti-patrón clave a la vista
+    assert "data-step-merge" in fewshot          # pandas
+    assert "DELETE FROM" in fewshot              # pushdown idempotente, no DROP
+    assert "macro-utility" in fewshot            # utility sin I/O
+    assert fewshot == prompt_builder.build_translation_system()[1], "determinista"
+
+
 # ── mensaje user por nodo ───────────────────────────────────────────────────
 
 def test_user_header_declara_datasets_y_macro_params() -> None:

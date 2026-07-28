@@ -128,14 +128,19 @@ class AnthropicCaller:
             f"llm.provider desconocido: {config.provider!r} (anthropic | foundry)"
         )
 
+    # El API admite hasta 4 breakpoints de cache por request.
+    MAX_CACHE_BREAKPOINTS = 4
+
     def _system_param(self, system_blocks: list[str]) -> list[dict[str, Any]] | None:
         if not system_blocks:
             return None
-        # Prompt caching: los bloques system son estables por diseño (las
-        # tablas de patrones, convenciones del proyecto); el breakpoint va en
-        # el último bloque y lo volátil viaja en el mensaje user.
+        # Prompt caching ESCALONADO: cada bloque system lleva su breakpoint
+        # (≤4). Con uno solo en el último bloque, cambiar el bloque final
+        # (contexto del proyecto) invalidaba también el prefijo compartido
+        # (contrato + patrones + few-shot). Lo volátil viaja en el user.
         blocks: list[dict[str, Any]] = [{"type": "text", "text": b} for b in system_blocks]
-        blocks[-1]["cache_control"] = {"type": "ephemeral"}
+        for block in blocks[-self.MAX_CACHE_BREAKPOINTS:]:
+            block["cache_control"] = {"type": "ephemeral"}
         return blocks
 
     TOOL_NAME = "responder"

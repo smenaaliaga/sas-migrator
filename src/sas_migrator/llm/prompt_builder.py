@@ -16,6 +16,23 @@ def _read(name: str) -> str:
     return (files("sas_migrator.llm") / "prompts" / name).read_text(encoding="utf-8")
 
 
+def _read_fewshot() -> str:
+    """Ejemplos curados SAS→NodeTranslation (llm/prompts/fewshot/, en orden).
+
+    Cumplen doble función: enseñan el formato con casos reales del eval set, y
+    engordan el prefijo cacheable — el system sin ejemplos quedaba bajo el
+    mínimo cacheable de algunos modelos (4096 tokens en Haiku) y el cache
+    rendía exactamente 0 en producción.
+    """
+    fewshot_dir = files("sas_migrator.llm") / "prompts" / "fewshot"
+    parts = [
+        entry.read_text(encoding="utf-8")
+        for entry in sorted(fewshot_dir.iterdir(), key=lambda e: e.name)
+        if entry.name.endswith(".md")
+    ]
+    return "# Ejemplos de traducción (formato exacto del output)\n\n" + "\n\n".join(parts)
+
+
 def build_analysis_system() -> list[str]:
     return [_read("analysis_pfd.md")]
 
@@ -37,18 +54,22 @@ def build_docs_system() -> list[str]:
 
 
 def build_translation_system(project_context: str | None = None) -> list[str]:
-    """System de traducción: contrato+patrones (estable entre proyectos) y,
-    si existe, el bloque de contexto del proyecto (estable por corrida).
+    """System de traducción en (hasta) TRES bloques con cache escalonado.
 
-    Bloques separados a propósito: cachean por separado, y el primero es
-    idéntico entre proyectos distintos.
+    1. Contrato + ambas tablas de patrones — idéntico entre proyectos.
+    2. Few-shot curado del eval set — idéntico entre proyectos.
+    3. Contexto del proyecto — estable por corrida.
+
+    Cada bloque lleva su propio breakpoint de cache (lo pone el cliente): si
+    cambia el contexto del proyecto, los bloques 1-2 siguen cacheados.
     """
     blocks = [
         _read("translation_system.md")
         + "\n\n"
         + _read("patterns_sas_pandas.md")
         + "\n\n"
-        + _read("patterns_sas_tsql.md")
+        + _read("patterns_sas_tsql.md"),
+        _read_fewshot(),
     ]
     if project_context:
         blocks.append(project_context)

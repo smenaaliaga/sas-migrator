@@ -86,6 +86,24 @@ def test_success_first_try_returns_validated_model(monkeypatch) -> None:
     assert "temperature" not in calls[0] and "thinking" not in calls[0]
 
 
+def test_cache_escalonado_un_breakpoint_por_bloque(monkeypatch) -> None:
+    """Con un solo breakpoint al final, cambiar el bloque de proyecto
+    invalidaba también el prefijo compartido (contrato + few-shot)."""
+    _, calls = _install_fake_sdk(monkeypatch, [_ok(1), _ok(2)])
+    caller = AnthropicCaller(LlmConfig())
+    caller.call(task="t", system_blocks=["contrato", "fewshot", "proyecto"],
+                user_content="c", output_model=Demo)
+    system = calls[0]["system"]
+    assert all(b.get("cache_control") == {"type": "ephemeral"} for b in system)
+
+    # más bloques que breakpoints permitidos: los ÚLTIMOS 4 los llevan
+    caller.call(task="t", system_blocks=["a", "b", "c", "d", "e"],
+                user_content="c", output_model=Demo)
+    system = calls[1]["system"]
+    assert "cache_control" not in system[0]
+    assert all("cache_control" in b for b in system[1:])
+
+
 def test_retry_bounded_then_needs_human(monkeypatch) -> None:
     _, calls = _install_fake_sdk(monkeypatch, [_invalid(), _invalid(), _invalid()])
     caller = AnthropicCaller(LlmConfig(max_validation_retries=3))
