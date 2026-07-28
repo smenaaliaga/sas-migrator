@@ -249,9 +249,10 @@ class AnthropicCaller:
             except self._anthropic.APIError:
                 raise  # transporte/API: visible, reanudable — jamás NeedsHuman
             except Exception as exc:
-                # Validación del structured output dentro del SDK.
+                # Validación del structured output dentro del SDK (sin response
+                # utilizable que mostrar de vuelta).
                 last_error = str(exc)
-                messages.append(self._correction(last_error))
+                messages.extend(self._correction_turns(None, last_error))
                 continue
 
             usage = getattr(response, "usage", None)
@@ -294,7 +295,7 @@ class AnthropicCaller:
                 return self._extract(response, output_model)
             except Exception as exc:
                 last_error = str(exc)
-                messages.append(self._correction(last_error))
+                messages.extend(self._correction_turns(response, last_error))
 
         raise NeedsHuman(
             task=task,
@@ -303,13 +304,49 @@ class AnthropicCaller:
             detail=last_error,
         )
 
-    @staticmethod
-    def _correction(error: str) -> dict[str, Any]:
-        return {
-            "role": "user",
-            "content": (
-                "La respuesta anterior no validó contra el schema requerido: "
-                f"{error[:500]}. Responde únicamente con el objeto JSON corregido, "
-                "sin texto adicional."
-            ),
-        }
+    def _correction_turns(self, response: Any, error: str) -> list[dict[str, Any]]:
+        """Turnos del reintento de validación — CON la respuesta fallida.
+
+        Un retry que no muestra la respuesta rechazada es la misma tirada otra
+        vez: el modelo no sabe qué produjo ni qué corregir. En modo tool el
+        turno assistant lleva el tool_use fallido y la corrección viaja como
+        ``tool_result`` con ``is_error`` (requisito del API: todo tool_use
+        exige su tool_result). En nativo, el texto del assistant si existe.
+        """
+        correction = (
+            "La respuesta anterior no validó contra el schema requerido: "
+            f"{error[:500]}. Responde únicamente con el objeto JSON corregido, "
+            "sin texto adicional."
+        )
+        blocks = list(getattr(response, "content", None) or []) if response else []
+        if self._mode == "tool":
+            tool_use = next(
+                (b for b in blocks if getattr(b, "type", None) == "tool_use"), None
+            )
+            if tool_use is not None and getattr(tool_use, "id", None):
+                return [
+                    {
+                        "role": "assistant",
+                        "content": [{
+                            "type": "tool_use", "id": tool_use.id,
+                            "name": self.TOOL_NAME, "input": tool_use.input,
+                        }],
+                    },
+                    {
+                        "role": "user",
+                        "content": [{
+                            "type": "tool_result", "tool_use_id": tool_use.id,
+                            "is_error": True, "content": correction,
+                        }],
+                    },
+                ]
+        text = "".join(
+            getattr(b, "text", "") for b in blocks
+            if getattr(b, "type", None) == "text"
+        )
+        if text.strip():
+            return [
+                {"role": "assistant", "content": text},
+                {"role": "user", "content": correction},
+            ]
+        return [{"role": "user", "content": correction}]

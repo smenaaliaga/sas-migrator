@@ -541,10 +541,11 @@ def _translate_checked(
     malo ya está persistido en ``state/translations/``, y el retomar-desde-disco
     lo da por hecho para siempre: se traduce mal una vez y no se reintenta nunca.
 
-    El motivo del rechazo vuelve al modelo como instrucción del reintento.
-    Agotados los intentos, ``NeedsHuman`` — que el caller registra en la cola.
+    Los motivos del rechazo (TODOS, no solo el primero: un nodo con 4
+    problemas se corrige en una ronda, no en cuatro) vuelven al modelo como
+    instrucción del reintento. Agotados los intentos, ``NeedsHuman``.
     """
-    from sas_migrator.core.assembly.notebook import check_node_translation
+    from sas_migrator.core.assembly.notebook import check_node_translation_all
 
     nota = iteration_note
     plan_strategy = str(target.get("strategy") or "")
@@ -554,29 +555,32 @@ def _translate_checked(
             db_aliases=db_aliases, iteration_note=nota,
             review_note=review_note, dependencies_context=dependencies_context,
         )
+        motivos: list[str] = []
         if plan_strategy and nt.strategy and nt.strategy != plan_strategy:
-            motivo = (
+            motivos.append(
                 f"strategy_mismatch: devolviste strategy '{nt.strategy}' y el plan "
                 f"aprobado para este nodo dice '{plan_strategy}'"
             )
-        else:
-            failure = check_node_translation(nt, allowed_imports)
-            if failure is None:
-                return nt
-            motivo = f"{failure.reason}: {failure.detail}"
+        motivos.extend(
+            f"{f.reason}: {f.detail}"
+            for f in check_node_translation_all(nt, allowed_imports)
+        )
+        if not motivos:
+            return nt
+        motivo = "\n".join(f"    {i}. {m}" for i, m in enumerate(motivos, start=1))
 
         if intento > MAX_TRANSLATION_RETRIES:
             raise NeedsHuman(
                 task="translation", reason="static_check_failed",
-                attempts=intento, detail=motivo,
+                attempts=intento, detail="; ".join(motivos),
             )
         aviso = (
             "Tu traducción anterior de este nodo fue RECHAZADA por el chequeo "
-            f"estático:\n\n    {motivo}\n\n"
-            "Volvé a traducir el nodo completo corrigiendo eso. No dejes huecos: "
-            "si algo no se puede resolver con la información disponible, la celda "
-            "va con raise NotImplementedError('<qué falta>') y el motivo en "
-            "warnings — nunca un valor vacío que el resto del código consuma."
+            f"estático. Corregí TODOS estos problemas en una sola pasada:\n\n{motivo}\n\n"
+            "Volvé a traducir el nodo completo. No dejes huecos: si algo no se "
+            "puede resolver con la información disponible, la celda va con "
+            "raise NotImplementedError('<qué falta>') y el motivo en warnings — "
+            "nunca un valor vacío que el resto del código consuma."
         )
         nota = f"{aviso}\n\n{iteration_note}" if iteration_note else aviso
     raise AssertionError("inalcanzable")  # pragma: no cover

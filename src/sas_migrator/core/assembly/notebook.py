@@ -305,6 +305,136 @@ def _import_resolvable(name: str, allowed: frozenset[str] | set[str]) -> bool:
         return False
 
 
+def check_node_translation_all(
+    nt: NodeTranslation,
+    allowed_imports: Iterable[str] | None = None,
+) -> list[NodeAssemblyFailure]:
+    """TODAS las fallas estáticas del nodo (deduplicadas), no solo la primera.
+
+    Devolver solo la primera obligaba al retry a jugar al gato y al ratón: un
+    nodo con 4 problemas gastaba 4 rondas de LLM para enterarse de a uno. Con
+    la lista completa se corrige en una.
+    """
+    allowed = frozenset(allowed_imports) if allowed_imports is not None \
+        else DEFAULT_ALLOWED_IMPORTS
+    if not any(cell.strip() for cell in nt.cells):
+        return [NodeAssemblyFailure(nt.node_id, "empty_translation", "sin celdas de código")]
+
+    failures: list[NodeAssemblyFailure] = []
+
+    def add(reason: str, detail: str) -> None:
+        failure = NodeAssemblyFailure(nt.node_id, reason, detail)
+        if failure not in failures:
+            failures.append(failure)
+
+    sources = list(nt.imports) + list(nt.cells)
+    for src in sources:
+        lowered = src.lower()
+        for token in FORBIDDEN_SUBSTRINGS:
+            if token in lowered:
+                add("forbidden_pattern", f"patrón prohibido '{token}'")
+        if _REPLACE_WRITE.search(lowered):
+            add(
+                "forbidden_pattern",
+                "to_sql(if_exists='replace') destruye DDL — el reemplazo estilo "
+                "SAS es DELETE FROM sin WHERE + append",
+            )
+        for pattern in _SECRET_PATTERNS:
+            m = pattern.search(src)
+            if m:
+                add(
+                    "secret_detected",
+                    f"posible credencial literal en el código: '{m.group(0)[:30]}…' — "
+                    "usar variables de entorno",
+                )
+
+    for i, cell in enumerate(nt.cells):
+        comment = _placeholder_comment(cell)
+        if comment is not None:
+            add(
+                "placeholder_stub",
+                f"celda {i}: relleno anunciado en un comentario ({comment}). Un hueco "
+                "va como raise NotImplementedError(...) — falla fuerte y se ve — "
+                "nunca como valor vacío que el resto del código consume",
+            )
+
+    # Una celda con error de sintaxis se reporta y se excluye del análisis AST;
+    # las demás celdas se siguen chequeando — el retry recibe el panorama entero.
+    trees: list[ast.AST] = []
+    for i, cell in enumerate(nt.cells):
+        try:
+            trees.append(ast.parse(cell))
+        except SyntaxError as exc:
+            add("syntax_error", f"celda {i}: {exc.msg} (línea {exc.lineno})")
+    for line in nt.imports:
+        try:
+            trees.append(ast.parse(line))
+        except SyntaxError as exc:
+            add("syntax_error", f"import inválido '{line}': {exc.msg}")
+
+    roots: set[str] = set()
+    for tree in trees:
+        sql = _fstring_sql(tree)
+        if sql is not None:
+            add("forbidden_pattern", f"SQL dinámico por f-string: {sql}")
+        path = _absolute_path_literal(tree)
+        if path is not None:
+            add(
+                "absolute_path",
+                f"ruta absoluta literal '{path[:60]}' — el estándar es ruta "
+                "relativa al workspace (declarar el cambio en warnings)",
+            )
+        lineno = _bare_except(tree)
+        if lineno is not None:
+            add(
+                "bare_except",
+                f"'except:' desnudo (línea {lineno}) — convierte un fallo real en "
+                "un dato faltante silencioso; capturar la excepción concreta o "
+                "dejar que propague",
+            )
+        name = _self_assignment(tree)
+        if name is not None:
+            add(
+                "self_assignment",
+                f"'{name} = {name}' no declara nada: si el nombre viene de un nodo "
+                "anterior, la línea sobra; si no viene, es un NameError disfrazado",
+            )
+        sql = _sql_no_op(tree)
+        if sql is not None:
+            add(
+                "sql_no_op",
+                f"'WHERE 1=1' sin predicados: {sql} — el filtro del SAS original "
+                "se perdió y la consulta trae la tabla entera",
+            )
+        call = _row_by_row_write(tree)
+        if call is not None:
+            add(
+                "row_by_row_write",
+                f"'{call}' dentro de un loop de iterrows(): un round-trip por fila. "
+                "El APPEND de SAS se traduce con una escritura masiva (to_sql fuera "
+                "del loop)",
+            )
+        roots |= _import_root_names(tree)
+
+    frame = _empty_frame_guard(trees)
+    if frame is not None:
+        add(
+            "empty_frame_guard",
+            f"'{frame}' se asigna una sola vez, a un DataFrame vacío, y después se "
+            "usa como condición: esa rama nunca corre y el nodo entrega números "
+            "faltantes sin error. Cargar el dato de verdad o raise NotImplementedError",
+        )
+
+    for name in sorted(roots):
+        if not _import_resolvable(name, allowed):
+            add(
+                "unresolvable_import",
+                f"import no permitido: '{name}' — no es stdlib ni está en "
+                "translation.allowed_imports (project_config.yaml)",
+            )
+    return failures
+
+
 def check_node_translation(
     nt: NodeTranslation,
     allowed_imports: Iterable[str] | None = None,
@@ -314,123 +444,8 @@ def check_node_translation(
     Local al nodo a propósito: así lo puede correr la fase 6 apenas traduce,
     antes de persistir, y usar el ``detail`` como feedback del reintento.
     """
-    allowed = frozenset(allowed_imports) if allowed_imports is not None \
-        else DEFAULT_ALLOWED_IMPORTS
-    if not any(cell.strip() for cell in nt.cells):
-        return NodeAssemblyFailure(nt.node_id, "empty_translation", "sin celdas de código")
-
-    sources = list(nt.imports) + list(nt.cells)
-    for src in sources:
-        lowered = src.lower()
-        for token in FORBIDDEN_SUBSTRINGS:
-            if token in lowered:
-                return NodeAssemblyFailure(
-                    nt.node_id, "forbidden_pattern", f"patrón prohibido '{token}'"
-                )
-        if _REPLACE_WRITE.search(lowered):
-            return NodeAssemblyFailure(
-                nt.node_id, "forbidden_pattern",
-                "to_sql(if_exists='replace') destruye DDL — el reemplazo estilo "
-                "SAS es DELETE FROM sin WHERE + append",
-            )
-        for pattern in _SECRET_PATTERNS:
-            m = pattern.search(src)
-            if m:
-                return NodeAssemblyFailure(
-                    nt.node_id, "secret_detected",
-                    f"posible credencial literal en el código: '{m.group(0)[:30]}…' — "
-                    "usar variables de entorno",
-                )
-
-    for i, cell in enumerate(nt.cells):
-        comment = _placeholder_comment(cell)
-        if comment is not None:
-            return NodeAssemblyFailure(
-                nt.node_id, "placeholder_stub",
-                f"celda {i}: relleno anunciado en un comentario ({comment}). Un hueco "
-                "va como raise NotImplementedError(...) — falla fuerte y se ve — "
-                "nunca como valor vacío que el resto del código consume",
-            )
-
-    trees: list[ast.AST] = []
-    for i, cell in enumerate(nt.cells):
-        try:
-            trees.append(ast.parse(cell))
-        except SyntaxError as exc:
-            return NodeAssemblyFailure(
-                nt.node_id, "syntax_error", f"celda {i}: {exc.msg} (línea {exc.lineno})"
-            )
-    for line in nt.imports:
-        try:
-            trees.append(ast.parse(line))
-        except SyntaxError as exc:
-            return NodeAssemblyFailure(
-                nt.node_id, "syntax_error", f"import inválido '{line}': {exc.msg}"
-            )
-
-    roots: set[str] = set()
-    for tree in trees:
-        sql = _fstring_sql(tree)
-        if sql is not None:
-            return NodeAssemblyFailure(
-                nt.node_id, "forbidden_pattern", f"SQL dinámico por f-string: {sql}"
-            )
-        path = _absolute_path_literal(tree)
-        if path is not None:
-            return NodeAssemblyFailure(
-                nt.node_id, "absolute_path",
-                f"ruta absoluta literal '{path[:60]}' — el estándar es ruta "
-                "relativa al workspace (declarar el cambio en warnings)",
-            )
-        lineno = _bare_except(tree)
-        if lineno is not None:
-            return NodeAssemblyFailure(
-                nt.node_id, "bare_except",
-                f"'except:' desnudo (línea {lineno}) — convierte un fallo real en "
-                "un dato faltante silencioso; capturar la excepción concreta o "
-                "dejar que propague",
-            )
-        name = _self_assignment(tree)
-        if name is not None:
-            return NodeAssemblyFailure(
-                nt.node_id, "self_assignment",
-                f"'{name} = {name}' no declara nada: si el nombre viene de un nodo "
-                "anterior, la línea sobra; si no viene, es un NameError disfrazado",
-            )
-        sql = _sql_no_op(tree)
-        if sql is not None:
-            return NodeAssemblyFailure(
-                nt.node_id, "sql_no_op",
-                f"'WHERE 1=1' sin predicados: {sql} — el filtro del SAS original "
-                "se perdió y la consulta trae la tabla entera",
-            )
-        call = _row_by_row_write(tree)
-        if call is not None:
-            return NodeAssemblyFailure(
-                nt.node_id, "row_by_row_write",
-                f"'{call}' dentro de un loop de iterrows(): un round-trip por fila. "
-                "El APPEND de SAS se traduce con una escritura masiva (to_sql fuera "
-                "del loop)",
-            )
-        roots |= _import_root_names(tree)
-
-    frame = _empty_frame_guard(trees)
-    if frame is not None:
-        return NodeAssemblyFailure(
-            nt.node_id, "empty_frame_guard",
-            f"'{frame}' se asigna una sola vez, a un DataFrame vacío, y después se "
-            "usa como condición: esa rama nunca corre y el nodo entrega números "
-            "faltantes sin error. Cargar el dato de verdad o raise NotImplementedError",
-        )
-
-    for name in sorted(roots):
-        if not _import_resolvable(name, allowed):
-            return NodeAssemblyFailure(
-                nt.node_id, "unresolvable_import",
-                f"import no permitido: '{name}' — no es stdlib ni está en "
-                "translation.allowed_imports (project_config.yaml)",
-            )
-    return None
+    failures = check_node_translation_all(nt, allowed_imports)
+    return failures[0] if failures else None
 
 
 # ── Ensamblado ──────────────────────────────────────────────────────────────

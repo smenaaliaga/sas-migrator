@@ -296,6 +296,31 @@ def test_tool_mode_missing_tool_call_exhausts_to_needs_human(monkeypatch) -> Non
     assert exc.value.attempts == 2
 
 
+def test_retry_en_modo_tool_incluye_el_turno_fallido(monkeypatch) -> None:
+    """El retry sin memoria era la misma tirada otra vez. Ahora el modelo ve su
+    tool_use rechazado y la corrección viaja como tool_result is_error (el API
+    exige un tool_result por cada tool_use del historial)."""
+    mod, _ = _install_fake_sdk(monkeypatch, [])
+    create_calls: list = []
+    bad = SimpleNamespace(
+        stop_reason="tool_use",
+        content=[SimpleNamespace(type="tool_use", id="toolu_01", input={"x": "no-int"})],
+    )
+    _add_create(mod, [bad, _tool_response(x=5)], create_calls)
+
+    caller = AnthropicCaller(LlmConfig(structured_mode="tool"))
+    assert caller.call(task="t", system_blocks=[], user_content="c",
+                       output_model=Demo) == Demo(x=5)
+
+    retry_messages = create_calls[1]["messages"]
+    assert [m["role"] for m in retry_messages] == ["user", "assistant", "user"]
+    assistant = retry_messages[1]["content"][0]
+    assert assistant["type"] == "tool_use" and assistant["input"] == {"x": "no-int"}
+    result = retry_messages[2]["content"][0]
+    assert result["type"] == "tool_result" and result["tool_use_id"] == "toolu_01"
+    assert result["is_error"] is True and "no validó" in result["content"]
+
+
 def test_tool_mode_refusal_is_still_needs_human(monkeypatch) -> None:
     mod, _ = _install_fake_sdk(monkeypatch, [])
     _add_create(mod, [SimpleNamespace(stop_reason="refusal", content=[])], [])

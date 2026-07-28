@@ -152,6 +152,23 @@ def test_empty_translation_fails() -> None:
     assert check_node_translation(_nt("A", ["   \n"])).reason == "empty_translation"
 
 
+def test_check_all_reporta_todas_las_fallas_en_una_pasada() -> None:
+    """Un nodo con 4 problemas se corrige en 1 ronda de retry, no en 4."""
+    from sas_migrator.core.assembly.notebook import check_node_translation_all
+
+    nt = _nt("A", [
+        "try:\n    x = carga()\nexcept:\n    pass\n",       # bare_except
+        'q = f"SELECT * FROM {tabla}"\n',                    # fstring SQL
+        "df.to_parquet('x.parquet')\n",                      # forbidden
+        "y = (\n",                                           # syntax error
+    ])
+    reasons = {f.reason for f in check_node_translation_all(nt)}
+    assert {"bare_except", "forbidden_pattern", "syntax_error"} <= reasons
+    assert len(reasons) >= 3
+    # la primera falla sigue siendo el contrato de check_node_translation
+    assert check_node_translation(nt).reason in reasons
+
+
 def test_node_translation_contrato_fuerte() -> None:
     """cells:[] validó DOS veces en producción y produjo nodos vacíos que
     parecían traducidos. Ahora es error de validación (retry inmediato del
