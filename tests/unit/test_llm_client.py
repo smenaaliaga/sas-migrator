@@ -133,6 +133,54 @@ def test_sdk_validation_exception_counts_as_attempt(monkeypatch) -> None:
     assert exc.value.attempts == 2
 
 
+def test_max_tokens_truncation_es_needs_human_sin_reintentar(monkeypatch) -> None:
+    """Mismo prompt + mismo tope = mismo corte: reintentar es gastar en vano."""
+    _, calls = _install_fake_sdk(
+        monkeypatch,
+        [SimpleNamespace(stop_reason="max_tokens", parsed_output=None), _ok(1)],
+    )
+    caller = AnthropicCaller(LlmConfig(max_validation_retries=3))
+    with pytest.raises(NeedsHuman) as exc:
+        caller.call(task="translate", system_blocks=[], user_content="c",
+                    output_model=Demo)
+    assert exc.value.reason == "output_truncated"
+    assert len(calls) == 1, "no debe reintentar: el segundo response quedó sin usar"
+    assert "max_tokens_by_task" in exc.value.detail
+
+
+def test_last_usage_se_resetea_al_entrar_y_captura_cache_creation(monkeypatch) -> None:
+    usage = SimpleNamespace(
+        input_tokens=100, output_tokens=20,
+        cache_read_input_tokens=0, cache_creation_input_tokens=4200,
+    )
+    mod, _ = _install_fake_sdk(
+        monkeypatch,
+        [SimpleNamespace(stop_reason="end_turn", parsed_output=Demo(x=1), usage=usage)],
+    )
+    caller = AnthropicCaller(LlmConfig())
+    caller.call(task="t", system_blocks=[], user_content="c", output_model=Demo)
+    assert caller.last_usage["cache_creation_input_tokens"] == 4200
+
+    # Falla de transporte: el usage de la llamada anterior NO debe sobrevivir.
+    caller._client.messages.parse = lambda **kw: (_ for _ in ()).throw(
+        mod.RateLimitError("429")
+    )
+    with pytest.raises(mod.RateLimitError):
+        caller.call(task="t", system_blocks=[], user_content="c", output_model=Demo)
+    assert caller.last_usage is None
+
+
+def test_max_tokens_by_task_gana_al_default(monkeypatch) -> None:
+    _, calls = _install_fake_sdk(monkeypatch, [_ok(1), _ok(2)])
+    caller = AnthropicCaller(
+        LlmConfig(max_tokens=16000, max_tokens_by_task={"translate": 32000})
+    )
+    caller.call(task="translate", system_blocks=[], user_content="c", output_model=Demo)
+    assert calls[0]["max_tokens"] == 32000
+    caller.call(task="matching", system_blocks=[], user_content="c", output_model=Demo)
+    assert calls[1]["max_tokens"] == 16000
+
+
 # ── structured outputs: nativo y degradación a tool use ─────────────────────
 
 def _tool_response(**payload) -> SimpleNamespace:

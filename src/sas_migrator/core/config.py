@@ -68,6 +68,11 @@ class LlmConfig(BaseModel):
     provider: Literal["anthropic", "foundry"] = "anthropic"
     model: str = "claude-opus-5"
     max_tokens: int = 16000
+    # Presupuesto de salida POR TAREA (analysis, matching, translate, verify,
+    # diagnose, docs). Un solo max_tokens para 6 tareas obliga a dimensionar
+    # todo para la peor: la traducción de un nodo de 600 LOC necesita mucho más
+    # que un matching. Ausente la clave, rige max_tokens.
+    max_tokens_by_task: dict[str, int] = Field(default_factory=dict)
     max_validation_retries: int = 3
     # Reintentos de TRANSPORTE (429, 5xx, 529 Overloaded) que hace el SDK con
     # backoff exponencial. Su default es 2, pensado para una petición suelta:

@@ -62,6 +62,7 @@ class AnthropicCaller:
 
         self._anthropic = anthropic
         self.config = config or LlmConfig()
+        self.last_usage: dict[str, Any] | None = None
         self._client = self._build_client(anthropic, self.config)
         # "auto" arranca nativo y degrada a tool en el primer rechazo del
         # backend; el modo resuelto se conserva para el resto de la corrida.
@@ -225,12 +226,20 @@ class AnthropicCaller:
         retries = max(1, self.config.max_validation_retries)
         last_error = ""
         attempts = 0
+        # Sin reset, una llamada que falla en transporte deja el usage de la
+        # llamada ANTERIOR y el trace le atribuye tokens que no consumió.
+        self.last_usage = None
+        resolved_max_tokens = (
+            max_tokens
+            or self.config.max_tokens_by_task.get(task)
+            or self.config.max_tokens
+        )
 
         for attempts in range(1, retries + 1):
             try:
                 response = self._invoke(
                     messages=messages, system=system, output_model=output_model,
-                    max_tokens=max_tokens or self.config.max_tokens,
+                    max_tokens=resolved_max_tokens,
                 )
             except self._anthropic.APIError:
                 raise  # transporte/API: visible, reanudable — jamás NeedsHuman
@@ -248,14 +257,32 @@ class AnthropicCaller:
                     "cache_read_input_tokens": getattr(
                         usage, "cache_read_input_tokens", None
                     ),
+                    "cache_creation_input_tokens": getattr(
+                        usage, "cache_creation_input_tokens", None
+                    ),
                 }
 
-            if getattr(response, "stop_reason", None) == "refusal":
+            stop_reason = getattr(response, "stop_reason", None)
+            if stop_reason == "refusal":
                 raise NeedsHuman(
                     task=task,
                     reason="refusal",
                     attempts=attempts,
                     detail="el modelo declinó la solicitud (stop_reason=refusal)",
+                )
+            if stop_reason == "max_tokens":
+                # Reintentar es gastar lo mismo para truncar igual: el mismo
+                # prompt con el mismo tope produce el mismo corte. A la cola
+                # humana con el remedio en la mano.
+                raise NeedsHuman(
+                    task=task,
+                    reason="output_truncated",
+                    attempts=attempts,
+                    detail=(
+                        f"respuesta cortada por max_tokens={resolved_max_tokens} "
+                        f"(stop_reason=max_tokens). Subí llm.max_tokens_by_task."
+                        f"{task} en project_config.yaml"
+                    ),
                 )
 
             try:
