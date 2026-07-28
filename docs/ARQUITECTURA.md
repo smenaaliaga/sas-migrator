@@ -95,7 +95,7 @@ flowchart TD
 | 1 Entrevista inicial | Tarjeta B1 (`interrupt()`): estrategia de salida, contexto | respuestas aplicadas |
 | 2 Análisis | Extractor `.egp` → `nodes/*.json`; parser v2 (placement, lineage); índices; reviews + fichas M-xxx (LLM) | índices/reviews presentes; sin needs_human fase 2 |
 | 3 Profiling | Perfila `input/data/`; matching archivo↔nodo (LLM) | `file_mapping.json` válido; sin needs_human |
-| 4 Entrevista post | Alcance (nodos nativos uno a uno), mejoras M-xxx una a la vez, B4b (placement por causa raíz → `db_connections.yaml` + `placement_decisions.yaml`) | decisiones completas |
+| 4 Entrevista post | Alcance (nodos nativos uno a uno), mejoras M-xxx una a la vez, B4b (placement por causa raíz → `db_connections.yaml` + `placement_decisions.yaml`), B4c (conexiones externas por host HTTP → `api_connections.yaml`) | decisiones completas |
 | 5 Plan | `planning.build()` determinista → `translation_plan.json`; aprobación (`interrupt()`) | `user_approved: true` |
 | 6 Generación | Traducción por nodo (LLM) → chequeos estáticos → verificador LLM → ensamblador → `run_audit()` | mapping completo, audit sin high bloqueantes, sin needs_human |
 | 7 Validación | verify tablas → **pausa sagrada** → ejecución nbclient (skip idempotente por hash) → cascada vs referencias → diagnóstico LLM de mismatches | reporte sin FAIL full / blocked |
@@ -169,14 +169,15 @@ usan el MISMO ensamblador. El pipeline completo corre sin API key.
 | Archivo | Qué hace |
 |---|---|
 | `analysis/analyze.py` | Clasificación/complejidad/prioridad por nodo, smells de código (`code_smells.json`), evidencia (`analysis_evidence.json`, incluye macro variables por nodo). |
-| `analysis/indexes.py` | `build(state_dir)`: `nodes_index.json` (resumen liviano por nodo: placement, flags, topo_order por Kahn) y `db_evidence.json` (librefs, tablas y accesos leídos del código; prefijos sin confirmar para B4b). |
+| `analysis/indexes.py` | `build(state_dir)`: `nodes_index.json` (resumen liviano por nodo: placement, flags, topo_order por Kahn), `db_evidence.json` (librefs, tablas y accesos leídos del código; prefijos sin confirmar para B4b) y `http_evidence.json` (hosts HTTP del `URL=` literal, para B4c). |
+| `http_evidence.py` | Extracción HTTP única (la comparten indexes y audit): `extract_http_hosts/calls`, `build_http_evidence`. URL por macro queda declarada, jamás inferida. |
 | `analysis/ledger.py` | Ledger de progreso del análisis (init/sync). |
 
 ### 6.3 Entrevistas (deterministas puras)
 
 | Archivo | Qué hace |
 |---|---|
-| `interview/*.py` | Builders de todas las tarjetas (B1 inicial; fase 4: mapping, alcance, preprocesamiento, ambigüedades, B4b con resolución de placement por causa raíz, fichas M-xxx una a la vez, cierre; aprobación del plan; fase 7: tarjeta de ejecución con evidencia y default NO ejecutar). `validate.py` (semántica de respuestas), `apply.py` (escritores atómicos: `approved_improvements.yaml`, `db_connections.yaml`, `placement_decisions.yaml`, `ignored_nodes.yaml`). |
+| `interview/*.py` | Builders de todas las tarjetas (B1 inicial; fase 4: mapping, alcance, preprocesamiento, ambigüedades, B4b con resolución de placement por causa raíz, B4c una tarjeta por host HTTP, fichas M-xxx una a la vez, cierre; aprobación del plan; fase 7: tarjeta de ejecución con evidencia y default NO ejecutar). `validate.py` (semántica de respuestas), `apply.py` (escritores atómicos: `approved_improvements.yaml`, `db_connections.yaml`, `api_connections.yaml`, `placement_decisions.yaml`, `ignored_nodes.yaml`). |
 | `models/interview.py` | `InterviewCard` (payload de UN interrupt), `CardAnswers`, `Question` con `recommended_default` y `evidence`. |
 
 ### 6.4 Plan, ensamblado y auditoría
@@ -185,7 +186,7 @@ usan el MISMO ensamblador. El pipeline completo corre sin API key.
 |---|---|
 | `planning.py` | `build(state)`: join mecánico de los artefactos de fases 2-4 → `translation_plan.json`. Un `TranslationTarget` por nodo: strategy desde el placement efectivo (overrides B4b ganan), `input/output_datasets` (vista v2 del parser), `output_tables` (no-WORK calificadas — lo que valida la cascada), mejoras asignadas, dependencias del DAG, `macro_params` (credenciales filtradas — jamás a la celda de parámetros). Supuestos VISIBLES en `assumptions`. |
 | `assembly/notebook.py` | **El ensamblador**: único escritor de notebooks. `check_node_translation_all()` = todos los chequeos estáticos (ver tabla abajo); `assemble_notebooks()` agrupa por notebook, dedupe imports en la celda de configuración, celda `parameters` (convención papermill) con las macro vars y fail-fast de faltantes, chequeo de nombres sin definir con acumulación en orden de ejecución, `cell_index/cell_count` calculados al ensamblar → `sas_python_mapping.json` correcto por construcción; emite `output/requirements.txt` (terceros realmente usados). |
-| `audit.py` | Auditoría semántica placement-aware post-ensamblado → `node_translation_audit.json` (+ `.md`). Coverage (nodo sin mapping = high), traceability, deriva de origen **inferida del propio SAS** (host del `URL=`, tabla destino de APPEND/INSERT/CREATE): detecta endpoint cambiado o llamada HTTP reemplazada por un SELECT de la tabla que debía poblar. Refleja los `revise` del verificador LLM como `verification` medium (no bloquea). |
+| `audit.py` | Auditoría semántica placement-aware post-ensamblado → `node_translation_audit.json` (+ `.md`). Coverage (nodo sin mapping = high), traceability, deriva de origen **inferida del propio SAS** (host del `URL=`, tabla destino de APPEND/INSERT/CREATE): detecta endpoint cambiado o llamada HTTP reemplazada por un SELECT de la tabla que debía poblar. Consciente de B4c: un host con `mode=sdk` no exige aparecer en el Python, pero el paquete ausente es medium. Refleja los `revise` del verificador LLM como `verification` medium (no bloquea). |
 | `gen_run_all.py` | `output/run_all.py` + descubrimiento de notebooks. |
 
 **Chequeos estáticos del ensamblador** (fallo = nodo fuera del notebook +
@@ -210,6 +211,7 @@ notebook entero) · `strategy_mismatch`.
 |---|---|
 | `db/engine.py` | `build_engine` único (SQLAlchemy), `connection_string`, `qualified_table` dialect-agnóstico. |
 | `db/connections.py` | **Loader único** de `db_connections.yaml` (todas las siete copias convergieron acá). |
+| `api/connections.py` | Loader único de `api_connections.yaml` (decisiones B4c: `load_api_connections`, `sdk_packages`, `sdk_by_host`). |
 | `db/verify_tables.py` | Inspector SQLAlchemy: tablas DESTINO faltantes bloquean (el sistema no crea tablas). |
 | `db/profile.py` | Perfilado de tablas de BD (dialect-agnóstico). |
 | `execution.py` | Ejecución nbclient tras la pausa sagrada. URL por `SASMIG_DB_URL`; **skip idempotente** por sha256 de celdas en `execution_progress.json` (re-ejecutar no repite notebooks ya PASS); notebooks conservan outputs. |
@@ -255,7 +257,7 @@ flowchart LR
 | `trace.py` | `TracingCaller`: registra cada llamada en `state/llm_trace.jsonl` (task, prompt_hash, modelo real, outcome, intentos, duración, usage, costo) y hace cumplir `max_run_cost_usd` ANTES de llamar (`BudgetExceeded` reanudable; acumulado releído del trace — sobrevive reinicios). `summarize()` agrega por task incl. cache. |
 | `costs.py` | Tabla de precios por prefijo de modelo (override `llm.prices`), `usage_cost`, `run_totals`. Modelo sin precio = `unpriced` declarado, jamás inventado. |
 | `runtime.py` | `get_caller(workspace)` con cache por workspace (la degradación native→tool y el presupuesto viven en la instancia); `set_caller` para inyección en tests. |
-| `prompt_builder.py` | System de traducción en 3 bloques cacheables (contrato+patrones / few-shot curado de `prompts/fewshot/` / contexto del proyecto: conexiones, M-xxx aprobadas, macro values, allowlist); header user por nodo (datasets, output_tables, macro_params, nota del analista, qué deja cada dependencia — cap 12 anunciado); `json_excerpt()` (recorta ITEMS y lo anuncia — siempre JSON válido); prompts del verificador. |
+| `prompt_builder.py` | System de traducción en 3 bloques cacheables (contrato+patrones / few-shot curado de `prompts/fewshot/` / contexto del proyecto: conexiones BD y externas B4c, M-xxx aprobadas, macro values, allowlist); header user por nodo (datasets, output_tables, macro_params, nota del analista, qué deja cada dependencia — cap 12 anunciado); `json_excerpt()` (recorta ITEMS y lo anuncia — siempre JSON válido); prompts del verificador. |
 | `phases.py` | Los runners (ver diagrama). La fase 6/9 comparten `_translate_pending`: split de nodos grandes por frontera PROC/DATA real (`mask_noncode`), retry con TODAS las fallas estáticas, verificador, persistencia por nodo, paralelismo opt-in (`llm.max_workers`) con primer nodo secuencial y ensamblado siempre en orden del plan. |
 | `contracts.py` | Output models: `PfdAnalysisOut`, `ImprovementsOut`, `FileMappingBatch`, `TranslationVerdict` (verificador), `DiagnosesOut`, `DocsOut`. Las `description` de los campos viajan en el JSON Schema al modelo. |
 | `errors.py` / `env.py` / `fake.py` | `NeedsHuman`; carga de `.env` (workspace > repo > `~/.sas-migrator/.env`, con rutas consultadas en el error); `FakeCaller` que valida contra el output_model. |

@@ -241,3 +241,54 @@ def test_http_kept_while_writing_its_table_is_clean(tmp_path, monkeypatch):
         'serie.to_sql("PIB", engine, if_exists="append", index=False)\n',
     )
     assert _semantic_details(tmp_path, monkeypatch) == []
+
+
+# ── B4c mode=sdk: la exención de host y su regla compensatoria ───────────────
+
+def _write_api_connections(tmp_path: Path, *, mode: str, package: str = "") -> None:
+    (tmp_path / "state" / "api_connections.yaml").write_text(
+        "connections:\n"
+        "  - host: api.cliente.cl\n"
+        f"    mode: {mode}\n"
+        + (f"    package: {package}\n" if package else ""),
+        encoding="utf-8",
+    )
+
+
+def test_sdk_mode_with_package_used_is_clean(tmp_path, monkeypatch):
+    """FP curado: el usuario eligió SDK y la traducción lo usa — 0 hallazgos,
+    aunque el host del SAS no aparezca en el Python (el SDK encapsula la URL)."""
+    _write_pair(
+        tmp_path,
+        _SAS_HTTP,
+        "cliente = clienteapi.Session()\nserie = cliente.get_series('X')\n",
+    )
+    _write_api_connections(tmp_path, mode="sdk", package="clienteapi")
+    assert _semantic_details(tmp_path, monkeypatch) == []
+
+
+def test_sdk_mode_with_package_missing_is_medium(tmp_path, monkeypatch):
+    """Declaró SDK pero la traducción no usa el paquete: medium visible, no high."""
+    _write_pair(
+        tmp_path,
+        _SAS_HTTP,
+        'r = requests.get("https://otro.endpoint.com/v2", params={"serie": "X"})\n',
+    )
+    _write_api_connections(tmp_path, mode="sdk", package="clienteapi")
+    report = _run_audit(tmp_path, monkeypatch)
+    semantic = [i for i in report["issues"] if i["category"] == "semantic"]
+    assert len(semantic) == 1, semantic
+    assert semantic[0]["severity"] == "medium"
+    assert "clienteapi" in semantic[0]["detail"]
+
+
+def test_http_mode_still_requires_same_host(tmp_path, monkeypatch):
+    """mode=http NO exime: el endpoint cambiado se sigue marcando high."""
+    _write_pair(
+        tmp_path,
+        _SAS_HTTP,
+        'r = requests.get("https://otro.endpoint.com/v2", params={"serie": "X"})\n',
+    )
+    _write_api_connections(tmp_path, mode="http")
+    details = _semantic_details(tmp_path, monkeypatch)
+    assert any("api.cliente.cl" in d and "endpoint" in d for d in details), details

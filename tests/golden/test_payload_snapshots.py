@@ -7,6 +7,8 @@ regresión: cualquier cambio de texto/opciones/default rompe el snapshot.
 
 from __future__ import annotations
 
+import json
+
 from sas_migrator.core.interview import initial, plan_approval, post_analysis
 
 
@@ -97,6 +99,35 @@ def test_snapshot_phase4_db_connection(synthetic_state, snapshot) -> None:
     snapshot("phase4_db_connection", _dump(card))
 
 
+def test_api_block_without_evidence_does_not_ask(synthetic_state) -> None:
+    """UX lean: el .egp sintético no tiene PROC HTTP → B4c no aparece."""
+    assert post_analysis.build_api_connection_cards(synthetic_state) == []
+
+
+def test_snapshot_phase4_api_connection(tmp_path, snapshot) -> None:
+    """B4c con fixture propio: el builder lee SOLO http_evidence.json."""
+    state = tmp_path / "state"
+    state.mkdir()
+    (state / "http_evidence.json").write_text(
+        json.dumps({
+            "generated_at": "2026-01-01T00:00:00+00:00",
+            "hosts": [{
+                "host": "si3.bcentral.cl",
+                "node_ids": ["CodeTask-uf"],
+                "methods": ["GET"],
+                "sample_urls": ["https://si3.bcentral.cl/SieteRestWS/SieteRestWS.ashx"],
+                "sources": ["proc_http"],
+            }],
+            "nodes_with_dynamic_url": [],
+            "detection_notes": [],
+        }),
+        encoding="utf-8",
+    )
+    cards = post_analysis.build_api_connection_cards(state)
+    assert [c.card_id for c in cards] == ["B4c:api:si3.bcentral.cl"]
+    snapshot("phase4_api_connection", [_dump(c) for c in cards])
+
+
 # ── Invariantes del UX lean sobre TODOS los payloads ────────────────────────
 
 def _all_cards(state_dir):
@@ -106,6 +137,7 @@ def _all_cards(state_dir):
         *post_analysis.build_native_node_cards(state_dir),
         post_analysis.build_db_step1_card(state_dir),
         *post_analysis.build_placement_resolution_cards(state_dir),
+        *post_analysis.build_api_connection_cards(state_dir),
         *post_analysis.build_improvement_cards(state_dir),
         post_analysis.build_closure_card(state_dir, {}),
         post_analysis.build_db_connection_card(state_dir),

@@ -10,6 +10,9 @@ from sas_migrator.core.models.analysis import (
 )
 from sas_migrator.core.models.artifacts import FileCatalogEntry, IntakeCatalog
 from sas_migrator.core.models.data import (
+    ApiConnection,
+    ApiConnectionMode,
+    ApiConnections,
     DatabaseConnection,
     DatabaseConnections,
     DataProfile,
@@ -38,6 +41,7 @@ __all__ = [
     "ImprovementStatus", "ImprovementCategory", "SmellSeverity",
     "DataProfile", "FileMapping", "HumanArtifact",
     "DatabaseConnection", "DatabaseConnections",
+    "ApiConnection", "ApiConnectionMode", "ApiConnections",
     "InterviewQA", "QuestionBlock", "Question", "Answer",
     "ValidationReport", "TestResult", "MismatchDiagnosis",
     "NodeTranslationAuditIssue", "NodeTranslationAuditSummary", "NodeTranslationAuditReport",

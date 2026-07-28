@@ -1,0 +1,36 @@
+[
+  {
+    "card_id": "B4c:api:si3.bcentral.cl",
+    "interview_type": "post_analysis",
+    "phase": 4,
+    "block_id": "B4c-api-connections",
+    "title": "Conexión externa: si3.bcentral.cl",
+    "transition": "",
+    "questions": [
+      {
+        "id": "Q-B4c-si3.bcentral.cl",
+        "text": "El SAS consulta si3.bcentral.cl por HTTP. ¿Cómo migramos esa conexión: replicar la llamada con requests (mismo host y método), o usar una librería/SDK oficial? Si eliges SDK, indica el nombre de import del paquete en texto libre (ej: bcchapi para la API BDE del Banco Central).",
+        "question_type": "single_choice",
+        "required": true,
+        "options": [
+          "Replicar la llamada HTTP con requests",
+          "Usar una librería/SDK oficial (indico el paquete en texto libre)"
+        ],
+        "source_finding": "",
+        "context": "",
+        "recommended_default": "Replicar la llamada HTTP con requests",
+        "evidence": [
+          "http_evidence.json: si3.bcentral.cl — método(s): GET (proc_http)",
+          "nodos afectados: CodeTask-uf",
+          "URL: https://si3.bcentral.cl/SieteRestWS/SieteRestWS.ashx"
+        ]
+      }
+    ],
+    "allow_free_text": true,
+    "validation_error": null,
+    "progress": {
+      "index": 1,
+      "total": 1
+    }
+  }
+]

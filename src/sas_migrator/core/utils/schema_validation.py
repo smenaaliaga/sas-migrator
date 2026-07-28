@@ -384,6 +384,53 @@ def _phase4_errors(state_path: Path) -> list[str]:
             f"(approved/rejected/postponed): {undecided[:10]}"
         )
 
+    errors.extend(_phase4_api_errors(state_path))
+    return errors
+
+
+def _phase4_api_errors(state_path: Path) -> list[str]:
+    """B4c: todo host HTTP detectado tiene decisión válida en api_connections.yaml.
+
+    Sin ``http_evidence.json`` no se exige nada: workspaces anteriores a la
+    tarjeta B4c no se bloquean retroactivamente.
+    """
+    evidence = _load_any(state_path / "http_evidence.json")
+    hosts = {
+        str(h.get("host", "")).strip().lower()
+        for h in (evidence or {}).get("hosts", [])
+        if isinstance(h, dict) and h.get("host")
+    }
+    if not hosts:
+        return []
+
+    doc = _load_any(state_path / "api_connections.yaml")
+    conns = (doc or {}).get("connections", []) if isinstance(doc, dict) else []
+    errors: list[str] = []
+    decided: set[str] = set()
+    for c in conns:
+        if not isinstance(c, dict):
+            continue
+        host = str(c.get("host", "")).strip().lower()
+        mode = str(c.get("mode", "")).strip().lower()
+        if mode not in {"http", "sdk"}:
+            errors.append(
+                f"api_connections.yaml: host {host or '?'} con mode inválido "
+                f"({mode or 'vacío'}; debe ser http o sdk)"
+            )
+            continue
+        if mode == "sdk" and not str(c.get("package", "")).strip():
+            errors.append(
+                f"api_connections.yaml: host {host or '?'} con mode=sdk sin `package` "
+                "(nombre de import del SDK)"
+            )
+            continue
+        decided.add(host)
+
+    for host in sorted(hosts - decided):
+        errors.append(
+            f"host HTTP {host} detectado en el SAS sin decisión B4c válida en "
+            "api_connections.yaml"
+        )
     return errors
 
 

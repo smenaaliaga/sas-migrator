@@ -12,6 +12,8 @@ evidencia. Reglas heredadas del protocolo v1:
 - B4b: solo se pregunta lo que la evidencia no resolvió. Una tarjeta por causa
   raíz (prefijo sin confirmar), no por nodo. Los nodos ``hybrid`` no generan
   tarjeta (su placement está resuelto por evidencia) ni los ``utility``.
+- B4c: una tarjeta por host HTTP detectado (URL= literal del SAS); el default
+  replica la llamada con requests; elegir SDK exige nombrar el paquete.
 - B5: una ficha M-xxx a la vez; `Explicar más` re-presenta con detalle;
   `postponed` solo existe vía texto libre.
 """
@@ -42,6 +44,10 @@ PREFIX_OPTIONS = ["Es una base de datos", "Es una ruta de archivos (no BD)", "No
 DB_CONNECTION_OPTIONS = ["Usar la conexión por defecto del proyecto", "Especificar otra conexión"]
 DB_ROLE_OPTIONS = ["Solo lectura (fuente)", "Solo escritura (destino)", "Lectura y escritura"]
 DB_MAPPING_OPTIONS = ["Mantener todos los nombres", "Renombrar alguna base"]
+API_MODE_OPTIONS = [
+    "Replicar la llamada HTTP con requests",
+    "Usar una librería/SDK oficial (indico el paquete en texto libre)",
+]
 IMPROVEMENT_OPTIONS = ["Aprobar", "Rechazar", "Explicar más"]
 IMPROVEMENT_DETAIL_OPTIONS = ["Aprobar", "Rechazar"]
 CLOSURE_OPTIONS = ["Sí, proceder al plan de traducción", "No, detener aquí"]
@@ -653,6 +659,58 @@ def build_db_mapping_card(
             )
         ],
     )
+
+
+# ── B4c: conexiones externas (APIs HTTP) ────────────────────────────────────
+
+def _http_evidence(state_dir: Path) -> dict:
+    return load_json(Path(state_dir) / "http_evidence.json") or {}
+
+
+def build_api_connection_cards(state_dir: Path) -> list[InterviewCard]:
+    """Una tarjeta por host HTTP detectado en el SAS (causa raíz, no por nodo).
+
+    Sin hosts (o sin ``http_evidence.json``) no hay tarjetas: el UX lean jamás
+    pregunta sin evidencia. Las URLs dinámicas (macro vars) no generan tarjeta —
+    quedan declaradas en la evidencia, nunca se adivina el host.
+    """
+    hosts = _http_evidence(state_dir).get("hosts", [])
+    cards: list[InterviewCard] = []
+    for i, h in enumerate(hosts, start=1):
+        host = str(h.get("host"))
+        methods = ", ".join(h.get("methods", [])) or "?"
+        node_ids = [str(n) for n in h.get("node_ids", [])]
+        evidence = [
+            f"http_evidence.json: {host} — método(s): {methods} "
+            f"({', '.join(h.get('sources', [])) or 'http'})",
+            f"nodos afectados: {', '.join(node_ids[:8]) or '—'}",
+        ]
+        evidence.extend(f"URL: {u}" for u in h.get("sample_urls", [])[:2])
+        cards.append(
+            _card(
+                f"B4c:api:{host}",
+                "B4c-api-connections",
+                f"Conexión externa: {host}",
+                questions=[
+                    Question(
+                        id=f"Q-B4c-{host}",
+                        text=(
+                            f"El SAS consulta {host} por HTTP. ¿Cómo migramos esa "
+                            "conexión: replicar la llamada con requests (mismo host y "
+                            "método), o usar una librería/SDK oficial? Si eliges SDK, "
+                            "indica el nombre de import del paquete en texto libre "
+                            "(ej: bcchapi para la API BDE del Banco Central)."
+                        ),
+                        question_type=QuestionType.SINGLE_CHOICE,
+                        options=list(API_MODE_OPTIONS),
+                        recommended_default="Replicar la llamada HTTP con requests",
+                        evidence=evidence,
+                    )
+                ],
+                progress=CardProgress(index=i, total=len(hosts)),
+            )
+        )
+    return cards
 
 
 # ── B5: mejoras M-xxx ───────────────────────────────────────────────────────

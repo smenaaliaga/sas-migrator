@@ -144,6 +144,31 @@ def _ask_db_block(state_dir: Path, collected: Collected) -> None:
         collected.append((step3, ask(step3)))
 
 
+def _ask_api_block(state_dir: Path, collected: Collected) -> None:
+    """B4c: una tarjeta por host HTTP. Elegir SDK sin nombrar el paquete
+    re-presenta la MISMA tarjeta con validation_error (converge en replay)."""
+    for card in post_analysis.build_api_connection_cards(state_dir):
+        current = card
+        while True:
+            ans = ask(current)
+            choice = _value_of(ans, card.questions[0].id)
+            if (
+                choice == "Usar una librería/SDK oficial (indico el paquete en texto libre)"
+                and not apply.parse_sdk_package(ans.free_text)
+            ):
+                current = card.model_copy(
+                    update={
+                        "validation_error": (
+                            "elegiste SDK: indica el nombre de import del paquete "
+                            "en texto libre (ej: bcchapi)"
+                        )
+                    }
+                )
+                continue
+            collected.append((card, ans))
+            break
+
+
 def run_post_analysis_interview(state_dir: Path) -> dict:
     state_dir = Path(state_dir)
     collected: Collected = []
@@ -165,6 +190,7 @@ def run_post_analysis_interview(state_dir: Path) -> dict:
         collected.append((amb, ask(amb)))
 
     _ask_db_block(state_dir, collected)
+    _ask_api_block(state_dir, collected)
     _ask_improvements(state_dir, collected)
 
     counts = apply.summarize_counts(state_dir, collected)

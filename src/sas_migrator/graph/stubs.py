@@ -206,6 +206,26 @@ def stub_post_analysis_interview(state_dir: Path) -> None:
     _dump_yaml(state_dir / "post_analysis_interview.yaml", _model_dump(qa))
     _dump_yaml(state_dir / "ignored_nodes.yaml", {"ignored_nodes": []})
 
+    # B4c: el stub replica el SAS (mode=http para todo host detectado); elegir
+    # un SDK es decisión del usuario y el stub jamás decide en su nombre.
+    http_ev_path = state_dir / "http_evidence.json"
+    if http_ev_path.exists():
+        hosts = (json.loads(http_ev_path.read_text(encoding="utf-8")) or {}).get("hosts", [])
+        if hosts:
+            from sas_migrator.core.models.data import ApiConnection, ApiConnections
+
+            doc = ApiConnections(
+                connections=[
+                    ApiConnection(
+                        host=str(h.get("host")),
+                        node_ids=[str(n) for n in h.get("node_ids", [])],
+                        notes="[stub] decisión default: replicar HTTP; revisar con usuario real",
+                    )
+                    for h in hosts
+                ]
+            )
+            _dump_yaml(state_dir / "api_connections.yaml", _model_dump(doc))
+
     proposed = yaml.safe_load(
         (state_dir / "improvements_proposed.yaml").read_text(encoding="utf-8")
     ) or {}

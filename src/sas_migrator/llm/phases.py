@@ -453,6 +453,7 @@ class TranslationSetup:
 
 
 def _translation_context(state_dir: Path, plan: dict) -> TranslationSetup:
+    from sas_migrator.core.api.connections import load_api_connections, sdk_packages
     from sas_migrator.core.config import load_project_config
     from sas_migrator.core.db.connections import load_connections
 
@@ -460,16 +461,20 @@ def _translation_context(state_dir: Path, plan: dict) -> TranslationSetup:
     db_aliases = [str(c["alias"]) for c in conns if c.get("alias")]
     cfg = load_project_config(state_dir.parent)
     tcfg = cfg.translation
+    # Los SDK elegidos en B4c entran a la allowlist: el chequeo estático
+    # unresolvable_import los acepta y requirements.txt los documenta si se usan.
+    allowed = sorted(set(tcfg.allowed_imports) | set(sdk_packages(state_dir)))
     context_block = prompt_builder.build_project_context(
         connections=conns,
         improvements=_approved_improvements(state_dir),
         macro_param_values=plan.get("macro_param_values") or {},
-        allowed_imports=list(tcfg.allowed_imports),
+        allowed_imports=allowed,
+        api_connections=load_api_connections(state_dir),
     )
     return TranslationSetup(
         system=prompt_builder.build_translation_system(context_block),
         db_aliases=db_aliases,
-        allowed=list(tcfg.allowed_imports),
+        allowed=allowed,
         verify_mode=tcfg.verify,
         max_workers=max(1, int(cfg.llm.max_workers)),
     )

@@ -9,6 +9,8 @@ Produce:
 - state/db_evidence.json — librefs de BD detectados desde el código
   (LIBNAME + referencias calificadas), tablas por libref con tipo de acceso,
   prefijos no verificados para confirmar en la entrevista B4b. (~3 KB)
+- state/http_evidence.json — hosts HTTP leídos del URL= literal del SAS
+  (PROC HTTP / FILENAME URL), para la entrevista B4c de conexiones externas.
 
 Idempotente y regenerable en cualquier momento desde state/.
 
@@ -24,6 +26,7 @@ from collections import defaultdict, deque
 from datetime import UTC, datetime
 from pathlib import Path
 
+from sas_migrator.core.http_evidence import build_http_evidence
 from sas_migrator.core.parser.statements import resolve_db_engines
 from sas_migrator.core.utils.fsio import dump_json
 
@@ -254,10 +257,16 @@ def build(state_dir: Path | str) -> None:
     }
     dump_json(state / "db_evidence.json", db_evidence, indent=1)
 
+    # ── http_evidence.json ──────────────────────────────────────
+    http_evidence = build_http_evidence(nodes, generated_at=now)
+    dump_json(state / "http_evidence.json", http_evidence, indent=1)
+
     kb = lambda p: (state / p).stat().st_size / 1024
     print(f"✓ nodes_index.json: {len(nodes)} nodos ({kb('nodes_index.json'):.1f} KB)")
     print(f"✓ db_evidence.json: {len(librefs_out)} librefs, "
           f"{len(unverified)} prefijos por confirmar ({kb('db_evidence.json'):.1f} KB)")
+    print(f"✓ http_evidence.json: {len(http_evidence['hosts'])} hosts HTTP, "
+          f"{len(http_evidence['nodes_with_dynamic_url'])} nodos con URL dinámica")
 
 
 def main() -> None:

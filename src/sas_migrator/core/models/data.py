@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import re
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 # ── Human Artifacts ─────────────────────────────────────────────────────────
 
@@ -117,3 +118,45 @@ class DatabaseConnections(BaseModel):
     """Coleccion de conexiones MSSQL declaradas para una migracion."""
 
     connections: list[DatabaseConnection] = Field(default_factory=list)
+
+
+# ── External API Connections (HTTP) ─────────────────────────────────────────
+
+_IMPORT_NAME_RE = r"^[A-Za-z_][A-Za-z0-9_]*$"
+
+
+class ApiConnectionMode(str, Enum):
+    HTTP = "http"  # replicar la llamada del SAS con requests
+    SDK = "sdk"    # usar una librería oficial declarada por el usuario
+
+
+class ApiConnection(BaseModel):
+    """Decisión B4c para UN host HTTP que el SAS consulta."""
+
+    host: str = Field(description="Host leído del URL= del SAS (ej: si3.bcentral.cl)")
+    mode: ApiConnectionMode = Field(
+        default=ApiConnectionMode.HTTP,
+        description="http = replicar con requests; sdk = usar la librería declarada",
+    )
+    package: str = Field(
+        default="",
+        description="Nombre de IMPORT del SDK (no el nombre pip); requerido si mode=sdk",
+    )
+    node_ids: list[str] = Field(default_factory=list)
+    notes: str = ""
+
+    @model_validator(mode="after")
+    def _sdk_requires_package(self) -> ApiConnection:
+        if self.mode is ApiConnectionMode.SDK:
+            if not re.match(_IMPORT_NAME_RE, self.package or ""):
+                raise ValueError(
+                    f"mode=sdk para {self.host!r} exige `package` con forma de nombre "
+                    f"de import Python (recibido: {self.package!r})"
+                )
+        return self
+
+
+class ApiConnections(BaseModel):
+    """Decisiones B4c de conexiones externas (una por host detectado)."""
+
+    connections: list[ApiConnection] = Field(default_factory=list)

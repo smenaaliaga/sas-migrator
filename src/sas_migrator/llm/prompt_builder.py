@@ -109,6 +109,7 @@ def build_project_context(
     improvements: list[dict],
     macro_param_values: dict,
     allowed_imports: list[str] | None = None,
+    api_connections: list[dict] | None = None,
 ) -> str | None:
     """Bloque system con lo que el proyecto sabe y el traductor necesitaba.
 
@@ -130,6 +131,24 @@ def build_project_context(
                 f"- `{c.get('alias', '')}` → database `{c.get('database', '')}`"
                 f" (role: {c.get('role', 'source')}) — tablas: {tablas}"
             )
+    if api_connections:
+        parts.append(
+            "\n## Conexiones externas (APIs HTTP)\n"
+            "Decisión del usuario por host que el SAS consulta por HTTP:"
+        )
+        for c in api_connections:
+            host = c.get("host", "")
+            if c.get("mode") == "sdk":
+                parts.append(
+                    f"- `{host}` → usa el paquete `{c.get('package', '')}` "
+                    "(librería oficial). NO repliques la llamada HTTP cruda; "
+                    "credenciales por os.environ, jamás literales."
+                )
+            else:
+                parts.append(
+                    f"- `{host}` → replica la llamada con requests al MISMO host "
+                    "y método que el SAS; credenciales por os.environ."
+                )
     if improvements:
         parts.append(
             "\n## Mejoras aprobadas por el usuario (M-xxx)\n"

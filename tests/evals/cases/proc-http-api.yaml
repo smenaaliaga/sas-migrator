@@ -1,0 +1,30 @@
+id: proc-http-api
+strategy: pandas
+placement: pandas
+node_label: Serie UF desde API BDE
+input_datasets: []
+sas_code: |
+  filename resp temp;
+  proc http
+    url="https://si3.bcentral.cl/SieteRestWS/SieteRestWS.ashx?user=&user.%nrstr(&pass)=&password.%nrstr(&function)=GetSeries%nrstr(&timeseries)=F073.UFF.PRE.Z.D%nrstr(&firstdate)=2026-01-01"
+    method="get" out=resp;
+  run;
+
+  libname api json fileref=resp automap=create;
+
+  data work.uf_diaria;
+    set api.series_obs;
+    fecha = input(substr(indexdatestring, 1, 10), ddmmyy10.);
+    valor = input(value, best.);
+    keep fecha valor;
+  run;
+expect:
+  cells_regex_all:
+    - "requests\\.get\\("
+    - "si3\\.bcentral\\.cl"
+    - "os\\.environ"
+    - "raise_for_status"
+    - "json_normalize"
+  forbid: ["to_parquet", "duckdb", "read_sql", "&user", "&password"]
+  imports_any: ["import requests"]
+  min_cells: 1

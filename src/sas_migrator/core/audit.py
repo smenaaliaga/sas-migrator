@@ -30,6 +30,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from sas_migrator.core.http_evidence import extract_http_hosts  # noqa: F401  (re-export histórico)
 from sas_migrator.core.utils.fsio import atomic_write_text, dump_json
 
 
@@ -141,35 +142,14 @@ def cells_text(nb: dict[str, Any]) -> list[str]:
 # El endpoint que consulta el nodo y la tabla que puebla están escritos en su
 # código. Extraerlos evita que el proyecto tenga que declararlos a mano y hace
 # que las reglas de deriva apliquen desde el primer nodo de cualquier migración.
-
-# Cubre `PROC HTTP URL="..."` y `FILENAME f URL "..."` (este sin `=`).
-_URL_RE = re.compile(r"""\burl\s*=?\s*(["'])(.+?)\1""", flags=re.IGNORECASE)
-_SCHEME_HOST_RE = re.compile(r"^[a-z][a-z0-9+.\-]*://([^/\s?\"']+)", flags=re.IGNORECASE)
+# La extracción HTTP vive en core/http_evidence.py (la comparte el índice de
+# fase 2); este módulo re-exporta extract_http_hosts para sus consumidores.
 
 _DEST_TABLE_RES = (
     re.compile(r"\bPROC\s+APPEND\b[\s\S]{0,200}?\bBASE\s*=\s*([A-Za-z_][\w.]*)", flags=re.IGNORECASE),
     re.compile(r"\bINSERT\s+INTO\s+([A-Za-z_][\w.]*)", flags=re.IGNORECASE),
     re.compile(r"\bCREATE\s+TABLE\s+([A-Za-z_][\w.]*)", flags=re.IGNORECASE),
 )
-
-
-def extract_http_hosts(sas_code: str) -> list[str]:
-    """Hosts que el nodo consulta por HTTP, leídos del URL= de su propio código.
-
-    Una URL armada con macro variables (``&base./ws``) no aporta host literal y
-    se descarta: mejor no inferir que inferir mal y reportar un falso positivo.
-    """
-    hosts: list[str] = []
-    for _, raw in _URL_RE.findall(sas_code):
-        match = _SCHEME_HOST_RE.match(raw.strip())
-        if not match:
-            continue
-        host = match.group(1).split("@")[-1].split(":")[0].strip().lower()
-        if not host or "&" in host or "%" in host:
-            continue
-        if host not in hosts:
-            hosts.append(host)
-    return hosts
 
 
 def extract_dest_tables(sas_code: str) -> list[str]:
@@ -192,6 +172,14 @@ def extract_dest_tables(sas_code: str) -> list[str]:
 def py_mentions_host(py_text: str, hosts: list[str]) -> bool:
     low = py_text.lower()
     return any(host in low for host in hosts)
+
+
+def py_uses_package(py_text: str, packages: list[str]) -> bool:
+    """¿El Python menciona alguno de esos paquetes como identificador?"""
+    low = py_text.lower()
+    return any(
+        re.search(rf"\b{re.escape(p.lower())}\b", low) for p in packages if p
+    )
 
 
 def py_reads_table(py_text: str, tables: list[str]) -> bool:
@@ -349,6 +337,12 @@ def run_audit(state_dir: Path, output_dir: Path) -> int:
     mapping_doc = load_json(state_dir / "sas_python_mapping.json")
     heuristics = load_heuristics(state_dir)
     ignored = load_ignored_nodes(state_dir)
+
+    # Decisiones B4c: host → package SDK. Un host migrado por SDK no exige
+    # aparecer en el Python; a cambio se exige que el paquete se use (medium).
+    from sas_migrator.core.api.connections import sdk_by_host
+
+    sdk_map = sdk_by_host(state_dir)
 
     # Placement efectivo (clasificador + overrides de la entrevista B4b).
     from sas_migrator.core.planning import load_placement_overrides
@@ -555,7 +549,18 @@ def run_audit(state_dir: Path, output_dir: Path) -> int:
         py_f_cell = find_features_py(mapped_text, heuristics)
         py_f_nb = find_features_py(all_text, heuristics)
 
-        if sas_f["proc_http"] and not (py_f_cell["requests_like"] or py_f_nb["requests_like"]):
+        # Decisión B4c del nodo: paquetes SDK de los hosts que este SAS consulta.
+        # Sin host literal (URL por macro) valen todos los SDK declarados.
+        sas_hosts = extract_http_hosts(sas_code)
+        node_sdk_pkgs = [sdk_map[h] for h in sas_hosts if h in sdk_map] or (
+            sorted(set(sdk_map.values())) if sas_f["proc_http"] and not sas_hosts else []
+        )
+        py_has_http = py_f_cell["requests_like"] or py_f_nb["requests_like"]
+        py_has_sdk = py_uses_package(mapped_text, node_sdk_pkgs) or py_uses_package(
+            all_text, node_sdk_pkgs
+        )
+
+        if sas_f["proc_http"] and not (py_has_http or py_has_sdk):
             issues.append(
                 Issue(
                     severity="high",
@@ -565,20 +570,21 @@ def run_audit(state_dir: Path, output_dir: Path) -> int:
                     notebook_path=nb_rel,
                     detail=(
                         "SAS node uses PROC HTTP, but Python translation has no "
-                        "requests/httpx/urllib pattern"
+                        "requests/httpx/urllib pattern (ni el SDK declarado en B4c)"
                     ),
                 )
             )
 
         # El SAS pega a un host y el Python sí hace HTTP, pero a otro lado: el
         # traductor cambió el endpoint. El host sale del URL= del propio nodo.
-        sas_hosts = extract_http_hosts(sas_code)
+        # Los hosts con mode=sdk (B4c) no exigen mención: el SDK encapsula la URL.
+        expected_hosts = [h for h in sas_hosts if h not in sdk_map]
         if (
-            sas_hosts
-            and (py_f_cell["requests_like"] or py_f_nb["requests_like"])
+            expected_hosts
+            and py_has_http
             and not (
-                py_mentions_host(mapped_text, sas_hosts)
-                or py_mentions_host(all_text, sas_hosts)
+                py_mentions_host(mapped_text, expected_hosts)
+                or py_mentions_host(all_text, expected_hosts)
             )
         ):
             issues.append(
@@ -589,19 +595,41 @@ def run_audit(state_dir: Path, output_dir: Path) -> int:
                     node_label=node_label,
                     notebook_path=nb_rel,
                     detail=(
-                        f"SAS node calls {', '.join(sas_hosts)} (URL= del PROC HTTP) "
+                        f"SAS node calls {', '.join(expected_hosts)} (URL= del PROC HTTP) "
                         "but the Python HTTP call does not mention it — endpoint "
                         "may have been changed or invented"
                     ),
                 )
             )
 
+        # Regla compensatoria de la exención SDK: el usuario declaró mode=sdk
+        # para un host de este nodo pero el paquete no aparece en la traducción.
+        # Medium a propósito: es una decisión visible, no un bloqueo.
+        for host in sas_hosts:
+            pkg = sdk_map.get(host)
+            if pkg and not (
+                py_uses_package(mapped_text, [pkg]) or py_uses_package(all_text, [pkg])
+            ):
+                issues.append(
+                    Issue(
+                        severity="medium",
+                        category="semantic",
+                        node_id=nid,
+                        node_label=node_label,
+                        notebook_path=nb_rel,
+                        detail=(
+                            f"B4c declara mode=sdk para {host} pero el paquete "
+                            f"`{pkg}` no aparece en la traducción del nodo"
+                        ),
+                    )
+                )
+
         # El nodo llamaba a la API y la traducción lee la tabla que esa misma
         # API debía poblar: corre sin fallar y entrega datos de la corrida previa.
         if (
             sas_f["proc_http"]
             and http_dest_tables
-            and not (py_f_cell["requests_like"] or py_f_nb["requests_like"])
+            and not (py_has_http or py_has_sdk)
             and (
                 py_reads_table(mapped_text, http_dest_tables)
                 or py_reads_table(all_text, http_dest_tables)

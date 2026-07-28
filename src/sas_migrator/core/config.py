@@ -50,7 +50,8 @@ class AuditConfig(_StrictSection):
 
     Los endpoints que el flujo consulta y las tablas que puebla NO se declaran:
     se infieren nodo por nodo del ``URL=`` y del destino de escritura del propio
-    código SAS (``core.audit.extract_http_hosts`` / ``extract_dest_tables``), de
+    código SAS (``core.http_evidence.extract_http_hosts`` /
+    ``core.audit.extract_dest_tables``), de
     modo que las reglas de deriva corren en cualquier proyecto sin configurar
     nada. Acá queda solo lo que el SAS no dice: qué formas de manejar secretos
     aceptas y qué DataFrames quieres vigilar en runtime.

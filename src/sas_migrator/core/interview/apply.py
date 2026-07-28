@@ -20,6 +20,9 @@ from sas_migrator.core.interview._io import (
 )
 from sas_migrator.core.models.analysis import PlacementDecisions, PlacementResolution
 from sas_migrator.core.models.data import (
+    ApiConnection,
+    ApiConnectionMode,
+    ApiConnections,
     ConnectionRole,
     DatabaseConnection,
     DatabaseConnections,
@@ -274,6 +277,56 @@ def _write_placement_decisions(
     return len(resolutions)
 
 
+_IMPORT_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+
+def parse_sdk_package(free_text: str) -> str:
+    """Primer token con forma de nombre de import en el texto libre; '' si no hay."""
+    match = _IMPORT_NAME.search(free_text or "")
+    return match.group(0) if match else ""
+
+
+def _api_decisions(collected: Collected) -> list[tuple[str, str, str]]:
+    """[(host, mode, package)] desde las tarjetas B4c, en orden de tarjeta."""
+    decisions: list[tuple[str, str, str]] = []
+    for card, ans in collected:
+        if not card.card_id.startswith("B4c:api:"):
+            continue
+        host = card.card_id.split("B4c:api:", 1)[1]
+        choice = _value_of(ans, card.questions[0].id)
+        if choice == "Usar una librería/SDK oficial (indico el paquete en texto libre)":
+            decisions.append((host, "sdk", parse_sdk_package(ans.free_text)))
+        else:
+            decisions.append((host, "http", ""))
+    return decisions
+
+
+def _write_api_connections(state_dir: Path, collected: Collected) -> None:
+    """B4c → api_connections.yaml. mode=http también se registra: la auditoría
+    y el prompt necesitan saber que la decisión fue replicar, no que faltó."""
+    decisions = _api_decisions(collected)
+    if not decisions:
+        return
+    ev = load_json(state_dir / "http_evidence.json") or {}
+    nodes_by_host = {
+        str(h.get("host")): [str(n) for n in h.get("node_ids", [])]
+        for h in ev.get("hosts", [])
+    }
+    connections = [
+        ApiConnection(
+            host=host,
+            mode=ApiConnectionMode(mode),
+            package=package,
+            node_ids=nodes_by_host.get(host, []),
+        )
+        for host, mode, package in sorted(decisions)
+    ]
+    atomic_write_yaml(
+        state_dir / "api_connections.yaml",
+        _model_dump(ApiConnections(connections=connections)),
+    )
+
+
 def summarize_counts(state_dir: Path, collected: Collected) -> dict:
     """Conteos para la tarjeta B6 — misma fuente que los artefactos finales."""
     state_dir = Path(state_dir)
@@ -342,6 +395,9 @@ def apply_post_analysis(state_dir: Path, collected: Collected) -> dict:
     if connect:
         _write_db_connections(state_dir, collected, confirmed)
     resolved = _write_placement_decisions(state_dir, confirmed, noise)
+
+    # 5. B4c → api_connections.yaml (solo si hubo tarjetas de conexión externa).
+    _write_api_connections(state_dir, collected)
 
     counts = summarize_counts(state_dir, collected)
     counts["placements_resolved"] = resolved

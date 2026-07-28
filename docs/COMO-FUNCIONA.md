@@ -145,7 +145,7 @@ flowchart TD
 | 1 Entrevista inicial | tú + código | `initial_interview.yaml` | requeridas sin responder |
 | 2 Análisis | código + LLM | `flow_graph`, `nodes_index`, `lineage`, `code_smells`, `improvements_proposed`, residuo | residuo sin explicar, nodos sin revisar, `needs_human` |
 | 3 Profiling | código + LLM | `profile_report`, `file_mapping`, `column_mapping` | archivos sin mapear, `needs_human` |
-| 4 Post-análisis | tú + código | `db_connections.yaml`, `placement_decisions`, `approved_improvements` | decisiones faltantes, `needs_human` |
+| 4 Post-análisis | tú + código | `db_connections.yaml`, `api_connections.yaml`, `placement_decisions`, `approved_improvements` | decisiones faltantes, `needs_human` |
 | 5 Plan | código + tú | `translation_plan.json` | `user_approved != true` |
 | 6 Generación | LLM + ensamblador | notebooks, `run_all.py`, `sas_python_mapping.json` | chequeos estáticos, auditoría high, `needs_human` |
 | 7 Validación | código (+LLM si falla) | `table_verification`, `execution_report`, `validation_report` | tabla destino faltante, notebook FAIL, mismatch, `needs_human` |
@@ -181,7 +181,9 @@ Si el LLM falla validación 3 veces o se rehúsa → el ítem cae a
 `state/llm_trace.jsonl` (task, hash del prompt, outcome, intentos, tokens).
 
 **Tú** decides en los puntos irreversibles o de negocio: contexto inicial,
-qué librefs son BD (B4b), qué mejoras se aplican (M-xxx), aprobación del plan,
+qué librefs son BD (B4b), cómo migrar cada conexión externa por HTTP (B4c:
+replicar con `requests` o usar un SDK oficial que tú nombras), qué mejoras se
+aplican (M-xxx), aprobación del plan,
 **autorización de ejecución** (default recomendado: NO ejecutar), y las
 iteraciones. Toda pregunta llega como tarjeta con default recomendado y
 evidencia; "no sé" es respuesta válida.
@@ -222,6 +224,22 @@ construcción SAS, regla de negocio y confianza.
 - En los notebooks: `engine = sqlalchemy.create_engine(os.environ["SASMIG_DB_URL"])`
   — la URL la inyecta el orquestador al ejecutar. **Jamás credenciales en el
   código** (scanner de secretos lo hace fallo de ensamblado).
+
+### 5.2b Conexiones externas (APIs HTTP)
+
+- Fase 2 lee los hosts del `URL=` literal del propio SAS (`PROC HTTP` /
+  `FILENAME ... URL`) → `state/http_evidence.json`. URL armada con macros
+  queda declarada (`nodes_with_dynamic_url`), jamás se adivina el host.
+- Fase 4, bloque **B4c**: una tarjeta por host — ¿replicar la llamada con
+  `requests` (default: mismo host y método que el SAS) o usar una librería
+  oficial? (ej.: `bcchapi` para la API BDE del Banco Central). Elegir SDK
+  exige nombrar el paquete (nombre de import). Decisión →
+  `state/api_connections.yaml`.
+- La decisión viaja al prompt de traducción y, si es SDK, el paquete entra a
+  la allowlist de imports (y a `requirements.txt` si se usa).
+- Auditoría: un host con `mode=sdk` no exige aparecer en el Python (el SDK
+  encapsula la URL), pero el paquete ausente en la traducción es un hallazgo
+  medium; con `mode=http` la regla de endpoint cambiado sigue siendo high.
 
 ### 5.3 Semántica de escritura = espejo del SAS (no se inventa)
 
