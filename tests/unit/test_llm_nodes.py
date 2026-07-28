@@ -280,8 +280,11 @@ def test_stale_bad_translation_on_disk_is_retranslated(ws: Path) -> None:
     trans_dir = state / "translations"
     shutil.rmtree(trans_dir, ignore_errors=True)
     trans_dir.mkdir(parents=True)
+    # JSON crudo a propósito: con el contrato fuerte (cells min_length=1) ya no
+    # se puede CONSTRUIR un NodeTranslation vacío — pero un artefacto viejo en
+    # disco puede traerlo, y model_validate lo rechaza al cargarlo.
     (trans_dir / "CodeTask-2.json").write_text(
-        NodeTranslation(node_id="CodeTask-2", node_label="viejo", cells=[]).model_dump_json(),
+        json.dumps({"node_id": "CodeTask-2", "node_label": "viejo", "cells": []}),
         encoding="utf-8",
     )
 

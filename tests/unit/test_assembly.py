@@ -152,6 +152,23 @@ def test_empty_translation_fails() -> None:
     assert check_node_translation(_nt("A", ["   \n"])).reason == "empty_translation"
 
 
+def test_node_translation_contrato_fuerte() -> None:
+    """cells:[] validó DOS veces en producción y produjo nodos vacíos que
+    parecían traducidos. Ahora es error de validación (retry inmediato del
+    LLM), y la strategy inventada también."""
+    import pydantic
+
+    with pytest.raises(pydantic.ValidationError):
+        NodeTranslation(node_id="A", cells=[])
+    with pytest.raises(pydantic.ValidationError):
+        NodeTranslation(node_id="A", cells=["x = 1\n"], strategy="polars")
+    # las descriptions viajan en el JSON Schema al modelo: son instrucciones
+    schema = NodeTranslation.model_json_schema()
+    assert all(
+        "description" in prop for prop in schema["properties"].values()
+    ), "todos los campos del output_model deben instruir al modelo"
+
+
 def test_strategy_mismatch_reported(tmp_path: Path) -> None:
     translations = {"A": _nt("A", ["x = 1\n"], strategy="sql_pushdown")}
     _, failures = assemble_notebooks(_plan("A"), translations, tmp_path / "output")

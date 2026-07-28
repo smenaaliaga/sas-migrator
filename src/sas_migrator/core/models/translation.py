@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from enum import Enum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -73,22 +73,57 @@ class Traceability(BaseModel):
     business_rule: str = ""  # 1 línea, lenguaje de negocio
 
 
+# Las 5 strategies válidas — las mismas que STRATEGY_BY_PLACEMENT produce.
+TranslationStrategy = Literal["pandas", "python", "sql_passthrough", "sql_pushdown", "hybrid"]
+
+
 class NodeTranslation(BaseModel):
     """Output estructurado del traductor para UN nodo.
 
-    Es también el ``output_model`` de la llamada LLM (structured output). Las
-    ``cells`` van SIN header ni ancla — los agrega el ensamblador, que es
+    Es también el ``output_model`` de la llamada LLM (structured output): las
+    ``description`` de los campos viajan en el JSON Schema al modelo, así que
+    son instrucciones, no decoración. Contrato FUERTE a propósito — en
+    producción ``cells: []`` validó dos veces y produjo nodos vacíos que
+    parecían traducidos; con ``min_length=1`` eso es un error de validación
+    con retry inmediato, no un artefacto persistido.
+
+    Las ``cells`` van SIN header ni ancla — los agrega el ensamblador, que es
     quien calcula ``cell_index`` por construcción.
     """
 
-    node_id: str
-    node_label: str = ""
-    strategy: str = "pandas"
-    imports: list[str] = Field(default_factory=list)  # líneas completas: "import pandas as pd"
-    cells: list[str] = Field(default_factory=list)  # ≥1 celda de código
-    traceability: Traceability = Field(default_factory=Traceability)
-    confidence: Confidence = Confidence.LOW
-    warnings: list[str] = Field(default_factory=list)
+    node_id: str = Field(description="Copia EXACTA del node_id del mensaje user.")
+    node_label: str = Field(default="", description="Copia del node_label del user.")
+    strategy: TranslationStrategy = Field(
+        default="pandas",
+        description="Copia de la strategy del plan para este nodo — no se renegocia acá.",
+    )
+    imports: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Líneas de import completas ('import pandas as pd'). Solo stdlib y "
+            "librerías permitidas del proyecto. Nunca imports dentro de cells."
+        ),
+    )
+    cells: list[str] = Field(
+        min_length=1,
+        description=(
+            "1..n celdas de código Python SIN headers ni anclas. Un nodo sin "
+            "código traducible NO devuelve cells vacías: devuelve una celda con "
+            "raise NotImplementedError('<qué falta>') y el motivo en warnings."
+        ),
+    )
+    traceability: Traceability = Field(
+        default_factory=Traceability,
+        description="Construct SAS dominante y regla de negocio en 1 línea.",
+    )
+    confidence: Confidence = Field(
+        default=Confidence.LOW,
+        description="Confianza honesta: low si hubo supuestos fuertes.",
+    )
+    warnings: list[str] = Field(
+        default_factory=list,
+        description="Supuestos tomados, ambigüedades, todo lo que un revisor debe mirar.",
+    )
 
 
 class MappingEntry(BaseModel):
