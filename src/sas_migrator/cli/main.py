@@ -575,6 +575,18 @@ def _trace_summary(state_dir: Path) -> dict:
         return {"calls": 0, "by_task": {}}
 
 
+def _cost_summary(state_dir: Path) -> dict:
+    """Totales de costo/tokens/cache de la corrida (desde el trace)."""
+    try:
+        from sas_migrator.core.config import load_project_config
+        from sas_migrator.llm.costs import run_totals
+
+        overrides = load_project_config(state_dir.parent).llm.prices
+        return run_totals(state_dir, overrides)
+    except Exception:
+        return {}
+
+
 def _confidence_summary(state_dir: Path) -> dict:
     """Distribución de confianza de las traducciones + veredictos del
     verificador — antes se descartaban y "qué tan confiable quedó esto" no
@@ -636,6 +648,7 @@ def status(
     items = _needs_human_items(state_dir) if started else []
     trace = _trace_summary(state_dir) if started else {"calls": 0, "by_task": {}}
     conf = _confidence_summary(state_dir) if started else {}
+    cost = _cost_summary(state_dir) if started else {}
 
     if as_json:
         typer.echo(
@@ -655,6 +668,7 @@ def status(
                     ),
                     "needs_human": [i.model_dump(mode="json") for i in items],
                     "llm": trace,
+                    "cost": cost,
                     "translation": conf,
                 },
                 indent=2,
@@ -717,6 +731,20 @@ def status(
             f"{agg['needs_human']} needs_human · {agg['errors']} error(es) · "
             f"{int(seconds // 60)}m {int(seconds % 60):02d}s"
         )
+
+    if cost.get("priced_calls") or cost.get("unpriced_calls"):
+        total_in = (
+            cost["input_tokens"] + cost["cache_read_tokens"] + cost["cache_write_tokens"]
+        )
+        cache_pct = (100 * cost["cache_read_tokens"] // total_in) if total_in else 0
+        linea = (
+            f"Costo: ~${cost['cost_usd']:.2f} · "
+            f"{cost['input_tokens'] + cost['cache_read_tokens'] + cost['cache_write_tokens']:,} in / "
+            f"{cost['output_tokens']:,} out · {cache_pct}% del input leído de cache"
+        )
+        if cost.get("unpriced_calls"):
+            linea += f" · {cost['unpriced_calls']} llamada(s) sin precio conocido"
+        typer.echo(linea)
 
     if conf.get("confidence"):
         orden = {"high": 0, "medium": 1, "low": 2}

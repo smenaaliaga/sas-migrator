@@ -32,6 +32,76 @@ def _call(caller, task: str = "translation"):
     )
 
 
+# ── costos y presupuesto ────────────────────────────────────────────────────
+
+class _PricedInner:
+    """Caller fake con config de LlmConfig y usage como el real."""
+
+    def __init__(self, budget: float = 0.0, model: str = "claude-opus-5"):
+        from sas_migrator.core.config import LlmConfig
+
+        self.config = LlmConfig(model=model, max_run_cost_usd=budget)
+        self.last_usage: dict | None = None
+
+    def call(self, **kwargs):
+        self.last_usage = {
+            "input_tokens": 1_000_000,  # $5 en opus → cada llamada cuesta ~$5.xx
+            "output_tokens": 10_000,
+            "cache_read_input_tokens": 0,
+            "cache_creation_input_tokens": 0,
+        }
+        return _Out(value="ok")
+
+
+def test_costo_por_llamada_y_acumulado_en_el_trace(tmp_path: Path) -> None:
+    from sas_migrator.llm.costs import run_totals
+
+    state = tmp_path / "state"
+    caller = TracingCaller(_PricedInner(), state)
+    _call(caller)
+    rec = _read_trace(state)[0]
+    assert rec["cost_usd"] > 5.0  # 1M in × $5/MTok + salida
+
+    totals = run_totals(state)
+    assert totals["priced_calls"] == 1 and totals["unpriced_calls"] == 0
+    assert totals["cost_usd"] == rec["cost_usd"]
+    assert totals["tokens_by_task"]["translation"] == 1_010_000
+
+
+def test_presupuesto_corta_antes_de_llamar_y_sobrevive_reinicios(tmp_path: Path) -> None:
+    """El tope es reanudable: corta gasto FUTURO, nunca invalida lo persistido."""
+    import pytest
+
+    from sas_migrator.llm.costs import BudgetExceeded
+
+    state = tmp_path / "state"
+    caller = TracingCaller(_PricedInner(budget=8.0), state)
+    _call(caller)  # ~$5.05 gastados < 8 → pasa
+    with pytest.raises(BudgetExceeded) as exc:
+        _call(caller)  # el acumulado ya supera el tope → corta ANTES
+        _call(caller)
+    assert "max_run_cost_usd" in str(exc.value)
+    assert len(_read_trace(state)) == 2, "una llamada ok + el intento que pasó antes del tope"
+
+    # Reinicio del proceso: un TracingCaller nuevo relee el trace y el tope sigue
+    caller2 = TracingCaller(_PricedInner(budget=8.0), state)
+    with pytest.raises(BudgetExceeded):
+        _call(caller2)
+
+
+def test_modelo_sin_precio_se_declara_no_se_inventa(tmp_path: Path) -> None:
+    from sas_migrator.llm.costs import run_totals
+
+    state = tmp_path / "state"
+    caller = TracingCaller(_PricedInner(model="modelo-desconocido-9000"), state)
+    _call(caller)
+    rec = _read_trace(state)[0]
+    assert "cost_usd" not in rec
+    totals = run_totals(state)
+    assert totals["unpriced_calls"] == 1 and totals["cost_usd"] == 0.0
+    assert totals["input_tokens"] == 1_000_000, "los tokens igual se cuentan"
+
+
 def test_trace_records_ok(tmp_path: Path) -> None:
     state = tmp_path / "state"
     caller = TracingCaller(FakeCaller({"translation": {"value": "ok"}}), state)

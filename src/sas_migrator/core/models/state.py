@@ -125,6 +125,6 @@ class MigrationState(BaseModel):
     improvements_postponed: int = 0
     iteration_cycle: int = 0  # current post-migration iteration cycle
     iteration_log: list[IterationEntry] = Field(default_factory=list)
-    tokens_consumed: dict[str, int] = Field(default_factory=dict)  # phase → tokens
+    tokens_consumed: dict[str, int] = Field(default_factory=dict)  # task LLM → tokens (in+out)
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))

@@ -62,11 +62,20 @@ def _project_migration_state(state: MigrationGraphState, phase: int, passed: boo
 
     ws = Path(state["workspace"])
     current = Phase(min(phase + 1, 9)) if passed else Phase(phase)
+    # tokens_consumed por fin poblado: sale del trace (fuente de verdad del
+    # gasto), agregado por task. Antes el campo existía y quedaba {} siempre.
+    try:
+        from sas_migrator.llm.costs import run_totals
+
+        tokens_by_task = run_totals(ws / "state")["tokens_by_task"]
+    except Exception:
+        tokens_by_task = {}
     ms = MigrationState(
         project_name=Path(state.get("egp_file", "")).stem,
         egp_file=state.get("egp_file"),
         current_phase=current,
         output_strategy="notebook-flow",
+        tokens_consumed=tokens_by_task,
     )
     atomic_write_text(
         ws / "state" / "migration_state.json", ms.model_dump_json(indent=2)

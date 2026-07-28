@@ -31,11 +31,23 @@ def _prompt_hash(system_blocks: list[str]) -> str:
 
 
 class TracingCaller:
-    """Decorador de cualquier StructuredCaller que registra cada llamada."""
+    """Decorador de cualquier StructuredCaller que registra cada llamada.
+
+    También hace cumplir el presupuesto (``llm.max_run_cost_usd``): el gasto
+    acumulado se inicializa releyendo el trace en disco (sobrevive reinicios)
+    y el chequeo corre ANTES de cada llamada — el tope corta gasto futuro,
+    jamás invalida trabajo ya persistido.
+    """
 
     def __init__(self, inner: StructuredCaller, state_dir: Path):
+        from sas_migrator.llm import costs
+
         self._inner = inner
         self._trace_path = Path(state_dir) / TRACE_FILE
+        config = getattr(inner, "config", None)
+        self._budget_usd = float(getattr(config, "max_run_cost_usd", 0.0) or 0.0)
+        self._price_overrides = dict(getattr(config, "prices", {}) or {})
+        self._spent_usd = costs.run_totals(state_dir, self._price_overrides)["cost_usd"]
 
     def _write(self, record: dict) -> None:
         self._trace_path.parent.mkdir(parents=True, exist_ok=True)
@@ -51,6 +63,16 @@ class TracingCaller:
         output_model: type[T],
         max_tokens: int | None = None,
     ) -> T:
+        from sas_migrator.llm import costs
+
+        if self._budget_usd > 0 and self._spent_usd >= self._budget_usd:
+            raise costs.BudgetExceeded(
+                f"presupuesto de la corrida agotado: ~${self._spent_usd:.2f} "
+                f"gastados de ${self._budget_usd:.2f} (llm.max_run_cost_usd). "
+                "Subí el tope en project_config.yaml y `sas-migrator resume` "
+                "— el trabajo ya hecho está persistido."
+            )
+
         record = {
             "at": datetime.now(UTC).isoformat(),
             "task": task,
@@ -79,6 +101,12 @@ class TracingCaller:
             usage = getattr(self._inner, "last_usage", None)
             if usage:
                 record["usage"] = usage
+                cost = costs.usage_cost(
+                    str(record.get("model", "")), usage, self._price_overrides
+                )
+                if cost is not None:
+                    record["cost_usd"] = round(cost, 6)
+                    self._spent_usd += cost
             self._write(record)
 
 

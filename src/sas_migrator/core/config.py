@@ -90,6 +90,14 @@ class LlmConfig(BaseModel):
     # Solo para provider=foundry. Puede sobreescribirse por entorno con
     # ANTHROPIC_FOUNDRY_RESOURCE (útil si dev/prod usan recursos distintos).
     foundry_resource: str = ""
+    # Tope de gasto de la corrida en USD (0 = sin tope). Se evalúa ANTES de
+    # cada llamada contra el acumulado del trace: al alcanzarlo, la corrida
+    # corta con BudgetExceeded — reanudable con `resume` tras subir el tope,
+    # nunca un NeedsHuman. El acumulado sobrevive reinicios (relee el trace).
+    max_run_cost_usd: float = 0.0
+    # Override de la tabla de precios por prefijo de modelo (USD por MTok):
+    #   prices: {"claude-opus": {input: 5, output: 25, cache_read: 0.5, cache_write: 6.25}}
+    prices: dict[str, dict[str, float]] = Field(default_factory=dict)
 
 
 class TranslationConfig(BaseModel):
