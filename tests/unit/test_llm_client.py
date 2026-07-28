@@ -522,6 +522,22 @@ def test_runtime_override_wins(tmp_path) -> None:
         runtime.set_caller(None)
 
 
+def test_config_estricta_nombra_la_clave_desconocida(tmp_path) -> None:
+    """Un typo (`max_worker`) ya no se ignora en silencio: el error dice
+    exactamente qué clave sobra y dónde mirar la referencia."""
+    from sas_migrator.core.config import load_project_config
+
+    (tmp_path / "project_config.yaml").write_text(
+        "llm:\n  max_worker: 4\nsecciones_muertas:\n  x: 1\n", encoding="utf-8"
+    )
+    with pytest.raises(ValueError) as exc:
+        load_project_config(tmp_path)
+    mensaje = str(exc.value)
+    assert "llm.max_worker" in mensaje
+    assert "secciones_muertas" in mensaje
+    assert "project_config.example.yaml" in mensaje
+
+
 def test_llm_config_defaults_and_yaml(tmp_path) -> None:
     assert ProjectConfig().llm.model == "claude-opus-5"
     (tmp_path / "project_config.yaml").write_text(

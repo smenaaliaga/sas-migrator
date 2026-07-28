@@ -1,4 +1,4 @@
-"""Configuración de proyecto — todo lo específico de un cliente/entorno vive aquí.
+﻿"""Configuración de proyecto — todo lo específico de un cliente/entorno vive aquí.
 
 El código genérico no puede traer defaults de un cliente (servidores, heurísticas
 de dominio, marcadores de auditoría). Esos valores se cargan desde
@@ -13,12 +13,24 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 CONFIG_FILENAME = "project_config.yaml"
 
 
-class DBConfig(BaseModel):
+class _StrictSection(BaseModel):
+    """Toda sección del config rechaza claves desconocidas.
+
+    Con extra permisivo, un typo (`max_worker` por `max_workers`) se ignora en
+    silencio y el usuario cree haber configurado algo que no configuró. Mejor
+    un error al cargar, con la clave exacta, que una corrida entera con el
+    default equivocado.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class DBConfig(_StrictSection):
     """Defaults de conexión SQL Server para el proyecto."""
 
     default_server: str = ""
@@ -33,7 +45,7 @@ class DBConfig(BaseModel):
     connection_url: str = ""
 
 
-class AuditConfig(BaseModel):
+class AuditConfig(_StrictSection):
     """Lo que la auditoría de traducción no puede leer del SAS.
 
     Los endpoints que el flujo consulta y las tablas que puebla NO se declaran:
@@ -50,7 +62,7 @@ class AuditConfig(BaseModel):
     runtime_df_checks: list[str] = Field(default_factory=list)
 
 
-class LlmConfig(BaseModel):
+class LlmConfig(_StrictSection):
     """Configuración de los nodos LLM (Etapa 4).
 
     ``model`` va pineado (ID fijo, sin sufijo de fecha). Sin parámetros de
@@ -112,7 +124,7 @@ class LlmConfig(BaseModel):
     prices: dict[str, dict[str, float]] = Field(default_factory=dict)
 
 
-class TranslationConfig(BaseModel):
+class TranslationConfig(_StrictSection):
     """Contrato del código Python DESTINO.
 
     ``allowed_imports``: librerías de terceros que las traducciones pueden
@@ -157,7 +169,7 @@ class TranslationConfig(BaseModel):
         return v
 
 
-class ParserConfig(BaseModel):
+class ParserConfig(_StrictSection):
     """Ajustes del parser SAS para el proyecto.
 
     ``extra_db_engines``: engines de BD del cliente que no están en la lista
@@ -170,7 +182,7 @@ class ParserConfig(BaseModel):
     ignore_db_engines: list[str] = Field(default_factory=list)
 
 
-class RunConfig(BaseModel):
+class RunConfig(_StrictSection):
     """Valores de corrida: los parámetros con los que se ejecuta el proceso.
 
     ``macro_params`` da valor a las variables macro que el SAS heredaba del
@@ -186,7 +198,7 @@ class RunConfig(BaseModel):
     macro_params: dict[str, Any] = Field(default_factory=dict)
 
 
-class ProjectConfig(BaseModel):
+class ProjectConfig(_StrictSection):
     """Raíz de project_config.yaml."""
 
     db: DBConfig = Field(default_factory=DBConfig)
@@ -207,4 +219,18 @@ def load_project_config(workspace: Path | str | None = None) -> ProjectConfig:
     if not path.exists():
         return ProjectConfig()
     data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    return ProjectConfig.model_validate(data)
+    try:
+        return ProjectConfig.model_validate(data)
+    except ValidationError as exc:
+        unknown = [
+            ".".join(str(p) for p in err["loc"])
+            for err in exc.errors()
+            if err["type"] == "extra_forbidden"
+        ]
+        if unknown:
+            raise ValueError(
+                f"{path.name} tiene clave(s) desconocida(s): {', '.join(sorted(unknown))} "
+                "— ¿typo o campo que ya no existe? La referencia de claves "
+                "válidas es project_config.example.yaml."
+            ) from exc
+        raise
