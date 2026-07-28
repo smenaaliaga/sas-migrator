@@ -7,20 +7,24 @@ name = "sas-migrator"
 version = "2.0.0a0"
 description = "SAS EG to Python migration pipeline — LangGraph orchestration over a deterministic core"
 requires-python = ">=3.11"
+# Pisos verificados con techo de major: un major nuevo de pandas/pydantic/
+# langgraph cambia semántica — que la actualización sea una decisión, no un
+# `pip install -U` accidental. Verificado contra pandas 3.x / pydantic 2.13 /
+# langgraph 1.2 (los instalados en el venv de desarrollo y CI).
 dependencies = [
-    "pandas>=2.0",
-    "pydantic>=2.5",
-    "pyyaml>=6.0",
-    "jsonschema>=4.20",
-    "openpyxl>=3.1",
-    "nbformat>=5.9",
-    "rapidfuzz>=3.0",
+    "pandas>=2.2,<4",
+    "pydantic>=2.7,<3",
+    "pyyaml>=6.0,<7",
+    "jsonschema>=4.20,<5",
+    "openpyxl>=3.1,<4",
+    "nbformat>=5.9,<6",
+    "rapidfuzz>=3.0,<4",
 ]
 
 [project.optional-dependencies]
 graph = [
-    "langgraph>=0.2",
-    "langgraph-checkpoint-sqlite>=2.0",
+    "langgraph>=1.0,<2",
+    "langgraph-checkpoint-sqlite>=3.0,<4",
 ]
 llm = [
     "anthropic>=0.75",
@@ -30,11 +34,13 @@ db = [
     "sqlalchemy>=2.0",
     "pyodbc>=5.0",
 ]
+# Requisito de la fase 7 (ejecución de notebooks tras la pausa sagrada):
+# nbclient ejecuta, ipykernel es el kernel que nbclient lanza. jupytext y
+# papermill salieron: nadie los importaba (la celda `parameters` usa la
+# CONVENCIÓN de papermill, no el paquete).
 notebook = [
-    "jupytext>=1.16",
-    "nbclient>=0.10",
-    "papermill>=2.5",
-    "ipykernel>=6.29",
+    "nbclient>=0.10,<1",
+    "ipykernel>=6.29,<10",
 ]
 cli = [
     "typer>=0.12",
