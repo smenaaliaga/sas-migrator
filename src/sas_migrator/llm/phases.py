@@ -352,9 +352,92 @@ def merge_translations(partes: list[NodeTranslation]) -> NodeTranslation:
     })
 
 
+def _review_notes(state_dir: Path) -> dict[str, str]:
+    """node_id → nota del analista (fase 2), desde state/analysis_reviews/*.json.
+
+    El criterio del code-analyst se pagaba en la fase 2 y después nadie se lo
+    daba al traductor: la nota que dice "ojo: este nodo depende del período
+    cargado" moría en un archivo que solo leía la entrevista.
+    """
+    notes: dict[str, str] = {}
+    reviews_dir = state_dir / "analysis_reviews"
+    if not reviews_dir.exists():
+        return notes
+    for path in sorted(reviews_dir.glob("*.json")):
+        try:
+            doc = fsio.load_json(path) or {}
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            continue  # una review ilegible no puede frenar la traducción
+        for r in doc.get("reviews", []):
+            nid = str(r.get("node_id") or "")
+            note = str(r.get("note") or "").strip()
+            if nid and note:
+                notes[nid] = note
+    return notes
+
+
+# Dependencias listadas en el contexto de un nodo. Más allá de este techo el
+# prompt crece sin que el modelo pueda usarlas todas; el recorte se anuncia.
+MAX_DEPS_IN_CONTEXT = 12
+
+
+def _deps_context(target: dict, targets_by_id: dict[str, dict]) -> dict | None:
+    """Qué DataFrames/tablas deja cada dependencia del nodo (cap declarado)."""
+    deps = [str(d) for d in (target.get("dependencies") or [])]
+    ctx: dict[str, object] = {}
+    for dep in deps[:MAX_DEPS_IN_CONTEXT]:
+        dep_target = targets_by_id.get(dep)
+        if dep_target is None:
+            continue
+        ctx[dep] = {
+            "label": dep_target.get("node_label", ""),
+            "deja_datasets": dep_target.get("output_datasets", []),
+            "deja_tablas_bd": dep_target.get("output_tables", []),
+        }
+    if len(deps) > MAX_DEPS_IN_CONTEXT:
+        ctx["_omitidas"] = (
+            f"{len(deps) - MAX_DEPS_IN_CONTEXT} dependencias más no listadas"
+        )
+    return ctx or None
+
+
+def _approved_improvements(state_dir: Path) -> list[dict]:
+    """Catálogo de mejoras M-xxx APROBADAS, para el bloque system del proyecto."""
+    doc = fsio.load_yaml(state_dir / "approved_improvements.yaml") or {}
+    out = []
+    for item in doc.get("improvements", []):
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("status", "")).lower() != "approved":
+            continue
+        out.append({
+            "id": item.get("id", ""),
+            "title": item.get("title", ""),
+            "description": item.get("description", ""),
+            "affected_nodes": item.get("affected_nodes", []),
+        })
+    return out
+
+
+def _translation_context(state_dir: Path, plan: dict) -> tuple[list[str], list[str]]:
+    """(system_blocks, db_aliases) para la fase de traducción."""
+    from sas_migrator.core.db.connections import load_connections
+
+    conns = load_connections(state_dir)
+    db_aliases = [str(c["alias"]) for c in conns if c.get("alias")]
+    context_block = prompt_builder.build_project_context(
+        connections=conns,
+        improvements=_approved_improvements(state_dir),
+        macro_param_values=plan.get("macro_param_values") or {},
+    )
+    return prompt_builder.build_translation_system(context_block), db_aliases
+
+
 def _translate_node(
     caller, *, system: list[str], target: dict, code: str, db_aliases: list[str],
     iteration_note: str | None = None,
+    review_note: str | None = None,
+    dependencies_context: dict | None = None,
 ) -> NodeTranslation:
     """Traduce un nodo, partiéndolo por bloques si no entra en un prompt.
 
@@ -393,7 +476,9 @@ def _translate_node(
             task="translation",
             system_blocks=system,
             user_content=prompt_builder.build_translation_user(
-                target, trozo, db_aliases, iteration_note=nota
+                target, trozo, db_aliases, iteration_note=nota,
+                review_note=review_note,
+                dependencies_context=dependencies_context,
             ),
             output_model=NodeTranslation,
         ))
@@ -438,6 +523,8 @@ def _load_valid_translations(trans_dir: Path) -> dict[str, NodeTranslation]:
 def _translate_checked(
     caller, *, system: list[str], target: dict, code: str, db_aliases: list[str],
     iteration_note: str | None = None,
+    review_note: str | None = None,
+    dependencies_context: dict | None = None,
 ) -> NodeTranslation:
     """Traduce un nodo y NO devuelve nada que no pase el chequeo estático.
 
@@ -457,6 +544,7 @@ def _translate_checked(
         nt = _translate_node(
             caller, system=system, target=target, code=code,
             db_aliases=db_aliases, iteration_note=nota,
+            review_note=review_note, dependencies_context=dependencies_context,
         )
         if plan_strategy and nt.strategy and nt.strategy != plan_strategy:
             motivo = (
@@ -492,13 +580,9 @@ def run_translation(state_dir: Path, output_dir: Path, workspace: Path) -> dict:
     state_dir = Path(state_dir)
     plan = _load_json(state_dir / "translation_plan.json")
     caller = runtime.get_caller(workspace)
-    system = prompt_builder.build_translation_system()
-
-    db_aliases: list[str] = []
-    conns_path = state_dir / "db_connections.yaml"
-    if conns_path.exists():
-        conns = yaml.safe_load(conns_path.read_text(encoding="utf-8")) or {}
-        db_aliases = [str(c.get("alias", "")) for c in conns.get("connections", [])]
+    system, db_aliases = _translation_context(state_dir, plan)
+    review_notes = _review_notes(state_dir)
+    targets_by_id = {str(t.get("node_id")): t for t in plan.get("targets", [])}
 
     # Persistir cada traducción apenas se obtiene (no al final del loop): si el
     # proceso muere a mitad de camino, retomar la corrida salta los nodos que
@@ -515,6 +599,8 @@ def run_translation(state_dir: Path, output_dir: Path, workspace: Path) -> dict:
             nt = _translate_checked(
                 caller, system=system, target=target,
                 code=_node_code(state_dir, nid), db_aliases=db_aliases,
+                review_note=review_notes.get(nid),
+                dependencies_context=_deps_context(target, targets_by_id),
             )
         except NeedsHuman as exc:
             record_needs_human(
@@ -569,12 +655,8 @@ def retranslate_nodes(
     translations = _load_valid_translations(trans_dir)
 
     caller = runtime.get_caller(workspace)
-    system = prompt_builder.build_translation_system()
-    db_aliases: list[str] = []
-    conns_path = state_dir / "db_connections.yaml"
-    if conns_path.exists():
-        conns = yaml.safe_load(conns_path.read_text(encoding="utf-8")) or {}
-        db_aliases = [str(c.get("alias", "")) for c in conns.get("connections", [])]
+    system, db_aliases = _translation_context(state_dir, plan)
+    review_notes = _review_notes(state_dir)
 
     retranslated = 0
     for nid in node_ids:
@@ -586,6 +668,8 @@ def retranslate_nodes(
                 caller, system=system, target=target,
                 code=_node_code(state_dir, nid), db_aliases=db_aliases,
                 iteration_note=iteration_note,
+                review_note=review_notes.get(nid),
+                dependencies_context=_deps_context(target, targets_by_id),
             )
         except NeedsHuman as exc:
             record_needs_human(
