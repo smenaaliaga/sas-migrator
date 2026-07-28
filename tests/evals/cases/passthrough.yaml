@@ -2,6 +2,7 @@ id: passthrough
 strategy: sql_passthrough
 placement: sql_passthrough
 node_label: Limpieza en BD
+input_datasets: []
 sas_code: |
   proc sql;
     connect to odbc as plat (datasrc="DWH");

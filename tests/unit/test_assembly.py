@@ -229,3 +229,185 @@ def test_credenciales_nunca_llegan_a_los_parametros_del_notebook() -> None:
         assert is_credential_macro(secreto), secreto
     for normal in ("ANIO", "TRIM", "Sector", "Entrada", "C_WTW"):
         assert not is_credential_macro(normal), normal
+
+
+# ── Relleno que aparenta funcionar ──────────────────────────────────────────
+#
+# Todo lo de acá compila y corre. El chequeo no busca código roto: busca código
+# que entrega números equivocados sin lanzar nada.
+
+def test_placeholder_comment_fails() -> None:
+    f = check_node_translation(_nt("A", [
+        "# placeholder; se cargaría con pd.read_sas(...)\n"
+        "ratio = pd.DataFrame({'x': []})\n"
+    ]))
+    assert f is not None and f.reason == "placeholder_stub"
+    assert "NotImplementedError" in f.detail
+
+
+def test_placeholder_word_inside_a_string_is_not_a_comment() -> None:
+    """Tokenizamos: un '#' dentro de un literal no es un comentario."""
+    assert check_node_translation(_nt("A", [
+        "col = '#placeholder'\n"
+        "df = pd.DataFrame({'c': [col]})\n"
+    ])) is None
+
+
+def test_empty_frame_under_a_guard_fails() -> None:
+    """El patrón que produce cifras faltantes sin una sola excepción."""
+    f = check_node_translation(_nt("A", [
+        "ratio = pd.DataFrame()\n",
+        "if len(ratio) > 0:\n    total = ratio['x'].sum()\n",
+    ]))
+    assert f is not None and f.reason == "empty_frame_guard"
+    assert "ratio" in f.detail
+
+
+def test_empty_frame_accumulator_is_fine() -> None:
+    """Si se reasigna, el guard sí puede entrar: no es este bug."""
+    assert check_node_translation(_nt("A", [
+        "acumulado = pd.DataFrame()\n"
+        "for parte in [1, 2]:\n"
+        "    acumulado = pd.concat([acumulado, pd.DataFrame({'x': [parte]})])\n",
+        "if len(acumulado) > 0:\n    total = acumulado['x'].sum()\n",
+    ])) is None
+
+
+def test_empty_frame_without_a_guard_is_fine() -> None:
+    assert check_node_translation(_nt("A", ["vacio = pd.DataFrame()\n"])) is None
+
+
+def test_bare_except_fails() -> None:
+    f = check_node_translation(_nt("A", [
+        "try:\n    dcv = pd.read_parquet('inputs/dcv.parquet')\nexcept:\n    dcv = None\n"
+    ]))
+    assert f is not None and f.reason == "bare_except"
+
+
+def test_typed_except_is_fine() -> None:
+    assert check_node_translation(_nt("A", [
+        "try:\n    dcv = pd.read_parquet('inputs/dcv.parquet')\n"
+        "except FileNotFoundError:\n    raise\n"
+    ])) is None
+
+
+def test_self_assignment_fails() -> None:
+    f = check_node_translation(_nt("A", ["t_sector = t_sector\n"]))
+    assert f is not None and f.reason == "self_assignment"
+    assert "t_sector" in f.detail
+
+
+def test_sql_where_1_equals_1_without_predicates_fails() -> None:
+    f = check_node_translation(_nt("A", [
+        'q = """SELECT * FROM bd_ctsi WHERE 1=1 ORDER BY ANIO"""\n'
+    ]))
+    assert f is not None and f.reason == "sql_no_op"
+
+
+def test_sql_where_1_equals_1_with_predicates_is_fine() -> None:
+    assert check_node_translation(_nt("A", [
+        'q = "SELECT * FROM bd_ctsi WHERE 1=1 AND SECTOR = 412"\n'
+    ])) is None
+
+
+def test_row_by_row_insert_fails() -> None:
+    f = check_node_translation(_nt("A", [
+        "for _, row in af62.iterrows():\n"
+        "    conn.execute(q, {'sector': row['SECTOR']})\n"
+    ]))
+    assert f is not None and f.reason == "row_by_row_write"
+    assert "to_sql" in f.detail
+
+
+def test_bulk_write_is_fine() -> None:
+    assert check_node_translation(_nt("A", [
+        "af62.to_sql('bd_ctsi', engine, if_exists='append', index=False)\n"
+    ])) is None
+
+
+def test_iterrows_without_a_write_is_fine() -> None:
+    assert check_node_translation(_nt("A", [
+        "for _, row in af62.iterrows():\n    print(row['SECTOR'])\n"
+    ])) is None
+
+
+# ── Nombres sin definir (cruza celdas y nodos) ──────────────────────────────
+
+def test_undefined_name_omits_the_node(tmp_path: Path) -> None:
+    """'asume que viene de un nodo anterior' cuando no viene de ninguno."""
+    translations = {"A": _nt("A", ["total = bd_ctsi['DATO'].sum()\n"])}
+    mapping, failures = assemble_notebooks(_plan("A"), translations, tmp_path / "output")
+
+    assert mapping.mappings == []
+    assert [f.reason for f in failures] == ["undefined_name"]
+    assert "bd_ctsi" in failures[0].detail
+
+
+def test_name_defined_by_an_earlier_node_is_visible(tmp_path: Path) -> None:
+    translations = {
+        "A": _nt("A", ["bd_ctsi = pd.DataFrame({'DATO': [1.0]})\n"]),
+        "B": _nt("B", ["total = bd_ctsi['DATO'].sum()\n"]),
+    }
+    _, failures = assemble_notebooks(_plan("A", "B"), translations, tmp_path / "output")
+    assert failures == []
+
+
+def test_a_rejected_node_does_not_blame_the_next_one(tmp_path: Path) -> None:
+    """Se reporta la causa raíz una vez, no una cascada por todo el notebook."""
+    translations = {
+        "A": _nt("A", ["bd = origen.copy()\n"]),          # 'origen' no existe
+        "B": _nt("B", ["total = bd['DATO'].sum()\n"]),    # 'bd' lo definía A
+    }
+    _, failures = assemble_notebooks(_plan("A", "B"), translations, tmp_path / "output")
+    assert [f.node_id for f in failures] == ["A"]
+
+
+def test_imports_params_and_engine_count_as_defined(tmp_path: Path) -> None:
+    plan = {"targets": [{
+        "node_id": "A", "node_label": "Nodo A", "strategy": "pandas",
+        "notebook_path": "output/NB-01_demo.ipynb", "macro_params": ["ANIO"],
+    }]}
+    translations = {"A": _nt("A", [
+        "q = text('SELECT 1')\n"
+        "with engine.begin() as conn:\n"
+        "    conn.execute(q)\n"
+        "periodo = Path('data') / str(ANIO)\n",
+    ], imports=["from sqlalchemy import text", "from pathlib import Path"])}
+    _, failures = assemble_notebooks(
+        plan, translations, tmp_path / "output", db_bootstrap=True
+    )
+    assert failures == []
+
+
+def test_comprehensions_lambdas_and_functions_do_not_trip_the_check(tmp_path: Path) -> None:
+    """Ante la duda el chequeo calla: un falso positivo manda a needs_human un
+    nodo que estaba bien, que es el error caro."""
+    translations = {"A": _nt("A", [
+        "pesos = [(321, 0.2), (511, 0.33)]\n"
+        "partes = [sector for sector, peso in pesos if peso > 0.1]\n"
+        "por_clave = {s: p for s, p in pesos}\n"
+        "def ajustar(df, factor=1.0):\n"
+        "    return df.assign(DATO=lambda x: x['DATO'] * factor * escala)\n"
+        "escala = 2.0\n"
+        "salida = ajustar(pd.DataFrame({'DATO': [1.0]}))\n"
+    ])}
+    _, failures = assemble_notebooks(_plan("A"), translations, tmp_path / "output")
+    assert failures == []
+
+
+def test_fstring_that_merely_mentions_a_sql_verb_is_fine() -> None:
+    """Un print de avance no es SQL dinámico: se exige forma de sentencia."""
+    assert check_node_translation(_nt("A", [
+        'n = 3\nprint(f"insert completado: {n} filas escritas")\n'
+    ])) is None
+
+
+def test_fstring_that_builds_a_real_statement_still_fails() -> None:
+    for src in (
+        'q = f"SELECT * FROM {tabla}"\n',
+        'q = f"INSERT INTO {tabla} VALUES (1)"\n',
+        'q = f"DELETE FROM {tabla}"\n',
+        'q = f"UPDATE {tabla} SET x = 1"\n',
+    ):
+        f = check_node_translation(_nt("A", [src]))
+        assert f is not None and f.reason == "forbidden_pattern", src

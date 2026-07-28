@@ -2,6 +2,7 @@ id: data-step-merge
 strategy: pandas
 placement: pandas
 node_label: Cruza clientes y ventas
+input_datasets: [work.clientes, work.ventas]
 sas_code: |
   data work.cruce;
     merge work.clientes(in=a) work.ventas(in=b);

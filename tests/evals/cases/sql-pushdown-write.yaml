@@ -2,6 +2,7 @@ id: sql-pushdown-write
 strategy: sql_pushdown
 placement: sql_pushdown
 node_label: Resumen regional escrito en la BD
+input_datasets: [gob.ventas]
 sas_code: |
   proc sql;
     create table gob.resumen_regional as

@@ -43,6 +43,10 @@ def _target(case: dict) -> dict:
         "node_label": case.get("node_label", case["id"]),
         "strategy": case["strategy"],
         "placement": case.get("placement"),
+        # Lo que el nodo consume. El chequeo de nombres sin definir lo necesita:
+        # un caso del eval es UN nodo aislado, así que sus entradas no las
+        # define ninguna celda anterior — las declara el plan.
+        "input_datasets": case.get("input_datasets", []),
         "notebook_path": "output/NB-01_eval.ipynb",
     }
 
@@ -64,7 +68,8 @@ def _assert_expectations(case: dict, nt: NodeTranslation, tmp_path: Path) -> Non
     # El ensamblador la acepta end-to-end (notebook + mapping).
     target = _target(case)
     mapping, failures = assemble_notebooks(
-        {"targets": [target]}, {nt.node_id: nt}, tmp_path / "output"
+        {"targets": [target]}, {nt.node_id: nt}, tmp_path / "output",
+        db_bootstrap=case.get("placement") != "pandas",
     )
     assert failures == []
     assert mapping.mappings[0].node_id == case["id"]

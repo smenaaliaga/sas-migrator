@@ -2,6 +2,7 @@ id: proc-sql-join
 strategy: sql_pushdown
 placement: sql_pushdown
 node_label: Resumen por región
+input_datasets: [gob.ventas, gob.sucursales]
 sas_code: |
   proc sql;
     create table gob.resumen as

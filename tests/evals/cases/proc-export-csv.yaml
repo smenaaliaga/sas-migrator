@@ -2,6 +2,7 @@ id: proc-export-csv
 strategy: pandas
 placement: pandas
 node_label: Exporta resumen a CSV
+input_datasets: [work.resumen]
 sas_code: |
   proc export data=work.resumen
     outfile="C:\salidas\resumen.csv"

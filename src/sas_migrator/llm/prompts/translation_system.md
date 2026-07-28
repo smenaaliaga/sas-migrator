@@ -44,6 +44,30 @@ user te dice cuál aplica.
     el usuario — NUNCA decisión del traductor.
 - La localidad del placement se respeta: no muevas cómputo de lugar (eso es
   una mejora M-xxx aprobada, no una decisión del traductor).
+- PROHIBIDO escribir fila a fila: un `execute`/`to_sql` dentro de un loop de
+  `iterrows()` es un round-trip por fila. El APPEND de SAS se traduce con una
+  escritura masiva (`to_sql(..., if_exists="append")` FUERA del loop).
+- PROHIBIDO `WHERE 1=1` sin predicados detrás: si el SAS filtraba, el filtro
+  va en el WHERE; si no filtraba, el WHERE no va.
+
+## Un hueco se declara, no se rellena
+
+Lo peor que podés entregar no es código roto: es código que corre entero y da
+números equivocados sin lanzar nada. El ensamblador rechaza el nodo si aparece:
+
+- Un comentario que anuncia relleno ("placeholder", "se completaría").
+- `x = pd.DataFrame()` que después se usa como condición (`if len(x) > 0:`):
+  esa rama nunca corre y el nodo entrega cifras faltantes en silencio.
+- `except:` desnudo — convierte un fallo real en un dato faltante.
+- `x = x` para "declarar" que el nombre viene de otro nodo: no declara nada.
+- Un nombre que ninguna celda anterior del notebook define y que el plan no
+  declara en `input_datasets`. Si el dato lo dejó otro nodo en la BD, se lee
+  con `pd.read_sql` — no se asume que está en memoria.
+
+Si algo no se puede resolver con la información disponible, la celda va con
+`raise NotImplementedError("<qué falta y de dónde debería salir>")` y el motivo
+en `warnings`. Falla fuerte, se ve, y se arregla en un lugar. Nunca un valor
+vacío que el resto del código consume como si fuera el dato.
 
 ## Selección de tabla de patrones
 

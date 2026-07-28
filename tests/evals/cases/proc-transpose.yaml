@@ -2,6 +2,7 @@ id: proc-transpose
 strategy: pandas
 placement: pandas
 node_label: Pivotea ventas por mes
+input_datasets: [work.ventas_mes]
 sas_code: |
   proc transpose data=work.ventas_mes out=work.ventas_ancho prefix=mes_;
     by id_cliente;

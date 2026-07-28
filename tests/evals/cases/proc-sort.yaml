@@ -2,6 +2,7 @@ id: proc-sort
 strategy: pandas
 placement: pandas
 node_label: Ordena por total
+input_datasets: [work.ventas]
 sas_code: |
   proc sort data=work.ventas out=work.ventas_ord;
     by descending total id_cliente;

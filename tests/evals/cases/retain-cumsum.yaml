@@ -2,6 +2,7 @@ id: retain-cumsum
 strategy: pandas
 placement: pandas
 node_label: Acumulado de montos por cliente
+input_datasets: [work.ventas]
 sas_code: |
   data work.acumulado;
     set work.ventas;

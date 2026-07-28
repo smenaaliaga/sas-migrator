@@ -2,6 +2,7 @@ id: data-step-filter
 strategy: pandas
 placement: pandas
 node_label: Filtra ventas positivas
+input_datasets: [work.ventas]
 sas_code: |
   data work.ventas_pos;
     set work.ventas;

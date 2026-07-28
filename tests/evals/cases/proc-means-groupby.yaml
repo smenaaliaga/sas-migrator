@@ -2,6 +2,7 @@ id: proc-means-groupby
 strategy: pandas
 placement: pandas
 node_label: Resumen de montos por region
+input_datasets: [work.ventas]
 sas_code: |
   proc means data=work.ventas noprint;
     class region;

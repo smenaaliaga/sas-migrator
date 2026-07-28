@@ -69,9 +69,12 @@ def fake_translation(user: str) -> NodeTranslation:
         node_id=head["node_id"],
         node_label=head["node_label"],
         strategy=head["strategy"],
+        # Con columnas de verdad: un `pd.DataFrame()` vacío asignado una sola vez
+        # y después usado como condición es el patrón `empty_frame_guard`, y el
+        # chequeo estático lo rechaza — con razón.
         cells=[
-            "df = pd.DataFrame()\n"
-            "resultado = df.sort_values(list(df.columns)) if len(df.columns) else df\n"
+            "ventas = pd.DataFrame({'cliente': ['a'], 'monto': [1.0]})\n"
+            "resultado = ventas.sort_values(list(ventas.columns))\n"
         ],
         traceability=Traceability(
             sas_construct="PROC SQL", business_rule="consolida ventas"

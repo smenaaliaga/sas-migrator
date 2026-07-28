@@ -13,7 +13,15 @@ el fallo como needs_human):
 - imports resolubles vía ``importlib.util.find_spec`` (sin importar);
 - patrones prohibidos: ``to_parquet``, ``duckdb``, y SQL dinámico por f-string
   (JoinedStr cuyo texto constante contiene SELECT/INSERT/UPDATE/DELETE);
-- strategy del NodeTranslation debe coincidir con la del target del plan.
+- strategy del NodeTranslation debe coincidir con la del target del plan;
+- relleno que aparenta funcionar: placeholders, ``except:`` desnudo,
+  autoasignación, DataFrame vacío bajo guardia, ``WHERE 1=1`` sin predicados;
+- escritura fila a fila (``iterrows()`` + ``execute``/``to_sql``).
+
+``check_node_translation`` es local al nodo, así que lo corre TAMBIÉN la fase
+6 apenas traduce, con reintento: un nodo que no pasa nunca llega al disco.
+El chequeo de nombres sin definir (``core.validation.symbols``) necesita el
+notebook entero y solo puede correr acá, al ensamblar.
 
 Convención de rutas (única): ``notebook_path`` es SIEMPRE relativo a la raíz
 del workspace con prefijo ``output/`` — tanto en el plan como en el mapping.
@@ -34,13 +42,18 @@ from sas_migrator.core.models.translation import (
     NodeTranslation,
     SasPythonMapping,
 )
+from sas_migrator.core.validation.symbols import undefined_in_cells
 
 BASELINE_IMPORTS = ("import pandas as pd", "import numpy as np")
 # drop table / if_exists=replace: destruyen DDL (permisos, índices) — el
 # reemplazo estilo SAS se replica con DELETE FROM sin WHERE + INSERT.
 FORBIDDEN_SUBSTRINGS = ("to_parquet", "duckdb", "drop table")
 _REPLACE_WRITE = re.compile(r"if_exists\s*=\s*['\"]replace['\"]")
-_SQL_WORDS = ("select ", "insert ", "update ", "delete ")
+# Forma de sentencia, no palabra suelta: un print(f"insert completado: {n}")
+# contiene "insert " y no es SQL. Se exige el par verbo+cláusula.
+_SQL_STATEMENT = re.compile(
+    r"(?is)\b(select\b.*?\bfrom\b|insert\s+into\b|update\b.*?\bset\b|delete\s+from\b)"
+)
 
 # Scanner de secretos (hardening Etapa 6): antes era una regla de prompt —
 # ahora es código. Un secreto literal en una celda es fallo de ensamblado.
@@ -55,7 +68,7 @@ _SECRET_PATTERNS = (
 @dataclass
 class NodeAssemblyFailure:
     node_id: str
-    reason: str  # syntax_error | unresolvable_import | forbidden_pattern | strategy_mismatch | empty_translation | secret_detected | absolute_path
+    reason: str  # syntax_error | unresolvable_import | forbidden_pattern | strategy_mismatch | empty_translation | secret_detected | absolute_path | placeholder_stub | bare_except | self_assignment | empty_frame_guard | sql_no_op | row_by_row_write | undefined_name
     detail: str
 
 
@@ -80,9 +93,9 @@ def _fstring_sql(tree: ast.AST) -> str | None:
             text = "".join(
                 v.value for v in node.values
                 if isinstance(v, ast.Constant) and isinstance(v.value, str)
-            ).lower()
-            if any(word in text for word in _SQL_WORDS):
-                return text[:120]
+            )
+            if _SQL_STATEMENT.search(text):
+                return " ".join(text.split())[:120]
     return None
 
 
@@ -109,8 +122,166 @@ def _absolute_path_literal(tree: ast.AST) -> str | None:
     return None
 
 
+# ── Relleno que aparenta funcionar ──────────────────────────────────────────
+#
+# Esta familia de chequeos no busca código roto: busca código que corre entero
+# y entrega números equivocados sin lanzar nada. Es lo que produce un traductor
+# cuando no supo resolver algo y no quiso decirlo. El estándar del proyecto es
+# que un hueco sea `raise NotImplementedError(...)` — ruidoso y localizable —,
+# nunca un DataFrame vacío ni un `except:` que se traga el fallo.
+
+_PLACEHOLDER_WORDS = re.compile(
+    r"(?i)\b(placeholder|marcador de posici[oó]n|por ahora se deja|se completar[ií]a)\b"
+)
+
+
+def _placeholder_comment(src: str) -> str | None:
+    """Comentario que anuncia un relleno.
+
+    Se tokeniza en vez de buscar '#' en el texto: así un '#' dentro de un
+    string (un literal de SQL, un nombre de columna) no cuenta como comentario.
+    """
+    import io
+    import tokenize
+
+    try:
+        tokens = list(tokenize.generate_tokens(io.StringIO(src).readline))
+    except (tokenize.TokenError, IndentationError, SyntaxError):
+        return None
+    for tok in tokens:
+        if tok.type == tokenize.COMMENT and _PLACEHOLDER_WORDS.search(tok.string):
+            return tok.string.strip()[:100]
+    return None
+
+
+def _is_empty_frame_call(node: ast.AST) -> bool:
+    if not isinstance(node, ast.Call) or node.args or node.keywords:
+        return False
+    func = node.func
+    if isinstance(func, ast.Attribute):
+        return func.attr == "DataFrame"
+    return isinstance(func, ast.Name) and func.id == "DataFrame"
+
+
+def _empty_frame_guard(trees: list[ast.AST]) -> str | None:
+    """``x = pd.DataFrame()`` y después ``if len(x) > 0:`` — la rama muere.
+
+    Es el patrón exacto que produce cifras faltantes sin una sola excepción: el
+    traductor deja el DataFrame vacío "para que lo cargue el revisor" y el
+    resto del nodo se saltea en silencio.
+
+    Solo se marca si el nombre se asigna UNA vez en todo el nodo. Un acumulador
+    (``out = pd.DataFrame()`` … ``out = pd.concat(...)``) se reasigna, y ahí el
+    guard sí puede entrar: no es este bug.
+    """
+    assign_count: dict[str, int] = {}
+    empty: set[str] = set()
+    for tree in trees:
+        for node in ast.walk(tree):
+            targets: list[ast.expr] = []
+            if isinstance(node, ast.Assign):
+                targets = list(node.targets)
+            elif isinstance(node, (ast.AugAssign, ast.AnnAssign)):
+                targets = [node.target]
+            elif isinstance(node, (ast.For, ast.AsyncFor)):
+                targets = [node.target]
+            for target in targets:
+                for sub in ast.walk(target):
+                    if isinstance(sub, ast.Name):
+                        assign_count[sub.id] = assign_count.get(sub.id, 0) + 1
+            if (
+                isinstance(node, ast.Assign)
+                and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name)
+                and _is_empty_frame_call(node.value)
+            ):
+                empty.add(node.targets[0].id)
+
+    suspect = {name for name in empty if assign_count.get(name, 0) == 1}
+    if not suspect:
+        return None
+    for tree in trees:
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.If, ast.IfExp)):
+                continue
+            for sub in ast.walk(node.test):
+                if isinstance(sub, ast.Name) and sub.id in suspect:
+                    return sub.id
+    return None
+
+
+def _bare_except(tree: ast.AST) -> int | None:
+    """``except:`` sin tipo — convierte un fallo real en un dato faltante."""
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ExceptHandler) and node.type is None:
+            return node.lineno
+    return None
+
+
+def _self_assignment(tree: ast.AST) -> str | None:
+    """``t_sectorizacion = t_sectorizacion``.
+
+    El traductor lo escribe para "declarar" que el nombre viene de otro nodo.
+    No declara nada: o el nombre ya existe y la línea sobra, o no existe y esto
+    es un NameError disfrazado de contrato.
+    """
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Assign)
+            and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name)
+            and isinstance(node.value, ast.Name)
+            and node.targets[0].id == node.value.id
+        ):
+            return node.targets[0].id
+    return None
+
+
+_WHERE_NOOP = re.compile(r"(?is)\bwhere\s+1\s*=\s*1\b(?!.*?\b(and|or)\b)")
+
+
+def _sql_no_op(tree: ast.AST) -> str | None:
+    """``WHERE 1=1`` sin ningún predicado detrás: el filtro del SAS se perdió."""
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Constant)
+            and isinstance(node.value, str)
+            and _WHERE_NOOP.search(node.value)
+        ):
+            return " ".join(node.value.split())[:100]
+    return None
+
+
+def _calls_iterrows(node: ast.AST) -> bool:
+    for sub in ast.walk(node):
+        if isinstance(sub, ast.Call) and isinstance(sub.func, ast.Attribute) \
+                and sub.func.attr in ("iterrows", "itertuples"):
+            return True
+    return False
+
+
+def _row_by_row_write(tree: ast.AST) -> str | None:
+    """``for _, row in df.iterrows(): conn.execute(INSERT ...)``.
+
+    Un round-trip por fila contra la base. La traducción correcta de un APPEND
+    de SAS es una escritura masiva (``to_sql`` fuera del loop, o executemany).
+    """
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.For, ast.AsyncFor)) or not _calls_iterrows(node.iter):
+            continue
+        for inner in ast.walk(node):
+            if isinstance(inner, ast.Call) and isinstance(inner.func, ast.Attribute) \
+                    and inner.func.attr in ("execute", "executemany", "to_sql"):
+                return inner.func.attr
+    return None
+
+
 def check_node_translation(nt: NodeTranslation) -> NodeAssemblyFailure | None:
-    """Primer fallo estático del nodo, o None si es ensamblable."""
+    """Primer fallo estático del nodo, o None si es ensamblable.
+
+    Local al nodo a propósito: así lo puede correr la fase 6 apenas traduce,
+    antes de persistir, y usar el ``detail`` como feedback del reintento.
+    """
     if not any(cell.strip() for cell in nt.cells):
         return NodeAssemblyFailure(nt.node_id, "empty_translation", "sin celdas de código")
 
@@ -136,6 +307,16 @@ def check_node_translation(nt: NodeTranslation) -> NodeAssemblyFailure | None:
                     f"posible credencial literal en el código: '{m.group(0)[:30]}…' — "
                     "usar variables de entorno",
                 )
+
+    for i, cell in enumerate(nt.cells):
+        comment = _placeholder_comment(cell)
+        if comment is not None:
+            return NodeAssemblyFailure(
+                nt.node_id, "placeholder_stub",
+                f"celda {i}: relleno anunciado en un comentario ({comment}). Un hueco "
+                "va como raise NotImplementedError(...) — falla fuerte y se ve — "
+                "nunca como valor vacío que el resto del código consume",
+            )
 
     trees: list[ast.AST] = []
     for i, cell in enumerate(nt.cells):
@@ -167,7 +348,47 @@ def check_node_translation(nt: NodeTranslation) -> NodeAssemblyFailure | None:
                 f"ruta absoluta literal '{path[:60]}' — el estándar es ruta "
                 "relativa al workspace (declarar el cambio en warnings)",
             )
+        lineno = _bare_except(tree)
+        if lineno is not None:
+            return NodeAssemblyFailure(
+                nt.node_id, "bare_except",
+                f"'except:' desnudo (línea {lineno}) — convierte un fallo real en "
+                "un dato faltante silencioso; capturar la excepción concreta o "
+                "dejar que propague",
+            )
+        name = _self_assignment(tree)
+        if name is not None:
+            return NodeAssemblyFailure(
+                nt.node_id, "self_assignment",
+                f"'{name} = {name}' no declara nada: si el nombre viene de un nodo "
+                "anterior, la línea sobra; si no viene, es un NameError disfrazado",
+            )
+        sql = _sql_no_op(tree)
+        if sql is not None:
+            return NodeAssemblyFailure(
+                nt.node_id, "sql_no_op",
+                f"'WHERE 1=1' sin predicados: {sql} — el filtro del SAS original "
+                "se perdió y la consulta trae la tabla entera",
+            )
+        call = _row_by_row_write(tree)
+        if call is not None:
+            return NodeAssemblyFailure(
+                nt.node_id, "row_by_row_write",
+                f"'{call}' dentro de un loop de iterrows(): un round-trip por fila. "
+                "El APPEND de SAS se traduce con una escritura masiva (to_sql fuera "
+                "del loop)",
+            )
         roots |= _import_root_names(tree)
+
+    frame = _empty_frame_guard(trees)
+    if frame is not None:
+        return NodeAssemblyFailure(
+            nt.node_id, "empty_frame_guard",
+            f"'{frame}' se asigna una sola vez, a un DataFrame vacío, y después se "
+            "usa como condición: esa rama nunca corre y el nodo entrega números "
+            "faltantes sin error. Cargar el dato de verdad o raise NotImplementedError",
+        )
+
     for name in sorted(roots):
         try:
             resolvable = name != "." and importlib.util.find_spec(name) is not None
@@ -236,6 +457,77 @@ def _parameters_cell(nb_targets: list[dict], values: dict | None = None):
     return cell
 
 
+def _macro_param_names(nb_targets: list[dict]) -> set[str]:
+    return {
+        str(v) for t in nb_targets for v in (t.get("macro_params") or []) if str(v).strip()
+    }
+
+
+def _declared_input_names(nb_targets: list[dict]) -> set[str]:
+    """Nombres que el plan autoriza a usar sin haberlos definido en el notebook.
+
+    ``input_datasets`` dice qué consume el nodo. Un dataset SAS ``WORK.VENTAS``
+    llega al Python como ``ventas`` (y a veces como ``work_ventas``): ambas
+    formas cuentan. Usar un nombre DECLARADO es legítimo aunque el notebook no
+    lo defina — lo trae un paso previo o el flujo anterior. Usar uno que nadie
+    declaró ni definió es el bug que buscamos.
+    """
+    names: set[str] = set()
+    for target in nb_targets:
+        for dataset in (target.get("input_datasets") or []):
+            raw = str(dataset).strip()
+            if not raw:
+                continue
+            names.add(raw.split(".")[-1].lower())
+            names.add(raw.replace(".", "_").lower())
+    return names
+
+
+def _names_bound_by_imports(import_lines: list[str]) -> set[str]:
+    names: set[str] = set()
+    for line in import_lines:
+        try:
+            tree = ast.parse(line)
+        except SyntaxError:
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.Import, ast.ImportFrom)):
+                names |= {
+                    (alias.asname or alias.name.split(".")[0]) for alias in node.names
+                }
+    return names
+
+
+def _reject_undefined_names(
+    valid: list[NodeTranslation], known: set[str]
+) -> tuple[list[NodeTranslation], list[NodeAssemblyFailure]]:
+    """Filtra los nodos que usan nombres que el notebook nunca define.
+
+    Recorre en orden de ejecución acumulando lo que cada nodo deja definido. Un
+    nodo rechazado igual aporta sus definiciones al set: así el nodo siguiente
+    se juzga por lo suyo y no arrastra la culpa del anterior — se reporta la
+    causa raíz una vez, no una cascada.
+    """
+    kept: list[NodeTranslation] = []
+    failures: list[NodeAssemblyFailure] = []
+    visible = set(known)
+    for nt in valid:
+        missing, defined = undefined_in_cells(list(nt.cells), visible)
+        visible |= defined | _names_bound_by_imports(list(nt.imports))
+        if missing:
+            failures.append(NodeAssemblyFailure(
+                nt.node_id, "undefined_name",
+                f"usa {len(missing)} nombre(s) que ninguna celda anterior define: "
+                f"{', '.join(missing[:8])}"
+                + (" …" if len(missing) > 8 else "")
+                + ". Si vienen de otro nodo, ese nodo los dejó en la base (hay que "
+                "leerlos con pd.read_sql) o no existen",
+            ))
+            continue
+        kept.append(nt)
+    return kept, failures
+
+
 def assemble_notebooks(
     plan: dict,
     translations: dict[str, NodeTranslation],
@@ -296,6 +588,20 @@ def assemble_notebooks(
                 line = line.strip()
                 if line and line not in imports:
                     imports.append(line)
+
+        # Nombres sin definir: necesita el notebook entero (imports agregados,
+        # parámetros, y los nodos anteriores en orden), así que va acá y no en
+        # check_node_translation, que es local al nodo.
+        known = (
+            _names_bound_by_imports(imports)
+            | _macro_param_names(nb_targets)
+            | _declared_input_names(nb_targets)
+        )
+        known.add("faltantes")  # lo define la celda de parámetros
+        if db_bootstrap:
+            known.add("engine")
+        valid, undefined_failures = _reject_undefined_names(valid, known)
+        failures.extend(undefined_failures)
 
         config_source = (
             "# ========= Celda 1: Configuración =========\n" + "\n".join(imports) + "\n"

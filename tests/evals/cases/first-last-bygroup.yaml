@@ -2,6 +2,7 @@ id: first-last-bygroup
 strategy: pandas
 placement: pandas
 node_label: Ultima compra por cliente
+input_datasets: [work.ventas]
 sas_code: |
   proc sort data=work.ventas; by id_cliente fecha; run;
   data work.ultima_compra;
