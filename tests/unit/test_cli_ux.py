@@ -230,7 +230,10 @@ def test_iterate_toma_la_descripcion_como_argumento(tmp_path: Path, monkeypatch)
     ws = make_workspace(tmp_path)
     visto: dict = {}
 
-    def _fake_iterate(self, description, request_type="enhancement", affected_nodes=None):
+    def _fake_iterate(
+        self, description, request_type="enhancement", affected_nodes=None,
+        *, resume=False,
+    ):
         visto.update(
             description=description, request_type=request_type, nodes=affected_nodes
         )
