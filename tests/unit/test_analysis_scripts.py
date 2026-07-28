@@ -6,9 +6,9 @@ paquete sas_migrator).
 from __future__ import annotations
 
 import json
-import sys
 
 import pandas as pd
+import pytest
 
 import sas_migrator.core.analysis.analyze as ga
 import sas_migrator.core.analysis.indexes as bi
@@ -148,12 +148,7 @@ def test_build_indexes_end_to_end(tmp_path):
     (state / "nodes" / "CodeTask-1.json").write_text(json.dumps(node), encoding="utf-8")
     (state / "flow_graph.json").write_text(json.dumps({"edges": []}), encoding="utf-8")
 
-    sys_argv = sys.argv
-    try:
-        sys.argv = ["build_indexes.py", "--state-dir", str(state)]
-        bi.main()
-    finally:
-        sys.argv = sys_argv
+    bi.build(state)
 
     idx = json.loads((state / "nodes_index.json").read_text(encoding="utf-8"))
     assert idx["total_nodes"] == 1
@@ -165,6 +160,13 @@ def test_build_indexes_end_to_end(tmp_path):
     assert gg["source"] == "libname_statement" and gg["engine_hint"] == "ODBC"
     tables = {t["table"]: t["access"] for t in gg["tables"]}
     assert "IN" in tables and "OUT" in tables
+
+
+def test_build_indexes_sin_nodos_es_runtime_error_no_systemexit(tmp_path):
+    state = tmp_path / "state"
+    (state / "nodes").mkdir(parents=True)
+    with pytest.raises(RuntimeError, match="No hay nodos"):
+        bi.build(state)
 
 
 # ── run_validation: cascada con DataFrames sintéticos ───────────────────────

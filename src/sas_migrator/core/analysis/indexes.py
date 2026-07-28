@@ -115,15 +115,16 @@ def write_refs(code: str) -> set[tuple[str, str]]:
             if m.group(1).upper() != "WORK"}
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description="Construye nodes_index.json y db_evidence.json")
-    parser.add_argument("--state-dir", default="state/", help="Directorio de estado")
-    args = parser.parse_args()
+def build(state_dir: Path | str) -> None:
+    """Construye nodes_index.json y db_evidence.json en state_dir.
 
-    state = Path(args.state_dir)
+    API de módulo: los errores son RuntimeError (el pipeline los captura y
+    reporta), nunca SystemExit — eso es asunto del wrapper CLI `main()`.
+    """
+    state = Path(state_dir)
     nodes = load_nodes(state / "nodes")
     if not nodes:
-        raise SystemExit(f"No hay nodos en {state / 'nodes'}")
+        raise RuntimeError(f"No hay nodos en {state / 'nodes'}")
     db_engines = resolve_db_engines(state.resolve().parent)
 
     flow_graph = json.loads((state / "flow_graph.json").read_text(encoding="utf-8"))
@@ -257,6 +258,16 @@ def main() -> None:
     print(f"✓ nodes_index.json: {len(nodes)} nodos ({kb('nodes_index.json'):.1f} KB)")
     print(f"✓ db_evidence.json: {len(librefs_out)} librefs, "
           f"{len(unverified)} prefijos por confirmar ({kb('db_evidence.json'):.1f} KB)")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Construye nodes_index.json y db_evidence.json")
+    parser.add_argument("--state-dir", default="state/", help="Directorio de estado")
+    args = parser.parse_args()
+    try:
+        build(args.state_dir)
+    except RuntimeError as exc:
+        raise SystemExit(str(exc)) from exc
 
 
 if __name__ == "__main__":

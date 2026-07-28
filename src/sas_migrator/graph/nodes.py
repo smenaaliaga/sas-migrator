@@ -5,8 +5,6 @@ del grafo lo persiste el checkpointer.
 
 from __future__ import annotations
 
-import contextlib
-import sys
 from pathlib import Path
 
 from sas_migrator.core import intake as core_intake
@@ -23,21 +21,6 @@ from sas_migrator.graph.state import MigrationGraphState
 def _paths(state: MigrationGraphState) -> tuple[Path, Path, Path]:
     ws = Path(state["workspace"])
     return ws, ws / "state", ws / "output"
-
-
-@contextlib.contextmanager
-def _argv(args: list[str]):
-    """Invoca mains argparse-based del core sin subprocess.
-
-    Deuda anotada: los módulos con main(argv) implícito (indexes) deberían
-    exponer una función build(state_dir); limpiar en Etapa 2.
-    """
-    old = sys.argv
-    sys.argv = ["sas-migrator", *args]
-    try:
-        yield
-    finally:
-        sys.argv = old
 
 
 # ── Fase 0: intake ───────────────────────────────────────────────────────────
@@ -71,8 +54,7 @@ def phase2_analysis(state: MigrationGraphState) -> dict:
 
     extract_egp(egp, st)
     core_analyze.main(st)
-    with _argv(["--state-dir", str(st)]):
-        core_indexes.main()
+    core_indexes.build(st)
 
     # Parser v2: placement + inputs/outputs recuperados + reporte comparativo.
     from sas_migrator.core.parser.enrich import enrich_state
