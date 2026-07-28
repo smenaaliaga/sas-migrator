@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from enum import Enum
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -34,6 +35,9 @@ class TranslationTarget(BaseModel):
     approved_improvements: list[str] = Field(default_factory=list)
     preprocess_steps: list[str] = Field(default_factory=list)
     dependencies: list[str] = Field(default_factory=list)
+    # Variables macro que el nodo usa (&ANIO): suben a la celda de parámetros
+    # del notebook. Sin este campo en el modelo, validar el plan las borraba.
+    macro_params: list[str] = Field(default_factory=list)
     notes: str = ""
 
 
@@ -45,6 +49,9 @@ class TranslationPlan(BaseModel):
     output_strategy: OutputStrategy = OutputStrategy.NOTEBOOK_FLOW
     generated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     targets: list[TranslationTarget] = Field(default_factory=list)
+    # Valores de las macro vars (project_config.yaml → run.macro_params); el
+    # ensamblador escribe la celda de parámetros desde acá sin releer config.
+    macro_param_values: dict[str, Any] = Field(default_factory=dict)
     ignored_nodes: list[str] = Field(default_factory=list)
     global_improvements: list[str] = Field(default_factory=list)
     assumptions: list[str] = Field(default_factory=list)

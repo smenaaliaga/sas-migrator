@@ -135,6 +135,13 @@
           "title": "Dependencies",
           "type": "array"
         },
+        "macro_params": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Macro Params",
+          "type": "array"
+        },
         "notes": {
           "default": "",
           "title": "Notes",
@@ -175,6 +182,11 @@
       },
       "title": "Targets",
       "type": "array"
+    },
+    "macro_param_values": {
+      "additionalProperties": true,
+      "title": "Macro Param Values",
+      "type": "object"
     },
     "ignored_nodes": {
       "items": {

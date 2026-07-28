@@ -290,6 +290,12 @@ def build(state: Path) -> dict:
                 str(o) for o in node_doc.get("outputs", [])
                 if "." in str(o) and not str(o).upper().startswith("WORK.")
             })
+            # Datasets del nodo (vista v2 del parser, ya calificados). Antes
+            # quedaban [] "para la fase 6" — pero la fase 6 nunca los
+            # resolvía: el traductor trabajaba a ciegas y los chequeos de
+            # nombres declarados comparaban contra un conjunto vacío.
+            input_datasets = sorted({str(i) for i in node_doc.get("inputs", [])})
+            output_datasets = sorted({str(o) for o in node_doc.get("outputs", [])})
             targets.append({
                 "node_id": nid,
                 "node_label": meta.get("label", ""),
@@ -297,8 +303,8 @@ def build(state: Path) -> dict:
                 "strategy": choose_strategy(placement),
                 "placement": placement,
                 "notebook_path": notebook_path,
-                "input_datasets": [],
-                "output_datasets": [],
+                "input_datasets": input_datasets,
+                "output_datasets": output_datasets,
                 "input_dir": None,
                 "input_files": node_inputs.get(nid, []),
                 "output_files": [],
@@ -314,7 +320,7 @@ def build(state: Path) -> dict:
     assumptions = [
         "Plan generado por build_translation_plan.py; el agente debe revisar strategy/notes y el usuario aprobar.",
         "strategy derivada del placement efectivo (clasificador + overrides de la entrevista B4b); utility → Python plano.",
-        "output_tables = salidas calificadas no-WORK del nodo (vista v2); input/output_datasets se resuelven en la Fase 6.",
+        "output_tables = salidas calificadas no-WORK del nodo (vista v2); input/output_datasets = vista v2 del parser por nodo.",
     ]
     for nid in ambiguous_nodes:
         assumptions.append(

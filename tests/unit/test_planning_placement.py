@@ -91,3 +91,44 @@ def test_notebook_paths_are_workspace_relative(tmp_path: Path) -> None:
     state = _state(tmp_path, placements={"A": "pandas"})
     plan = planning.build(state)
     assert plan["targets"][0]["notebook_path"] == "output/NB-01_flujo.ipynb"
+
+
+def test_datasets_se_pueblan_desde_los_node_files(tmp_path: Path) -> None:
+    """La info existía en state/nodes/*.json y el plan la dejaba [] — el
+    traductor trabajaba a ciegas y _declared_input_names comparaba contra vacío."""
+    state = _state(tmp_path, placements={"A": "pandas"})
+    (state / "nodes").mkdir()
+    (state / "nodes" / "A.json").write_text(
+        json.dumps({
+            "id": "A",
+            "inputs": ["WORK.BASE", "GG.CLIENTES"],
+            "outputs": ["WORK.RESULT", "GG.SALIDA"],
+        }),
+        encoding="utf-8",
+    )
+    plan = planning.build(state)
+    target = plan["targets"][0]
+    assert target["input_datasets"] == ["GG.CLIENTES", "WORK.BASE"]
+    assert target["output_datasets"] == ["GG.SALIDA", "WORK.RESULT"]
+    assert target["output_tables"] == ["GG.SALIDA"]  # solo no-WORK calificadas
+
+
+def test_el_modelo_no_borra_claves_del_plan_construido(tmp_path: Path) -> None:
+    """Anti-deriva plan↔modelo: validar el dict que build() produce y volver a
+    dumpear tiene que conservar TODAS las claves. macro_params y
+    macro_param_values eran campos fantasma: el dict los traía y el modelo los
+    tiraba en silencio."""
+    from sas_migrator.core.models.translation import TranslationPlan
+
+    state = _state(tmp_path, placements={"A": "pandas"})
+    plan = planning.build(state)
+    round_tripped = TranslationPlan.model_validate(plan).model_dump(mode="json")
+
+    assert set(plan) <= set(round_tripped), (
+        f"claves perdidas al validar: {set(plan) - set(round_tripped)}"
+    )
+    target_keys = set(plan["targets"][0])
+    model_target_keys = set(round_tripped["targets"][0])
+    assert target_keys <= model_target_keys, (
+        f"claves de target perdidas: {target_keys - model_target_keys}"
+    )
