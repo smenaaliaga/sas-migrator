@@ -19,8 +19,13 @@ from sas_migrator.core.utils.schema_validation import check_gate
 from sas_migrator.graph import nodes
 from sas_migrator.graph.state import GateRecord, MigrationGraphState
 
-# Orden de fases: (nombre de nodo, función, fase que valida su gate)
-PHASES: list[tuple[str, object, int]] = [
+# Orden de fases: (nombre de nodo, función, fase que valida su gate).
+# Una fila con fase None es un sub-nodo intermedio: se encadena directo al
+# siguiente sin gate — la fase 7 son tres sub-nodos para que el interrupt de
+# autorización viva en su propia frontera de checkpoint (ADR-0009). El gate
+# sigue siendo el ÚNICO camino a la fase siguiente: solo la última fila de
+# cada fase desemboca en su gate.
+PHASES: list[tuple[str, object, int | None]] = [
     ("phase0_intake", nodes.phase0_intake, 0),
     ("phase1_initial_interview", nodes.phase1_initial_interview, 1),
     ("phase2_analysis", nodes.phase2_analysis, 2),
@@ -28,9 +33,23 @@ PHASES: list[tuple[str, object, int]] = [
     ("phase4_post_interview", nodes.phase4_post_interview, 4),
     ("phase5_plan", nodes.phase5_plan, 5),
     ("phase6_generation", nodes.phase6_generation, 6),
-    ("phase7_validation", nodes.phase7_validation, 7),
+    ("phase7_verify", nodes.phase7_verify, None),
+    ("phase7_authorize", nodes.phase7_authorize, None),
+    ("phase7_execute_validate", nodes.phase7_execute_validate, 7),
     ("phase8_docs", nodes.phase8_docs, 8),
 ]
+
+# Nodo de ENTRADA de cada fase (la primera fila del tramo que desemboca en su
+# gate): es lo que rewind_to_phase necesita — rebobinar la fase 7 arranca en
+# phase7_verify, no en el sub-nodo que toca el gate.
+PHASE_ENTRY_NODE: dict[int, str] = {}
+_pending_entry: str | None = None
+for _name, _fn, _ph in PHASES:
+    if _pending_entry is None:
+        _pending_entry = _name
+    if _ph is not None:
+        PHASE_ENTRY_NODE[_ph] = _pending_entry
+        _pending_entry = None
 
 
 def _project_migration_state(state: MigrationGraphState, phase: int, passed: bool) -> None:
@@ -86,13 +105,18 @@ def build_graph(checkpointer=None):
 
     for name, fn, phase in PHASES:
         g.add_node(name, fn)
-        g.add_node(f"gate{phase}", _make_gate_node(phase))
+        if phase is not None:
+            g.add_node(f"gate{phase}", _make_gate_node(phase))
     g.add_node("gate_blocked", gate_blocked)
     g.add_node("finish", nodes.finish)
 
     g.set_entry_point(PHASES[0][0])
 
     for i, (name, _fn, phase) in enumerate(PHASES):
+        if phase is None:
+            # Sub-nodo intermedio: encadena directo al siguiente de la fase.
+            g.add_edge(name, PHASES[i + 1][0])
+            continue
         g.add_edge(name, f"gate{phase}")
         next_node = PHASES[i + 1][0] if i + 1 < len(PHASES) else "finish"
         g.add_conditional_edges(

@@ -60,6 +60,28 @@ def test_execute_notebooks_pass_and_fail(tmp_path: Path) -> None:
                if c["cell_type"] == "code")
 
 
+def test_progress_skip_no_reejecuta_lo_que_ya_paso(tmp_path: Path) -> None:
+    """ADR-0009: con progress_path, un notebook ya PASS con el mismo sha se
+    saltea en el replay — un crash a mitad de la fase 7 no re-escribe en la
+    BD lo que ya corrió. Si el contenido cambió, se re-ejecuta (la regla y su
+    falso positivo)."""
+    out = tmp_path / "output"
+    progress = tmp_path / "execution_progress.json"
+    _notebook(out, "NB-01_ok.ipynb", ["x = pd.DataFrame({'a': [1]})\n"])
+
+    r1 = execute_notebooks(out, ["NB-01_ok.ipynb"], progress_path=progress)
+    assert r1["results"][0]["status"] == "PASS"
+
+    r2 = execute_notebooks(out, ["NB-01_ok.ipynb"], progress_path=progress)
+    assert r2["results"][0]["status"] == "SKIPPED_CACHED"
+    assert r2["passed"] == 1, "lo cacheado cuenta como pasado en el reporte"
+
+    # Re-traducción o edición manual → sha distinto → se re-ejecuta.
+    _notebook(out, "NB-01_ok.ipynb", ["y = pd.DataFrame({'b': [2]})\n"])
+    r3 = execute_notebooks(out, ["NB-01_ok.ipynb"], progress_path=progress)
+    assert r3["results"][0]["status"] == "PASS"
+
+
 def test_failed_execution_blocks_gate7(tmp_path: Path) -> None:
     state = tmp_path / "state"
     state.mkdir()

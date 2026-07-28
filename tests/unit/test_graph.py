@@ -34,6 +34,22 @@ def make_workspace(root: Path) -> tuple[Path, Path]:
 
 # ── 1. End-to-end ────────────────────────────────────────────────────────────
 
+def test_fase7_subnodos_y_gate_unico_camino() -> None:
+    """ADR-0009: verify → authorize → execute_validate → gate7, y NINGÚN
+    sub-nodo de la fase 7 tiene arista directa a la fase 8 — el gate sigue
+    siendo el único camino, aunque la fase sea tres nodos."""
+    g = build_graph().get_graph()
+    edges = {(e.source, e.target) for e in g.edges}
+
+    assert ("phase7_verify", "phase7_authorize") in edges
+    assert ("phase7_authorize", "phase7_execute_validate") in edges
+    assert ("phase7_execute_validate", "gate7") in edges
+    assert not any(
+        src.startswith("phase7") and dst == "phase8_docs" for src, dst in edges
+    )
+    assert all(src == "gate7" for src, dst in edges if dst == "phase8_docs")
+
+
 def test_e2e_stub_run_completes_all_gates(tmp_path: Path) -> None:
     ws, egp = make_workspace(tmp_path)
     result = build_graph().invoke(initial_state(ws, egp))

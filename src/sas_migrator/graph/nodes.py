@@ -196,44 +196,85 @@ def phase6_generation(state: MigrationGraphState) -> dict:
     return {"current_phase": 6, "notes": [note]}
 
 
-# ── Fase 7: verificación BD → autorización (pausa sagrada) → ejecución →
-#    cascada de validación ─────────────────────────────────────────────────
+# ── Fase 7 en TRES sub-nodos: verificación → autorización → ejecución+cascada.
+#
+# Antes era un monolito de 85 líneas con el interrupt() en el medio: por
+# ADR-0002 el nodo se re-ejecuta COMPLETO al reanudar, así que cada resume
+# volvía a golpear la BD, y un corte durante execute_notebooks re-ejecutaba
+# los notebooks al retomar (con escrituras a medias ya aplicadas). Con el
+# interrupt aislado en su propio nodo, reanudar la respuesta de la tarjeta
+# re-ejecuta SOLO phase7_authorize; verify/staging quedaron en su checkpoint
+# y la ejecución tiene skip idempotente por hash. Ver ADR-0009.
 
-def phase7_validation(state: MigrationGraphState) -> dict:
-    ws, st, out = _paths(state)
+def phase7_verify(state: MigrationGraphState) -> dict:
+    """Verificación de tablas contra la BD + staging de referencias SAS."""
+    ws, st, _out = _paths(state)
     if state.get("stub_mode", True):
         stubs.stub_validation_report(st)
-        return {"current_phase": 7, "notes": ["fase 7: validación not_applicable (stub)"]}
+        return {"notes": []}
 
     from sas_migrator.core.config import load_project_config
     from sas_migrator.core.db.verify_tables import verify
+    from sas_migrator.core.validation.references import stage_references
+
+    cfg = load_project_config(ws)
+    vreport, _vcode = verify(st, cfg)
+    stage_references(st, ws / "input" / "data", st / "reference_outputs")
+    notes = []
+    if vreport.get("status") not in ("not_applicable",):
+        notes.append(f"fase 7: verificación de tablas — {vreport.get('status')}")
+    return {"notes": notes}
+
+
+def phase7_authorize(state: MigrationGraphState) -> dict:
+    """SOLO la pausa sagrada. Ninguna escritura a state/ (ADR-0002 al pie:
+    el nodo con interrupt no tiene efectos previos que replicar al reanudar).
+    La decisión viaja por el estado del grafo — la persiste el checkpointer."""
+    _ws, st, out = _paths(state)
+    if state.get("stub_mode", True):
+        return {"execution_authorized": False}
+
     from sas_migrator.core.gen_run_all import discover_notebooks
+
+    if not discover_notebooks(out):
+        return {"execution_authorized": False}
+
+    from sas_migrator.core.interview.execution import AUTHORIZE, build_execution_card
+    from sas_migrator.graph.interviews import ask
+
+    answer = ask(build_execution_card(st))
+    return {"execution_authorized": any(a.value == AUTHORIZE for a in answer.answers)}
+
+
+def phase7_execute_validate(state: MigrationGraphState) -> dict:
+    """Ejecución autorizada (con skip idempotente) + cascada + reporte."""
+    ws, st, out = _paths(state)
+    if state.get("stub_mode", True):
+        return {"current_phase": 7, "notes": ["fase 7: validación not_applicable (stub)"]}
+
+    from sas_migrator.core.config import load_project_config
+    from sas_migrator.core.gen_run_all import discover_notebooks
+    from sas_migrator.core.utils.fsio import load_json
     from sas_migrator.core.validation.references import stage_references
 
     cfg = load_project_config(ws)
     notes: list[str] = []
 
-    # 1. Paso 4 de B4b: verificación de tablas contra la BD (idempotente).
-    vreport, vcode = verify(st, cfg)
-    if vreport.get("status") not in ("not_applicable",):
-        notes.append(f"verificación de tablas: {vreport.get('status')}")
-
-    # 2. Referencias SAS staged (byte-idempotente; puede correr antes del interrupt).
+    # Los insumos de los sub-nodos previos viven en disco (la fuente de verdad
+    # de siempre); re-derivarlos acá es lectura + una copia byte-idempotente.
+    vstatus = (load_json(st / "table_verification.json") or {}).get(
+        "status", "not_applicable"
+    )
+    if vstatus != "not_applicable":
+        notes.append(f"verificación de tablas: {vstatus}")
     staged = stage_references(st, ws / "input" / "data", st / "reference_outputs")
 
-    # 3. Autorización de ejecución — esa pausa es sagrada.
     notebooks = discover_notebooks(out)
-    authorized = False
-    if notebooks:
-        from sas_migrator.core.interview.execution import AUTHORIZE, build_execution_card
-        from sas_migrator.graph.interviews import ask
-
-        answer = ask(build_execution_card(st))
-        authorized = any(a.value == AUTHORIZE for a in answer.answers)
+    authorized = bool(state.get("execution_authorized"))
 
     exec_summary: dict | None = None
-    if authorized:
-        if vreport.get("status") == "blocked_missing_targets":
+    if authorized and notebooks:
+        if vstatus == "blocked_missing_targets":
             notes.append(
                 "ejecución NO corrida: faltan tablas DESTINO (ver table_verification.json)"
             )
@@ -241,7 +282,8 @@ def phase7_validation(state: MigrationGraphState) -> dict:
             from sas_migrator.core.execution import execute_notebooks, resolve_db_url
 
             exec_report = execute_notebooks(
-                out, notebooks, db_url=resolve_db_url(st, cfg)
+                out, notebooks, db_url=resolve_db_url(st, cfg),
+                progress_path=st / "execution_progress.json",
             )
             _dump_json(st / "execution_report.json", exec_report)
             exec_summary = {
@@ -254,7 +296,6 @@ def phase7_validation(state: MigrationGraphState) -> dict:
     elif notebooks:
         notes.append("ejecución no autorizada por el usuario — notebooks sin correr")
 
-    # 4. Cascada de validación (referencias + conexiones) o reporte honesto.
     if staged and (st / "db_connections.yaml").exists():
         from sas_migrator.core.validation.cascade import run_cascade
 

@@ -102,6 +102,38 @@ def test_full_pipeline_driven_by_interrupts(tmp_path: Path) -> None:
     assert decisions["confirmed_prefixes"] == []  # el default de SRC fue "No sé"
 
 
+def test_responder_la_autorizacion_no_reejecuta_verify(tmp_path: Path, monkeypatch) -> None:
+    """ADR-0009: el interrupt vive solo en phase7_authorize. Reanudar con la
+    respuesta de la tarjeta re-ejecuta SOLO ese sub-nodo — la verificación
+    contra la BD corrió en phase7_verify (su propio checkpoint) y no se
+    repite. Con el monolito viejo, cada resume volvía a golpear la BD."""
+    ws, egp = make_workspace(tmp_path)
+    graph = build_graph(checkpointer=InMemorySaver())
+    config = {"configurable": {"thread_id": "t-verify"}}
+
+    from sas_migrator.core.db import verify_tables
+
+    calls: list[int] = []
+    original = verify_tables.verify
+
+    def spy(state_dir, config=None):
+        calls.append(1)
+        return original(state_dir, config)
+
+    monkeypatch.setattr(verify_tables, "verify", spy)
+
+    result, cards = drive(
+        graph, config, initial_state(ws, egp, stub_mode=False), default_answers
+    )
+
+    assert result["done"] is True
+    assert cards[-1]["card_id"] == "execution_approval"
+    assert len(calls) == 1, (
+        "verify corre UNA vez (en phase7_verify); responder la autorización "
+        "no debe re-invocarla"
+    )
+
+
 # ── 2. Respuesta inválida ⇒ re-interrupt, nunca crash ───────────────────────
 
 def test_invalid_answer_reinterrupts_with_validation_error(tmp_path: Path) -> None:

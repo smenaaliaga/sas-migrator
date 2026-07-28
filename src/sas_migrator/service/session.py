@@ -147,11 +147,16 @@ class MigrationSession:
         ANTERIOR al nodo de la fase — esos resumes quedan en la rama vieja y el
         nodo vuelve a preguntar desde la primera tarjeta.
         """
-        from sas_migrator.graph.builder import PHASES
+        from sas_migrator.graph.builder import PHASE_ENTRY_NODE
 
-        node = next((name for name, _fn, ph in PHASES if ph == phase), None)
+        # El nodo de ENTRADA de la fase: una fase puede ser varios sub-nodos
+        # (la 7 es verify → authorize → execute_validate) y rebobinarla es
+        # arrancar en el primero, no en el que toca el gate.
+        node = PHASE_ENTRY_NODE.get(phase)
         if node is None:
-            raise ValueError(f"fase desconocida: {phase} (esperado 0-{PHASES[-1][2]})")
+            raise ValueError(
+                f"fase desconocida: {phase} (esperado 0-{max(PHASE_ENTRY_NODE)})"
+            )
 
         history = list(self.graph.get_state_history(self._config()))
         for i, snap in enumerate(history):
