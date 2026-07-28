@@ -434,3 +434,34 @@ def test_reintentos_de_transporte_configurables_y_altos_por_defecto() -> None:
         _FakeSDK, LlmConfig(provider="anthropic", max_transport_retries=7)
     )
     assert capturado["max_retries"] == 7
+
+
+def test_credencial_faltante_dice_que_env_se_consulto(tmp_path, monkeypatch) -> None:
+    """El .env del repo NO se lee desde otro cwd: el error tiene que decirlo.
+
+    Con el comando instalado global y ejecutado desde el workspace, la búsqueda
+    hacia arriba nunca llega al repo. Sin la lista de rutas consultadas, un fix
+    de treinta segundos se vuelve una cacería.
+    """
+    from sas_migrator.llm import env as env_mod
+
+    ws = tmp_path / "mi_migracion"
+    ws.mkdir()
+    monkeypatch.setattr(env_mod, "_loaded", set())
+    monkeypatch.setattr(env_mod, "_consulted", [])
+    monkeypatch.chdir(ws)
+    monkeypatch.delenv("ANTHROPIC_FOUNDRY_API_KEY", raising=False)
+    env_mod.load_env(ws)
+
+    class _FakeSDK:
+        AnthropicFoundry = object
+
+    with pytest.raises(RuntimeError) as exc:
+        AnthropicCaller._build_client(
+            _FakeSDK, LlmConfig(provider="foundry", foundry_resource="r")
+        )
+
+    mensaje = str(exc.value)
+    assert "ANTHROPIC_FOUNDRY_API_KEY" in mensaje
+    assert str(ws.resolve() / ".env") in mensaje, "la ruta exacta que hay que crear"
+    assert "no existe" in mensaje

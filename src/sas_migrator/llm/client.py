@@ -85,11 +85,13 @@ class AnthropicCaller:
             try:
                 return anthropic.Anthropic(max_retries=config.max_transport_retries)
             except Exception as exc:
+                from sas_migrator.llm.env import describe_sources
+
                 raise RuntimeError(
                     "No se pudo autenticar contra la API de Anthropic "
-                    f"({exc}). Definí ANTHROPIC_API_KEY en el entorno o en un "
-                    ".env (raíz del repo o del workspace). Para usar Azure: "
-                    "llm.provider: foundry en project_config.yaml."
+                    f"({exc}). Definí ANTHROPIC_API_KEY en <workspace>/.env o "
+                    "en el entorno. Para usar Azure: llm.provider: foundry en "
+                    f"project_config.yaml.\n{describe_sources()}"
                 ) from exc
 
         if config.provider == "foundry":
@@ -101,9 +103,13 @@ class AnthropicCaller:
                 )
             api_key = os.environ.get("ANTHROPIC_FOUNDRY_API_KEY")
             if not api_key:
+                from sas_migrator.llm.env import describe_sources
+
                 raise RuntimeError(
-                    "Falta ANTHROPIC_FOUNDRY_API_KEY (entorno o .env). Es la key "
-                    "del recurso de Azure AI Foundry (portal → Keys and Endpoint)."
+                    "Falta ANTHROPIC_FOUNDRY_API_KEY. Es la key del recurso de "
+                    "Azure AI Foundry (portal → Keys and Endpoint).\n"
+                    f"{describe_sources()}\n"
+                    "Ponela en <workspace>/.env, o exportala al entorno."
                 )
             resource = os.environ.get("ANTHROPIC_FOUNDRY_RESOURCE") or config.foundry_resource
             if not resource:

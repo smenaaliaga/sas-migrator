@@ -70,9 +70,26 @@ credencial viene del entorno, nunca de la config. Copiar `.env.example` a
 | `anthropic` | `ANTHROPIC_API_KEY` |
 | `foundry` | `ANTHROPIC_FOUNDRY_API_KEY` + `ANTHROPIC_FOUNDRY_RESOURCE` (o `llm.foundry_resource` en la config, que no es secreto) |
 
-Precedencia: entorno del proceso > `<workspace>/.env` > `.env` de la raíz. Una
-corrida real además necesita `db.default_server` en la config (lo usa la fase 7
-para `verify_tables`) y referencias en `input/data/`.
+Precedencia: entorno del proceso > `<workspace>/.env` > el primer `.env`
+buscando **hacia arriba desde el directorio actual**.
+
+⚠ Ese tercer nivel es una trampa con el comando instalado global: parado en
+`D:\Migraciones\mi_proyecto`, la búsqueda hacia arriba **no** llega al `.env`
+del repo. Con `sas-migrator` en el PATH, la credencial va en
+`<workspace>/.env` o en el entorno del usuario:
+
+```powershell
+# por sesión de terminal
+$env:ANTHROPIC_FOUNDRY_API_KEY = "..."
+# persistente (nueva terminal para que tome efecto)
+setx ANTHROPIC_FOUNDRY_API_KEY "..."
+```
+
+Si falta la credencial, el error lista los `.env` que se consultaron y si
+existían — no hay que adivinar cuál se leyó.
+
+Una corrida real además necesita `db.default_server` en la config (lo usa la
+fase 7 para `verify_tables`) y referencias en `input/data/`.
 
 ## Estructura del workspace
 

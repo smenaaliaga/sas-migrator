@@ -21,6 +21,8 @@ from __future__ import annotations
 from pathlib import Path
 
 _loaded: set[Path] = set()
+# Qué se miró y si estaba — sin esto, "falta la key" no dice dónde ponerla.
+_consulted: list[tuple[str, bool]] = []
 
 
 def load_env(workspace: Path | str | None = None) -> None:
@@ -39,9 +41,30 @@ def load_env(workspace: Path | str | None = None) -> None:
     # gana sobre el del repo por cargarse primero.
     if workspace is not None:
         ws_env = Path(workspace).resolve() / ".env"
+        _consulted.append((str(ws_env), ws_env.is_file()))
         if ws_env.is_file():
             load_dotenv(ws_env, override=False)
 
     found = find_dotenv(usecwd=True)
+    _consulted.append(
+        (found or f"búsqueda hacia arriba desde {Path.cwd()}", bool(found))
+    )
     if found:
         load_dotenv(found, override=False)
+
+
+def describe_sources() -> str:
+    """De dónde se intentó leer, para pegar en un error de credencial faltante.
+
+    El `.env` de la raíz del repo se encuentra buscando hacia arriba desde el
+    directorio actual, así que con el comando instalado global y ejecutado
+    desde el workspace NO se lee. Callarlo convierte un fix de treinta segundos
+    en una cacería.
+    """
+    if not _consulted:
+        return "No se consultó ningún .env (falta el extra 'llm': python-dotenv)."
+    lines = [
+        f"  {'✓' if ok else '·'} {path}" + ("" if ok else "  (no existe)")
+        for path, ok in _consulted
+    ]
+    return ".env consultados:\n" + "\n".join(lines)
