@@ -10,6 +10,8 @@ from __future__ import annotations
 import textwrap
 from typing import Any
 
+from sas_migrator.core.models.state import PHASE_LABELS
+
 CardDict = dict[str, Any]
 
 
@@ -24,21 +26,11 @@ WIDTH = 78
 BODY = "      "
 
 
-# Nombres de fase para el tablero de `status`. Viven acá porque son texto para
-# humanos: el grafo las conoce por nombre de nodo (`analysis`, `planning`), que
-# no es lo que uno quiere leer cuando pregunta dónde quedó la migración.
-PHASE_NAMES: dict[int, str] = {
-    0: "Intake",
-    1: "Entrevista inicial",
-    2: "Análisis SAS",
-    3: "Profiling + matching",
-    4: "Entrevista post-análisis",
-    5: "Plan de traducción",
-    6: "Generación",
-    7: "Validación",
-    8: "Documentación",
-    9: "Post-migración",
-}
+# Nombres de fase para el tablero de `status`: la fuente única es
+# core.models.state.PHASE_LABELS (al lado del enum Phase). Antes había dos
+# copias — una acá y el enum allá — y agregar una fase podía dejarlas en
+# desacuerdo sin que nada fallara.
+PHASE_NAMES: dict[int, str] = {int(p): label for p, label in PHASE_LABELS.items()}
 
 
 def render_phases(current: int, completed: list[int]) -> str:

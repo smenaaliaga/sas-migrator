@@ -21,6 +21,23 @@ class Phase(IntEnum):
     POST_MIGRATION = 9
 
 
+# Etiqueta humana de cada fase — la ÚNICA fuente; la CLI la importa. Vive al
+# lado del enum para que agregar una fase sin etiquetarla no compile "bien":
+# hay un test que exige la biyección Phase ↔ PHASE_LABELS.
+PHASE_LABELS: dict[Phase, str] = {
+    Phase.INTAKE: "Intake",
+    Phase.INITIAL_INTERVIEW: "Entrevista inicial",
+    Phase.SAS_ANALYSIS: "Análisis SAS",
+    Phase.PROFILING_MATCHING: "Profiling + matching",
+    Phase.POST_ANALYSIS_INTERVIEW: "Entrevista post-análisis",
+    Phase.TRANSLATION_PLAN: "Plan de traducción",
+    Phase.GENERATION: "Generación de notebooks",
+    Phase.VALIDATION: "Ejecución y validación",
+    Phase.DOCUMENTATION: "Documentación",
+    Phase.POST_MIGRATION: "Post-migración (iteraciones)",
+}
+
+
 class GateCheck(BaseModel):
     """Result of a gate validation between phases."""
 

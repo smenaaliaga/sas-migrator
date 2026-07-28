@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from sas_migrator.core.interview._io import load_json, load_yaml
+from sas_migrator.core.interview._io import load_json
 from sas_migrator.core.models.interview import InterviewCard, Question, QuestionType
 
 AUTHORIZE = "Autorizar ejecución"
@@ -27,8 +27,9 @@ def build_execution_card(state_dir: Path) -> InterviewCard:
     })
     evidence = [f"notebook: {nb}" for nb in notebooks[:10]]
 
-    conns = load_yaml(state_dir / "db_connections.yaml") or {}
-    aliases = [str(c.get("alias", "?")) for c in conns.get("connections", [])]
+    from sas_migrator.core.db.connections import load_connections
+
+    aliases = [str(c.get("alias", "?")) for c in load_connections(state_dir)]
     if aliases:
         evidence.append(
             "db_connections.yaml: escribe en la(s) conexión(es) " + ", ".join(aliases)

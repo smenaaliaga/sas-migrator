@@ -23,14 +23,9 @@ def resolve_db_url(state_dir: Path, config) -> str | None:
     construcción mssql desde la primera conexión de db_connections.yaml."""
     if config is not None and config.db.connection_url:
         return config.db.connection_url
-    import yaml
+    from sas_migrator.core.db.connections import load_connections
 
-    conn_path = Path(state_dir) / "db_connections.yaml"
-    if not conn_path.exists():
-        return None
-    connections = (
-        yaml.safe_load(conn_path.read_text(encoding="utf-8")) or {}
-    ).get("connections", [])
+    connections = load_connections(state_dir)
     if not connections:
         return None
     from sas_migrator.core.db.engine import connection_string

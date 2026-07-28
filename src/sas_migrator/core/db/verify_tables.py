@@ -21,8 +21,6 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
-import yaml
-
 from sas_migrator.core.config import ProjectConfig
 from sas_migrator.core.db.engine import build_engine
 from sas_migrator.core.utils.fsio import dump_json
@@ -36,13 +34,12 @@ def verify(state_dir: Path, config: ProjectConfig | None = None) -> tuple[dict, 
     """
     from sqlalchemy import inspect
 
+    from sas_migrator.core.db.connections import load_connections
+
     state_dir = Path(state_dir)
-    conn_path = state_dir / "db_connections.yaml"
-    if not conn_path.exists():
+    if not (state_dir / "db_connections.yaml").exists():
         return {"status": "not_applicable", "note": "sin db_connections.yaml"}, 0
-    connections = (
-        yaml.safe_load(conn_path.read_text(encoding="utf-8")) or {}
-    ).get("connections", [])
+    connections = load_connections(state_dir)
     if not connections:
         return {"status": "not_applicable", "note": "db_connections.yaml sin conexiones"}, 0
 

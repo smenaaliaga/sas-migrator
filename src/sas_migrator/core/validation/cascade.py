@@ -28,7 +28,6 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
-import yaml
 
 # CSV separator for reference files. Configurable via --separator (default ";").
 _CSV_SEP: str = ";"
@@ -61,12 +60,9 @@ def load_reference(path: Path) -> pd.DataFrame | None:
 
 
 def load_connections(state_dir: Path) -> list[dict]:
-    path = state_dir / "db_connections.yaml"
-    if not path.exists():
-        return []
-    with open(path, encoding="utf-8") as f:
-        data = yaml.safe_load(f) or {}
-    return data.get("connections", [])
+    from sas_migrator.core.db.connections import load_connections as _load
+
+    return _load(state_dir)
 
 
 def load_target_tables(state_dir: Path) -> list[str]:

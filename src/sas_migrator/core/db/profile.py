@@ -28,21 +28,16 @@ from sas_migrator.core.utils.fsio import dump_json
 
 # Asegurar que src/ sea importable
 
-try:
-    import yaml
-except ImportError:
-    sys.exit("Error: pyyaml no está instalado. Ejecutar: pip install pyyaml")
 
 
 def load_connections(state_dir: Path) -> list[dict]:
     """Lee state/db_connections.yaml y retorna la lista de conexiones."""
-    path = state_dir / "db_connections.yaml"
-    if not path.exists():
-        print(f"⚠ No se encontró {path} — nada que perfilar")
-        return []
-    with open(path, encoding="utf-8") as f:
-        data = yaml.safe_load(f)
-    return data.get("connections", [])
+    from sas_migrator.core.db.connections import load_connections as _load
+
+    conns = _load(state_dir)
+    if not conns:
+        print(f"⚠ Sin conexiones en {state_dir / 'db_connections.yaml'} — nada que perfilar")
+    return conns
 
 
 def profile_table_from_db(conn_cfg: dict, table_name: str, config=None) -> dict:
