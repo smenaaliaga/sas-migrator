@@ -6,8 +6,10 @@ description: Mantener CHANGELOG.md y la versión de pyproject.toml al día. Usar
 # Changelog y versionado
 
 Una sola fuente de verdad para la versión: `version` en `pyproject.toml`
-(PEP 440: `2.0.0a1` = alpha 1). La instalación es editable, así que el bump
-no requiere reinstalar. Cada versión publicada lleva tag `v<version>`.
+(PEP 440: `2.0.0a1` = alpha 1). La instalación es editable vía pipx: el
+código se actualiza solo, pero la versión que reporta `--version` sale de
+los metadatos congelados al instalar — tras un bump hay que refrescarla
+(paso 5). Cada versión publicada lleva tag `v<version>`.
 
 ## Al commitear un cambio
 
@@ -42,5 +44,6 @@ Solo cuando el usuario lo pida o apruebe. Pasos, en un solo commit:
    encima.
 4. Commit con mensaje `Release 2.0.0aN: <resumen de una línea>` y tag:
    `git tag v<version>`.
-5. Verificar: `sas-migrator --version` debe mostrar la versión nueva
-   (editable install — sin reinstalar).
+5. Refrescar metadatos y verificar:
+   `python -m pipx reinstall sas-migrator`, luego `sas-migrator --version`
+   debe mostrar la versión nueva.
