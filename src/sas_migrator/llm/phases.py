@@ -35,6 +35,12 @@ from sas_migrator.llm.errors import NeedsHuman
 # y cubren una fracción del nodo.
 MAX_CODE_CHARS = 120_000
 
+# Reintentos de traducción por fallo de chequeo estático. El modelo recibe el
+# motivo exacto del rechazo, así que un segundo intento tiene información nueva
+# —no es la misma tirada otra vez—. Pasado el techo va a needs_human: insistir
+# más gasta tokens en un nodo que el modelo no está resolviendo.
+MAX_TRANSLATION_RETRIES = 2
+
 # En el prompt de ANÁLISIS entran todos los nodos de un PFD a la vez, y el
 # objetivo es revisar (clasificar, detectar mejoras), no reproducir el código.
 # Ahí sí se recorta, pero el recorte se anuncia dentro del prompt.
@@ -398,6 +404,77 @@ def _translate_node(
     return merge_translations(partes)
 
 
+def _load_valid_translations(trans_dir: Path) -> dict[str, NodeTranslation]:
+    """Traducciones persistidas que HOY pasan el chequeo estático.
+
+    Retomar una corrida no debe heredar la basura de corridas viejas: un .json
+    que no pasa el gate no se registra, así el nodo se vuelve a traducir en vez
+    de quedar cacheado como hecho. No se borra el archivo — sirve para mirar qué
+    salió mal, y la próxima traducción lo sobrescribe.
+    """
+    from sas_migrator.core.assembly.notebook import check_node_translation
+
+    translations: dict[str, NodeTranslation] = {}
+    if not trans_dir.exists():
+        return translations
+    for path in sorted(trans_dir.glob("*.json")):
+        nt = NodeTranslation.model_validate(_load_json(path))
+        if check_node_translation(nt) is None:
+            translations[nt.node_id] = nt
+    return translations
+
+
+def _translate_checked(
+    caller, *, system: list[str], target: dict, code: str, db_aliases: list[str],
+    iteration_note: str | None = None,
+) -> NodeTranslation:
+    """Traduce un nodo y NO devuelve nada que no pase el chequeo estático.
+
+    El gate del ensamblador es local al nodo, así que se puede correr acá — el
+    momento en que todavía sirve de algo. Corrido solo al ensamblar, un nodo
+    malo ya está persistido en ``state/translations/``, y el retomar-desde-disco
+    lo da por hecho para siempre: se traduce mal una vez y no se reintenta nunca.
+
+    El motivo del rechazo vuelve al modelo como instrucción del reintento.
+    Agotados los intentos, ``NeedsHuman`` — que el caller registra en la cola.
+    """
+    from sas_migrator.core.assembly.notebook import check_node_translation
+
+    nota = iteration_note
+    plan_strategy = str(target.get("strategy") or "")
+    for intento in range(1, MAX_TRANSLATION_RETRIES + 2):
+        nt = _translate_node(
+            caller, system=system, target=target, code=code,
+            db_aliases=db_aliases, iteration_note=nota,
+        )
+        if plan_strategy and nt.strategy and nt.strategy != plan_strategy:
+            motivo = (
+                f"strategy_mismatch: devolviste strategy '{nt.strategy}' y el plan "
+                f"aprobado para este nodo dice '{plan_strategy}'"
+            )
+        else:
+            failure = check_node_translation(nt)
+            if failure is None:
+                return nt
+            motivo = f"{failure.reason}: {failure.detail}"
+
+        if intento > MAX_TRANSLATION_RETRIES:
+            raise NeedsHuman(
+                task="translation", reason="static_check_failed",
+                attempts=intento, detail=motivo,
+            )
+        aviso = (
+            "Tu traducción anterior de este nodo fue RECHAZADA por el chequeo "
+            f"estático:\n\n    {motivo}\n\n"
+            "Volvé a traducir el nodo completo corrigiendo eso. No dejes huecos: "
+            "si algo no se puede resolver con la información disponible, la celda "
+            "va con raise NotImplementedError('<qué falta>') y el motivo en "
+            "warnings — nunca un valor vacío que el resto del código consuma."
+        )
+        nota = f"{aviso}\n\n{iteration_note}" if iteration_note else aviso
+    raise AssertionError("inalcanzable")  # pragma: no cover
+
+
 def run_translation(state_dir: Path, output_dir: Path, workspace: Path) -> dict:
     from sas_migrator.core.assembly.notebook import assemble_notebooks
 
@@ -417,17 +494,14 @@ def run_translation(state_dir: Path, output_dir: Path, workspace: Path) -> dict:
     # ya tengan .json en disco en vez de perder todo el trabajo en memoria.
     trans_dir = state_dir / "translations"
     trans_dir.mkdir(exist_ok=True)
-    translations: dict[str, NodeTranslation] = {}
-    for path in sorted(trans_dir.glob("*.json")):
-        nt = NodeTranslation.model_validate(_load_json(path))
-        translations[nt.node_id] = nt
+    translations = _load_valid_translations(trans_dir)
 
     for target in plan.get("targets", []):
         nid = str(target.get("node_id"))
         if nid in translations:
             continue
         try:
-            nt = _translate_node(
+            nt = _translate_checked(
                 caller, system=system, target=target,
                 code=_node_code(state_dir, nid), db_aliases=db_aliases,
             )
@@ -481,10 +555,7 @@ def retranslate_nodes(
     targets_by_id = {str(t.get("node_id")): t for t in plan.get("targets", [])}
     trans_dir = state_dir / "translations"
 
-    translations: dict[str, NodeTranslation] = {}
-    for path in sorted(trans_dir.glob("*.json")) if trans_dir.exists() else []:
-        nt = NodeTranslation.model_validate(_load_json(path))
-        translations[nt.node_id] = nt
+    translations = _load_valid_translations(trans_dir)
 
     caller = runtime.get_caller(workspace)
     system = prompt_builder.build_translation_system()
@@ -500,7 +571,7 @@ def retranslate_nodes(
         if target is None:
             continue
         try:
-            nt = _translate_node(
+            nt = _translate_checked(
                 caller, system=system, target=target,
                 code=_node_code(state_dir, nid), db_aliases=db_aliases,
                 iteration_note=iteration_note,

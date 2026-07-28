@@ -207,6 +207,8 @@ def test_run_translation_failed_node_is_needs_human_and_gate_blocks(ws: Path) ->
 
 
 def test_run_translation_static_failure_is_recorded(ws: Path) -> None:
+    """Un nodo que nunca pasa el chequeo agota los reintentos y va a la cola —
+    y NO queda persistido en state/translations/ como si estuviera hecho."""
     state = ws / "state"
     shutil.rmtree(state / "translations", ignore_errors=True)
 
@@ -216,11 +218,76 @@ def test_run_translation_static_failure_is_recorded(ws: Path) -> None:
             return nt.model_copy(update={"cells": ["df.to_parquet('x')\n"]})
         return nt
 
-    runtime.set_caller(FakeCaller({"translation": bad_code}))
+    caller = FakeCaller({"translation": bad_code})
+    runtime.set_caller(caller)
     counts = phases.run_translation(state, ws / "output", ws)
-    assert counts["assembly_failures"] == 1
+
+    assert counts["translated"] == counts["targets"] - 1
+    assert counts["assembly_failures"] == 0, (
+        "el fallo estático se ataja al traducir, no al ensamblar"
+    )
     items = unresolved(state, phase=6)
-    assert items[0].task == "assembly" and items[0].reason == "static_check_failed"
+    assert [i.node_id for i in items] == ["CodeTask-2"]
+    assert items[0].task == "translation" and items[0].reason == "static_check_failed"
+    assert "to_parquet" in items[0].detail, "el motivo exacto queda en la cola"
+    assert items[0].attempts == phases.MAX_TRANSLATION_RETRIES + 1
+
+    assert not (state / "translations" / "CodeTask-2.json").exists(), (
+        "una traducción rechazada no se persiste: si se persistiera, el "
+        "retomar-desde-disco la daría por hecha y no se reintentaría nunca"
+    )
+    malas = [
+        c for c in caller.calls
+        if c["task"] == "translation" and '"node_id": "CodeTask-2"' in c["user_content"]
+    ]
+    assert len(malas) == phases.MAX_TRANSLATION_RETRIES + 1
+    assert "to_parquet" in malas[-1]["user_content"], (
+        "el reintento le dice al modelo por qué se lo rechazó"
+    )
+
+
+def test_run_translation_retries_until_the_node_is_clean(ws: Path) -> None:
+    """El reintento no es ceremonia: si el segundo intento sale bien, el nodo
+    entra al notebook y nadie queda en la cola."""
+    state = ws / "state"
+    shutil.rmtree(state / "translations", ignore_errors=True)
+    intentos: dict[str, int] = {}
+
+    def flaky_once(user: str) -> NodeTranslation:
+        nt = _translation_fake(user)
+        nid = _header(user)["node_id"]
+        intentos[nid] = intentos.get(nid, 0) + 1
+        if nid == "CodeTask-2" and intentos[nid] == 1:
+            return nt.model_copy(update={"cells": ["x = x\n"]})  # self_assignment
+        return nt
+
+    runtime.set_caller(FakeCaller({"translation": flaky_once}))
+    counts = phases.run_translation(state, ws / "output", ws)
+
+    assert counts["translated"] == counts["targets"]
+    assert counts["assembly_failures"] == 0
+    assert unresolved(state, phase=6) == []
+    assert intentos["CodeTask-2"] == 2
+
+
+def test_stale_bad_translation_on_disk_is_retranslated(ws: Path) -> None:
+    """Una traducción inválida de una corrida vieja no se hereda como hecha."""
+    state = ws / "state"
+    trans_dir = state / "translations"
+    shutil.rmtree(trans_dir, ignore_errors=True)
+    trans_dir.mkdir(parents=True)
+    (trans_dir / "CodeTask-2.json").write_text(
+        NodeTranslation(node_id="CodeTask-2", node_label="viejo", cells=[]).model_dump_json(),
+        encoding="utf-8",
+    )
+
+    runtime.set_caller(FakeCaller({"translation": _translation_fake}))
+    counts = phases.run_translation(state, ws / "output", ws)
+
+    assert counts["translated"] == counts["targets"]
+    assert unresolved(state, phase=6) == []
+    regenerada = json.loads((trans_dir / "CodeTask-2.json").read_text(encoding="utf-8"))
+    assert regenerada["cells"], "el .json vacío se reemplazó por una traducción real"
 
 
 # ── Pipeline completo con LLM fake + entrevistas ────────────────────────────
