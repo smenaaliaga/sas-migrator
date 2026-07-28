@@ -92,6 +92,33 @@ class LlmConfig(BaseModel):
     foundry_resource: str = ""
 
 
+class TranslationConfig(BaseModel):
+    """Contrato del código Python DESTINO.
+
+    ``allowed_imports``: librerías de terceros que las traducciones pueden
+    importar (además de la stdlib). Es la unión de lo que los prompts y la
+    auditoría ya daban por buenas — antes vivía repartida en tres capas que se
+    contradecían: el prompt decía "pandas, numpy o sqlalchemy", la tabla de
+    patrones sugería requests/matplotlib, y el chequeo estático validaba contra
+    el entorno del MIGRADOR (que no es el entorno donde correrán los
+    notebooks) y rechazó nodos correctos. El entorno destino lo documenta
+    ``output/requirements.txt``, que el ensamblador emite desde esta lista.
+    """
+
+    allowed_imports: list[str] = Field(
+        default_factory=lambda: [
+            "matplotlib",
+            "numpy",
+            "openpyxl",
+            "pandas",
+            "pyreadstat",
+            "requests",
+            "scipy",
+            "sqlalchemy",
+        ]
+    )
+
+
 class ParserConfig(BaseModel):
     """Ajustes del parser SAS para el proyecto.
 
@@ -129,6 +156,7 @@ class ProjectConfig(BaseModel):
     parser: ParserConfig = Field(default_factory=ParserConfig)
     llm: LlmConfig = Field(default_factory=LlmConfig)
     run: RunConfig = Field(default_factory=RunConfig)
+    translation: TranslationConfig = Field(default_factory=TranslationConfig)
 
 
 def load_project_config(workspace: Path | str | None = None) -> ProjectConfig:

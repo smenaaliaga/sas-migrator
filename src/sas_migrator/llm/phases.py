@@ -419,18 +419,23 @@ def _approved_improvements(state_dir: Path) -> list[dict]:
     return out
 
 
-def _translation_context(state_dir: Path, plan: dict) -> tuple[list[str], list[str]]:
-    """(system_blocks, db_aliases) para la fase de traducción."""
+def _translation_context(
+    state_dir: Path, plan: dict
+) -> tuple[list[str], list[str], list[str]]:
+    """(system_blocks, db_aliases, allowed_imports) para la fase de traducción."""
+    from sas_migrator.core.config import load_project_config
     from sas_migrator.core.db.connections import load_connections
 
     conns = load_connections(state_dir)
     db_aliases = [str(c["alias"]) for c in conns if c.get("alias")]
+    allowed = list(load_project_config(state_dir.parent).translation.allowed_imports)
     context_block = prompt_builder.build_project_context(
         connections=conns,
         improvements=_approved_improvements(state_dir),
         macro_param_values=plan.get("macro_param_values") or {},
+        allowed_imports=allowed,
     )
-    return prompt_builder.build_translation_system(context_block), db_aliases
+    return prompt_builder.build_translation_system(context_block), db_aliases, allowed
 
 
 def _translate_node(
@@ -485,7 +490,9 @@ def _translate_node(
     return merge_translations(partes)
 
 
-def _load_valid_translations(trans_dir: Path) -> dict[str, NodeTranslation]:
+def _load_valid_translations(
+    trans_dir: Path, allowed_imports: list[str] | None = None
+) -> dict[str, NodeTranslation]:
     """Traducciones persistidas que HOY pasan el chequeo estático.
 
     Retomar una corrida no debe heredar la basura de corridas viejas: un .json
@@ -515,7 +522,7 @@ def _load_valid_translations(trans_dir: Path) -> dict[str, NodeTranslation]:
                 file=sys.stderr,
             )
             continue
-        if check_node_translation(nt) is None:
+        if check_node_translation(nt, allowed_imports) is None:
             translations[nt.node_id] = nt
     return translations
 
@@ -525,6 +532,7 @@ def _translate_checked(
     iteration_note: str | None = None,
     review_note: str | None = None,
     dependencies_context: dict | None = None,
+    allowed_imports: list[str] | None = None,
 ) -> NodeTranslation:
     """Traduce un nodo y NO devuelve nada que no pase el chequeo estático.
 
@@ -552,7 +560,7 @@ def _translate_checked(
                 f"aprobado para este nodo dice '{plan_strategy}'"
             )
         else:
-            failure = check_node_translation(nt)
+            failure = check_node_translation(nt, allowed_imports)
             if failure is None:
                 return nt
             motivo = f"{failure.reason}: {failure.detail}"
@@ -580,7 +588,7 @@ def run_translation(state_dir: Path, output_dir: Path, workspace: Path) -> dict:
     state_dir = Path(state_dir)
     plan = _load_json(state_dir / "translation_plan.json")
     caller = runtime.get_caller(workspace)
-    system, db_aliases = _translation_context(state_dir, plan)
+    system, db_aliases, allowed = _translation_context(state_dir, plan)
     review_notes = _review_notes(state_dir)
     targets_by_id = {str(t.get("node_id")): t for t in plan.get("targets", [])}
 
@@ -589,7 +597,7 @@ def run_translation(state_dir: Path, output_dir: Path, workspace: Path) -> dict:
     # ya tengan .json en disco en vez de perder todo el trabajo en memoria.
     trans_dir = state_dir / "translations"
     trans_dir.mkdir(exist_ok=True)
-    translations = _load_valid_translations(trans_dir)
+    translations = _load_valid_translations(trans_dir, allowed)
 
     for target in plan.get("targets", []):
         nid = str(target.get("node_id"))
@@ -601,6 +609,7 @@ def run_translation(state_dir: Path, output_dir: Path, workspace: Path) -> dict:
                 code=_node_code(state_dir, nid), db_aliases=db_aliases,
                 review_note=review_notes.get(nid),
                 dependencies_context=_deps_context(target, targets_by_id),
+                allowed_imports=allowed,
             )
         except NeedsHuman as exc:
             record_needs_human(
@@ -616,7 +625,8 @@ def run_translation(state_dir: Path, output_dir: Path, workspace: Path) -> dict:
         _dump_json(trans_dir / f"{nid}.json", json.loads(nt.model_dump_json()))
 
     mapping, failures = assemble_notebooks(
-        plan, translations, Path(output_dir), db_bootstrap=bool(db_aliases)
+        plan, translations, Path(output_dir), db_bootstrap=bool(db_aliases),
+        allowed_imports=allowed,
     )
     for failure in failures:
         record_needs_human(
@@ -652,10 +662,9 @@ def retranslate_nodes(
     targets_by_id = {str(t.get("node_id")): t for t in plan.get("targets", [])}
     trans_dir = state_dir / "translations"
 
-    translations = _load_valid_translations(trans_dir)
-
     caller = runtime.get_caller(workspace)
-    system, db_aliases = _translation_context(state_dir, plan)
+    system, db_aliases, allowed = _translation_context(state_dir, plan)
+    translations = _load_valid_translations(trans_dir, allowed)
     review_notes = _review_notes(state_dir)
 
     retranslated = 0
@@ -670,6 +679,7 @@ def retranslate_nodes(
                 iteration_note=iteration_note,
                 review_note=review_notes.get(nid),
                 dependencies_context=_deps_context(target, targets_by_id),
+                allowed_imports=allowed,
             )
         except NeedsHuman as exc:
             record_needs_human(
@@ -686,7 +696,8 @@ def retranslate_nodes(
         retranslated += 1
 
     mapping, failures = assemble_notebooks(
-        plan, translations, Path(output_dir), db_bootstrap=bool(db_aliases)
+        plan, translations, Path(output_dir), db_bootstrap=bool(db_aliases),
+        allowed_imports=allowed,
     )
     for failure in failures:
         record_needs_human(

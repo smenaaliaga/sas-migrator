@@ -32,6 +32,8 @@ from __future__ import annotations
 import ast
 import importlib.util
 import re
+import sys
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -45,6 +47,16 @@ from sas_migrator.core.models.translation import (
 from sas_migrator.core.validation.symbols import undefined_in_cells
 
 BASELINE_IMPORTS = ("import pandas as pd", "import numpy as np")
+
+# Default de librerías de terceros permitidas en el código DESTINO. La fuente
+# de verdad configurable es `translation.allowed_imports` (project_config.yaml);
+# este frozenset la espeja para los callers sin config (stubs, tests). Validar
+# contra el entorno del MIGRADOR era el bug: los notebooks corren en OTRO
+# entorno, documentado por output/requirements.txt.
+DEFAULT_ALLOWED_IMPORTS = frozenset({
+    "matplotlib", "numpy", "openpyxl", "pandas", "pyreadstat", "requests",
+    "scipy", "sqlalchemy",
+})
 # drop table / if_exists=replace: destruyen DDL (permisos, índices) — el
 # reemplazo estilo SAS se replica con DELETE FROM sin WHERE + INSERT.
 FORBIDDEN_SUBSTRINGS = ("to_parquet", "duckdb", "drop table")
@@ -276,12 +288,34 @@ def _row_by_row_write(tree: ast.AST) -> str | None:
     return None
 
 
-def check_node_translation(nt: NodeTranslation) -> NodeAssemblyFailure | None:
+def _import_resolvable(name: str, allowed: frozenset[str] | set[str]) -> bool:
+    """¿El import es legítimo en el código destino?
+
+    stdlib ∪ allowlist deciden sin mirar el entorno local; ``find_spec`` queda
+    como fallback para lo instalado acá que no está declarado (pasa, pero el
+    requirements.txt no lo documenta — la allowlist es el contrato).
+    """
+    if name == ".":
+        return False
+    if name in sys.stdlib_module_names or name in allowed:
+        return True
+    try:
+        return importlib.util.find_spec(name) is not None
+    except (ImportError, ValueError):
+        return False
+
+
+def check_node_translation(
+    nt: NodeTranslation,
+    allowed_imports: Iterable[str] | None = None,
+) -> NodeAssemblyFailure | None:
     """Primer fallo estático del nodo, o None si es ensamblable.
 
     Local al nodo a propósito: así lo puede correr la fase 6 apenas traduce,
     antes de persistir, y usar el ``detail`` como feedback del reintento.
     """
+    allowed = frozenset(allowed_imports) if allowed_imports is not None \
+        else DEFAULT_ALLOWED_IMPORTS
     if not any(cell.strip() for cell in nt.cells):
         return NodeAssemblyFailure(nt.node_id, "empty_translation", "sin celdas de código")
 
@@ -390,13 +424,11 @@ def check_node_translation(nt: NodeTranslation) -> NodeAssemblyFailure | None:
         )
 
     for name in sorted(roots):
-        try:
-            resolvable = name != "." and importlib.util.find_spec(name) is not None
-        except (ImportError, ValueError):
-            resolvable = False
-        if not resolvable:
+        if not _import_resolvable(name, allowed):
             return NodeAssemblyFailure(
-                nt.node_id, "unresolvable_import", f"módulo no resoluble: '{name}'"
+                nt.node_id, "unresolvable_import",
+                f"import no permitido: '{name}' — no es stdlib ni está en "
+                "translation.allowed_imports (project_config.yaml)",
             )
     return None
 
@@ -534,16 +566,20 @@ def assemble_notebooks(
     output_dir: Path,
     *,
     db_bootstrap: bool = False,
+    allowed_imports: Iterable[str] | None = None,
 ) -> tuple[SasPythonMapping, list[NodeAssemblyFailure]]:
     """Construye los notebooks del plan y el mapping SAS→Python.
 
     ``translations``: NodeTranslation por node_id. Un target sin traducción se
     omite en silencio aquí (el caller ya lo registró como needs_human); un
     target cuya traducción falla los chequeos estáticos se omite y se devuelve
-    como ``NodeAssemblyFailure``.
+    como ``NodeAssemblyFailure``. Además emite ``output/requirements.txt`` con
+    las librerías de terceros que los notebooks realmente importan — el
+    contrato del entorno DESTINO.
     """
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+    all_import_lines: list[str] = []
 
     by_notebook: dict[str, list[dict]] = {}
     for target in plan.get("targets", []):
@@ -571,7 +607,7 @@ def assemble_notebooks(
                     )
                 )
                 continue
-            failure = check_node_translation(nt)
+            failure = check_node_translation(nt, allowed_imports)
             if failure is not None:
                 failures.append(failure)
                 continue
@@ -650,5 +686,32 @@ def assemble_notebooks(
             cell["id"] = f"cell-{i:03d}"
         nb["cells"] = cells
         nbformat.write(nb, str(output_dir / name))
+        all_import_lines.extend(imports)
 
+    _write_requirements(output_dir, all_import_lines)
     return SasPythonMapping(mappings=entries), failures
+
+
+def _write_requirements(output_dir: Path, import_lines: list[str]) -> None:
+    """``output/requirements.txt``: las terceras que los notebooks importan.
+
+    Sin esto, "en qué entorno corren los notebooks" era conocimiento oral. El
+    contenido sale de los imports REALES ensamblados (no de la allowlist
+    entera: permitir scipy no obliga a instalarlo).
+    """
+    from sas_migrator.core.utils.fsio import atomic_write_text
+
+    roots: set[str] = set()
+    for line in import_lines:
+        try:
+            roots |= _import_root_names(ast.parse(line))
+        except SyntaxError:
+            continue
+    third_party = sorted(
+        r for r in roots if r != "." and r not in sys.stdlib_module_names
+    )
+    text = (
+        "# Entorno destino de los notebooks generados — emitido por el ensamblador\n"
+        + "".join(f"{name}\n" for name in third_party)
+    )
+    atomic_write_text(output_dir / "requirements.txt", text)

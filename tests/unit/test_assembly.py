@@ -120,6 +120,34 @@ def test_unresolvable_import_fails() -> None:
     assert failure2.reason == "unresolvable_import"
 
 
+def test_allowlist_no_depende_del_entorno_del_migrador() -> None:
+    """El bug real: requests/matplotlib eran válidos por prompt y auditoría,
+    pero el chequeo validaba con find_spec contra ESTE entorno y rechazó 7
+    nodos. Un import de la allowlist pasa aunque no esté instalado acá."""
+    nt = _nt("A", ["x = 1\n"], imports=["import libreria_del_cliente_zz"])
+    assert check_node_translation(nt).reason == "unresolvable_import"
+    assert check_node_translation(nt, ["libreria_del_cliente_zz"]) is None
+    # la stdlib pasa siempre, sin declararla
+    assert check_node_translation(_nt("A", ["import json\nx = 1\n"], imports=[])) is None
+    # los default (contrato de prompts + auditoría) pasan sin config
+    assert check_node_translation(
+        _nt("A", ["x = 1\n"], imports=["import requests", "import matplotlib"])
+    ) is None
+
+
+def test_requirements_txt_documenta_el_entorno_destino(tmp_path: Path) -> None:
+    translations = {
+        "A": _nt("A", ["r = requests.get('https://api').status_code\nx = 1\n"],
+                 imports=["import requests", "import json"]),
+    }
+    _, failures = assemble_notebooks(_plan("A"), translations, tmp_path / "output")
+    assert not failures
+    req = (tmp_path / "output" / "requirements.txt").read_text(encoding="utf-8")
+    lines = [l for l in req.splitlines() if l and not l.startswith("#")]
+    # terceros usados de verdad (baseline pandas/numpy + requests); json es stdlib
+    assert lines == ["numpy", "pandas", "requests"]
+
+
 def test_empty_translation_fails() -> None:
     assert check_node_translation(_nt("A", ["   \n"])).reason == "empty_translation"
 

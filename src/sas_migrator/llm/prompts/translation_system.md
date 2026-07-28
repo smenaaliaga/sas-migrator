@@ -14,8 +14,10 @@ están abajo; el user te dice cuál aplica.
 ## Contrato del output
 
 - `node_id`, `node_label`, `strategy`: copia EXACTA de los del user.
-- `imports`: líneas completas ("import pandas as pd"); solo librerías
-  estándar, pandas, numpy o sqlalchemy. NO pongas imports dentro de `cells`.
+- `imports`: líneas completas ("import pandas as pd"); solo la stdlib y las
+  librerías permitidas del proyecto (el contexto trae la lista; sin lista:
+  pandas, numpy, sqlalchemy, requests, matplotlib, scipy, pyreadstat,
+  openpyxl). NO pongas imports dentro de `cells`.
 - `cells`: 1..n celdas de código Python SIN headers ni anclas (los agrega el
   ensamblador). Celdas cortas y legibles; una responsabilidad por celda.
 - `traceability.sas_construct`: el construct dominante ("PROC SQL CREATE

@@ -283,6 +283,40 @@ def check_dependencies(*, stub: bool = False) -> list[Check]:
     return checks
 
 
+def check_target_env(workspace: Path) -> list[Check]:
+    """¿El entorno local puede EJECUTAR lo que las traducciones pueden importar?
+
+    La allowlist define qué puede importar el código destino; la fase 7 lo
+    ejecuta acá. Una librería permitida y no instalada no rompe la traducción
+    (el chequeo estático no mira el entorno) pero sí la ejecución — mejor
+    saberlo antes que en el notebook 14 de 17.
+    """
+    from sas_migrator.core.config import load_project_config
+
+    try:
+        allowed = load_project_config(workspace).translation.allowed_imports
+    except Exception:
+        return []  # config rota: ya la reportó check_config
+    missing = []
+    for name in sorted(set(allowed)):
+        try:
+            if find_spec(name) is None:
+                missing.append(name)
+        except (ImportError, ValueError):
+            missing.append(name)
+    if not missing:
+        return [Check("translation.allowed_imports", OK, "todas instaladas localmente")]
+    return [
+        Check(
+            "translation.allowed_imports",
+            WARN,
+            f"sin instalar localmente: {', '.join(missing)}",
+            "La traducción no las necesita, pero la fase 7 ejecuta los "
+            f"notebooks acá: pip install {' '.join(missing)}",
+        )
+    ]
+
+
 def check_state(workspace: Path) -> list[Check]:
     """Migración en curso: decir que existe evita un `run` que arranca de cero."""
     from sas_migrator.service.session import CHECKPOINT_FILE
@@ -311,6 +345,7 @@ def run_checks(workspace: Path, *, stub: bool = False) -> Report:
     if not stub:
         checks += check_credential(ws)
     checks += check_dependencies(stub=stub)
+    checks += check_target_env(ws)
     checks += check_state(ws)
     return Report(ws, checks)
 

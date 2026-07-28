@@ -60,6 +60,7 @@ def build_project_context(
     connections: list[dict],
     improvements: list[dict],
     macro_param_values: dict,
+    allowed_imports: list[str] | None = None,
 ) -> str | None:
     """Bloque system con lo que el proyecto sabe y el traductor necesitaba.
 
@@ -101,6 +102,13 @@ def build_project_context(
         )
         for k in sorted(macro_param_values):
             parts.append(f"- &{k} = {macro_param_values[k]!r}")
+    if allowed_imports:
+        parts.append(
+            "\n## Librerías permitidas en el código destino\n"
+            "stdlib de Python más: "
+            + ", ".join(sorted(allowed_imports))
+            + ". Cualquier otro import hace fallar el chequeo estático."
+        )
     if len(parts) == 1:
         return None
     return "\n".join(parts)

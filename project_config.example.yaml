@@ -30,12 +30,32 @@ llm:
   provider: "anthropic"
   model: "claude-opus-5"
   max_tokens: 16000
+  # Tope de salida por tarea (translate, verify, analysis_reviews, matching,
+  # docs, mismatch_diagnosis). Ausente la clave, rige max_tokens.
+  max_tokens_by_task: {}
+  #  translation: 32000
   max_validation_retries: 3
   # Solo con provider=foundry: el <resource> de
   # https://<resource>.services.ai.azure.com — infraestructura, no secreto.
   foundry_resource: ""
   # Las API keys NO van acá (este archivo se commitea): van en .env o en el
   # entorno — ANTHROPIC_API_KEY / ANTHROPIC_FOUNDRY_API_KEY. Ver .env.example.
+
+translation:
+  # Librerías de terceros que las traducciones pueden importar (además de la
+  # stdlib). Es el contrato del entorno DESTINO de los notebooks — el
+  # ensamblador emite output/requirements.txt con las que se usan de verdad.
+  # Agregar acá una librería del cliente la habilita en el chequeo estático y
+  # se la anuncia al traductor en el prompt.
+  allowed_imports:
+    - matplotlib
+    - numpy
+    - openpyxl
+    - pandas
+    - pyreadstat
+    - requests
+    - scipy
+    - sqlalchemy
 
 run:
   # Valores de las variables macro que el SAS heredaba del entorno (autoexec
