@@ -188,6 +188,35 @@ def test_last_usage_se_resetea_al_entrar_y_captura_cache_creation(monkeypatch) -
     assert caller.last_usage is None
 
 
+def test_models_by_task_elige_el_modelo_por_tarea(monkeypatch) -> None:
+    """haiku-para-todo fue el anti-patrón medido: la traducción amerita el
+    modelo fuerte, el matching no necesita pagarlo."""
+    _, calls = _install_fake_sdk(monkeypatch, [_ok(1), _ok(2)])
+    caller = AnthropicCaller(
+        LlmConfig(model="claude-haiku-4-5", models_by_task={"translation": "claude-opus-5"})
+    )
+    caller.call(task="translation", system_blocks=[], user_content="c", output_model=Demo)
+    assert calls[0]["model"] == "claude-opus-5"
+    assert caller.last_model == "claude-opus-5", "el trace registra el modelo real"
+    caller.call(task="matching", system_blocks=[], user_content="c", output_model=Demo)
+    assert calls[1]["model"] == "claude-haiku-4-5"
+
+
+def test_runtime_cachea_el_caller_por_workspace(tmp_path, monkeypatch) -> None:
+    """La degradación native→tool y el presupuesto viven en la instancia:
+    reconstruirla por fase los reseteaba."""
+    _install_fake_sdk(monkeypatch, [])
+    monkeypatch.setattr("sas_migrator.llm.env.load_env", lambda ws=None: None)
+    runtime.set_caller(None)  # limpia override y cache
+    c1 = runtime.get_caller(tmp_path)
+    c2 = runtime.get_caller(tmp_path)
+    assert c1 is c2
+    otro = tmp_path / "otro"
+    otro.mkdir()
+    assert runtime.get_caller(otro) is not c1
+    runtime.set_caller(None)
+
+
 def test_max_tokens_by_task_gana_al_default(monkeypatch) -> None:
     _, calls = _install_fake_sdk(monkeypatch, [_ok(1), _ok(2)])
     caller = AnthropicCaller(

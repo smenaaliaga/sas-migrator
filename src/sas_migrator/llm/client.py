@@ -63,6 +63,7 @@ class AnthropicCaller:
         self._anthropic = anthropic
         self.config = config or LlmConfig()
         self.last_usage: dict[str, Any] | None = None
+        self.last_model: str | None = None
         self._client = self._build_client(anthropic, self.config)
         # "auto" arranca nativo y degrada a tool en el primer rechazo del
         # backend; el modo resuelto se conserva para el resto de la corrida.
@@ -162,6 +163,7 @@ class AnthropicCaller:
         system: list[dict[str, Any]] | None,
         output_model: type[T],
         max_tokens: int,
+        model: str | None = None,
     ) -> Any:
         """Una llamada al backend en el modo vigente, con degradación única.
 
@@ -170,7 +172,7 @@ class AnthropicCaller:
         degradación no consume un intento de validación.
         """
         kwargs: dict[str, Any] = {
-            "model": self.config.model,
+            "model": model or self.config.model,
             "max_tokens": max_tokens,
             "messages": list(messages),
         }
@@ -199,7 +201,7 @@ class AnthropicCaller:
             self._mode = "tool"
             return self._invoke(
                 messages=messages, system=system, output_model=output_model,
-                max_tokens=max_tokens,
+                max_tokens=max_tokens, model=model,
             )
 
     def _extract(self, response: Any, output_model: type[T]) -> T:
@@ -239,12 +241,16 @@ class AnthropicCaller:
             or self.config.max_tokens_by_task.get(task)
             or self.config.max_tokens
         )
+        # Modelo por tarea; last_model queda expuesto para que el trace (y el
+        # costo) registren el modelo REAL de cada llamada, no el default.
+        resolved_model = self.config.models_by_task.get(task) or self.config.model
+        self.last_model = resolved_model
 
         for attempts in range(1, retries + 1):
             try:
                 response = self._invoke(
                     messages=messages, system=system, output_model=output_model,
-                    max_tokens=resolved_max_tokens,
+                    max_tokens=resolved_max_tokens, model=resolved_model,
                 )
             except self._anthropic.APIError:
                 raise  # transporte/API: visible, reanudable — jamás NeedsHuman

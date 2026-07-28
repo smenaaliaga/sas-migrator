@@ -98,6 +98,11 @@ class TracingCaller:
             raise
         finally:
             record["duration_ms"] = int((time.monotonic() - start) * 1000)
+            # El modelo REAL de esta llamada: models_by_task puede cambiarlo
+            # por tarea, y el costo se calcula con la tarifa del que corrió.
+            last_model = getattr(self._inner, "last_model", None)
+            if last_model:
+                record["model"] = last_model
             usage = getattr(self._inner, "last_usage", None)
             if usage:
                 record["usage"] = usage

@@ -67,6 +67,12 @@ class LlmConfig(BaseModel):
 
     provider: Literal["anthropic", "foundry"] = "anthropic"
     model: str = "claude-opus-5"
+    # Modelo POR TAREA (translation, verify, analysis_reviews, improvements,
+    # matching, mismatch_diagnosis, docs). Un solo modelo para todo es el
+    # anti-patrón medido en producción (haiku-para-todo): la traducción y el
+    # verificador ameritan el modelo fuerte; matching o docs pueden ir en un
+    # tier menor. Ausente la clave, rige `model`.
+    models_by_task: dict[str, str] = Field(default_factory=dict)
     max_tokens: int = 16000
     # Presupuesto de salida POR TAREA (analysis, matching, translate, verify,
     # diagnose, docs). Un solo max_tokens para 6 tareas obliga a dimensionar
