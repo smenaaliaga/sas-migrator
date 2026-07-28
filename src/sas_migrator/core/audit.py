@@ -32,6 +32,7 @@ from typing import Any
 
 from sas_migrator.core.http_evidence import extract_http_hosts  # noqa: F401  (re-export histórico)
 from sas_migrator.core.utils.fsio import atomic_write_text, dump_json
+from sas_migrator.core.utils.node_io import load_node
 
 
 @dataclass
@@ -435,7 +436,7 @@ def run_audit(state_dir: Path, output_dir: Path) -> int:
         if node_id not in sas_by_id:
             node_file = state_dir / "nodes" / f"{node_id}.json"
             try:
-                sas_by_id[node_id] = str(load_json(node_file).get("code", ""))
+                sas_by_id[node_id] = str((load_node(node_file) or {}).get("code", ""))
             except Exception:
                 sas_by_id[node_id] = ""
         return sas_by_id[node_id]

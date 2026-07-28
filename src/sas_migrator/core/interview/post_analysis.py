@@ -29,6 +29,7 @@ from sas_migrator.core.models.interview import (
     Question,
     QuestionType,
 )
+from sas_migrator.core.utils.node_io import load_node
 
 INTERVIEW = "post_analysis"
 PHASE = 4
@@ -338,7 +339,7 @@ def _build_query_card(state_dir: Path, queries: list[dict]) -> InterviewCard | N
 
 
 def _query_node(state_dir: Path, node_id: str) -> dict:
-    return load_json(Path(state_dir) / "nodes" / f"{node_id}.json") or {}
+    return load_node(Path(state_dir) / "nodes" / f"{node_id}.json") or {}
 
 
 def _from_last_run(state_dir: Path, node_id: str) -> bool:

@@ -29,6 +29,7 @@ from pathlib import Path
 
 from sas_migrator.core.parser.statements import DEFAULT_DB_ENGINES, resolve_db_engines
 from sas_migrator.core.utils.fsio import dump_json
+from sas_migrator.core.utils.node_io import decode_node_code, dump_node
 
 # Consolas Windows cp1252 no soportan "✓" — forzar UTF-8 en stdout.
 if hasattr(sys.stdout, "reconfigure"):
@@ -47,7 +48,7 @@ FILE_EXTENSIONS = {"XLSX", "XLS", "CSV", "TXT", "PDF", "HTML", "SAS7BDAT"}
 def load_nodes(nodes_dir: Path) -> dict[str, dict]:
     nodes = {}
     for p in sorted(nodes_dir.glob("*.json")):
-        n = json.loads(p.read_text(encoding="utf-8"))
+        n = decode_node_code(json.loads(p.read_text(encoding="utf-8")))
         nodes[n["id"]] = n
     return nodes
 
@@ -498,7 +499,7 @@ def main(state_dir: Path | None = None):
         if "classification" not in meta:
             meta.update(classify_node(node, sinks))
 
-        dump_json(nodes_dir / f"{nid}.json", node)
+        dump_node(nodes_dir / f"{nid}.json", node)
     print("  ✓ Nodos clasificados")
 
     # ── 2. Code smells ─────────────────────────────────────────

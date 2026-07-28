@@ -177,7 +177,7 @@ def test_reextraction_preserves_node_enrichment(synthetic_egp, tmp_path):
     assert after["metadata"]["migration_priority"] == "critical"
     assert "CALCULATED" in after["translation_notes"]
     # La topología y el código sí se refrescan desde el .egp.
-    assert after["code"], "el código debe seguir viniendo de la extracción"
+    assert after["code_lines"], "el código debe seguir viniendo de la extracción"
     assert after["metadata"].get("sas_constructs"), "los constructs se recalculan"
 
 

@@ -29,6 +29,7 @@ from pathlib import Path
 from sas_migrator.core.http_evidence import build_http_evidence
 from sas_migrator.core.parser.statements import resolve_db_engines
 from sas_migrator.core.utils.fsio import dump_json
+from sas_migrator.core.utils.node_io import decode_node_code
 
 # Consolas Windows cp1252 no soportan "✓" — forzar UTF-8 en stdout.
 if hasattr(sys.stdout, "reconfigure"):
@@ -45,7 +46,10 @@ WRITE_PATTERNS = re.compile(
 
 
 def load_nodes(nodes_dir: Path) -> list[dict]:
-    return [json.loads(p.read_text(encoding="utf-8")) for p in sorted(nodes_dir.glob("*.json"))]
+    return [
+        decode_node_code(json.loads(p.read_text(encoding="utf-8")))
+        for p in sorted(nodes_dir.glob("*.json"))
+    ]
 
 
 def topo_order(node_ids: list[str], edges: list[dict]) -> dict[str, int]:

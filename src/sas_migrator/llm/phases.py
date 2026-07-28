@@ -20,6 +20,7 @@ from sas_migrator.core.models.translation import Confidence, NodeTranslation
 from sas_migrator.core.utils import fsio
 from sas_migrator.core.utils.fsio import dump_json as _dump_json
 from sas_migrator.core.utils.needs_human import record as record_needs_human
+from sas_migrator.core.utils.node_io import load_node
 from sas_migrator.llm import prompt_builder, runtime
 from sas_migrator.llm.contracts import (
     DiagnosesOut,
@@ -87,7 +88,7 @@ def _node_code(state_dir: Path, node_id: str) -> str:
     path = state_dir / "nodes" / f"{node_id}.json"
     if not path.exists():
         return ""
-    return str(_load_json(path).get("code") or "")
+    return str((load_node(path, required=True) or {}).get("code") or "")
 
 
 def _node_excerpt(state_dir: Path, node_id: str, limit: int) -> str:

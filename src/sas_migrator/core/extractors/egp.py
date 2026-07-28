@@ -33,6 +33,7 @@ from sas_migrator.core.models.graph import (
     SASNode,
 )
 from sas_migrator.core.parser.statements import parse_sas_code
+from sas_migrator.core.utils.node_io import dump_node
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -759,8 +760,7 @@ def extract_egp(egp_path: str | Path, output_dir: str | Path | None = None) -> F
         for node in graph.nodes:
             node_path = out / "nodes" / f"{node.id}.json"
             node_dict = _merge_node_enrichment(node.model_dump(mode="json"), node_path)
-            with open(node_path, "w", encoding="utf-8") as f:
-                json.dump(node_dict, f, indent=2, ensure_ascii=False)
+            dump_node(node_path, node_dict)
 
         # extraction_residue.json — cuadratura .egp ↔ nodos (gate de Fase 2)
         with open(out / "extraction_residue.json", "w", encoding="utf-8") as f:

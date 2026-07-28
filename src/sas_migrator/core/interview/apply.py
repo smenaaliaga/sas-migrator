@@ -34,6 +34,7 @@ from sas_migrator.core.models.interview import (
     InterviewQA,
     QuestionBlock,
 )
+from sas_migrator.core.utils.node_io import dump_node, load_node
 
 Collected = list[tuple[InterviewCard, CardAnswers]]
 
@@ -231,7 +232,7 @@ def _write_placement_decisions(
         engines = resolve_db_engines(Path(state_dir).parent)
         parses = {}
         for n in ambiguous:
-            node = load_json(state_dir / "nodes" / f"{n['id']}.json") or {}
+            node = load_node(state_dir / "nodes" / f"{n['id']}.json") or {}
             parses[n["id"]] = parse_sas_code(node.get("code") or "")
         db_libs = project_db_librefs(parses, engines) | set(confirmed)
 
@@ -370,10 +371,10 @@ def apply_post_analysis(state_dir: Path, collected: Collected) -> dict:
     atomic_write_yaml(state_dir / "ignored_nodes.yaml", {"ignored_nodes": sorted(ignored)})
     for nid, note in sorted(notes.items()):
         node_path = state_dir / "nodes" / f"{nid}.json"
-        node = load_json(node_path)
+        node = load_node(node_path)
         if node is not None:
             node["translation_notes"] = note
-            atomic_write_json(node_path, node)
+            dump_node(node_path, node)
 
     # 3. Mejoras → approved_improvements.yaml (toda M-xxx con decisión).
     decisions = _improvement_decisions(collected)

@@ -24,6 +24,7 @@ from sas_migrator.core.parser.statements import (
 )
 from sas_migrator.core.utils.fsio import dump_json as _dump_json
 from sas_migrator.core.utils.fsio import load_json
+from sas_migrator.core.utils.node_io import load_node
 
 _load_json = partial(load_json, required=True)
 
@@ -40,7 +41,7 @@ def enrich_state(state_dir: Path) -> dict:
 
     parses: dict[str, NodeParse] = {}
     for node_file in sorted(nodes_dir.glob("*.json")):
-        node = _load_json(node_file)
+        node = load_node(node_file, required=True)
         parses[node["id"]] = parse_sas_code(node.get("code") or "")
 
     db_libs = project_db_librefs(parses, db_engines)

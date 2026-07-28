@@ -57,7 +57,9 @@ mi_migracion/
 │   └── docs/              # documentación de negocio opcional
 ├── state/                 # TODOS los artefactos intermedios (auditable)
 │   ├── checkpoint.sqlite  # checkpointer LangGraph (reanudación)
-│   ├── nodes/*.json       # un JSON por nodo SAS extraído
+│   ├── nodes/*.json       # un JSON por nodo SAS extraído (código como
+│   │                      #   `code_lines`, una línea por elemento; codec
+│   │                      #   único en core/utils/node_io.py)
 │   ├── translations/*.json# una NodeTranslation persistida por nodo
 │   ├── needs_human.yaml   # la cola de trabajo humano pendiente
 │   ├── llm_trace.jsonl    # cada llamada LLM: tokens, costo, outcome
