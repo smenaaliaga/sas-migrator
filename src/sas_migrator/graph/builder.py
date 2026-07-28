@@ -14,6 +14,7 @@ from typing import Literal
 
 from langgraph.graph import END, StateGraph
 
+from sas_migrator.core.utils.fsio import atomic_write_text
 from sas_migrator.core.utils.schema_validation import check_gate
 from sas_migrator.graph import nodes
 from sas_migrator.graph.state import GateRecord, MigrationGraphState
@@ -48,8 +49,8 @@ def _project_migration_state(state: MigrationGraphState, phase: int, passed: boo
         current_phase=current,
         output_strategy="notebook-flow",
     )
-    (ws / "state" / "migration_state.json").write_text(
-        ms.model_dump_json(indent=2), encoding="utf-8"
+    atomic_write_text(
+        ws / "state" / "migration_state.json", ms.model_dump_json(indent=2)
     )
 
 

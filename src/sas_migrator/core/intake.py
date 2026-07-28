@@ -20,10 +20,11 @@ Exit codes:
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
+
+from sas_migrator.core.utils.fsio import dump_json
 
 DATA_SUFFIXES = {".csv", ".xlsx", ".xls", ".parquet"}
 DOC_SUFFIXES = {".md", ".docx", ".pdf", ".html", ".txt"}
@@ -70,7 +71,7 @@ def main() -> int:
     intake = scan(input_dir)
 
     out = state_dir / "intake.json"
-    out.write_text(json.dumps(intake, indent=2, ensure_ascii=False), encoding="utf-8")
+    dump_json(out, intake)
 
     n_egp = len(intake["egp_files"])
     n_data = len(intake["data_files"])

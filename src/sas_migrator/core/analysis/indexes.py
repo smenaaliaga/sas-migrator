@@ -25,6 +25,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from sas_migrator.core.parser.statements import resolve_db_engines
+from sas_migrator.core.utils.fsio import dump_json
 
 # Consolas Windows cp1252 no soportan "✓" — forzar UTF-8 en stdout.
 if hasattr(sys.stdout, "reconfigure"):
@@ -207,9 +208,7 @@ def main() -> None:
         "total_nodes": len(nodes),
         "nodes": sorted(index_nodes, key=lambda x: x["topo_order"]),
     }
-    (state / "nodes_index.json").write_text(
-        json.dumps(nodes_index, ensure_ascii=False, separators=(",", ":")), encoding="utf-8"
-    )
+    dump_json(state / "nodes_index.json", nodes_index, indent=None, separators=(",", ":"))
 
     # ── db_evidence.json ────────────────────────────────────────
     librefs_out = []
@@ -252,9 +251,7 @@ def main() -> None:
             "unverified_prefixes: prefijos sin LIBNAME y con poca evidencia — confirmar con el usuario en el bloque B4b",
         ],
     }
-    (state / "db_evidence.json").write_text(
-        json.dumps(db_evidence, indent=1, ensure_ascii=False), encoding="utf-8"
-    )
+    dump_json(state / "db_evidence.json", db_evidence, indent=1)
 
     kb = lambda p: (state / p).stat().st_size / 1024
     print(f"✓ nodes_index.json: {len(nodes)} nodos ({kb('nodes_index.json'):.1f} KB)")

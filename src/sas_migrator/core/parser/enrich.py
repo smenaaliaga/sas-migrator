@@ -13,7 +13,7 @@ integración (tests/integration) sigue siendo la puerta de entrada de cada
 
 from __future__ import annotations
 
-import json
+from functools import partial
 from pathlib import Path
 
 from sas_migrator.core.parser.placement import classify_placement, project_db_librefs
@@ -22,14 +22,10 @@ from sas_migrator.core.parser.statements import (
     parse_sas_code,
     resolve_db_engines,
 )
+from sas_migrator.core.utils.fsio import dump_json as _dump_json
+from sas_migrator.core.utils.fsio import load_json
 
-
-def _load_json(path: Path):
-    return json.loads(path.read_text(encoding="utf-8"))
-
-
-def _dump_json(path: Path, data) -> None:
-    path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+_load_json = partial(load_json, required=True)
 
 
 def enrich_state(state_dir: Path) -> dict:

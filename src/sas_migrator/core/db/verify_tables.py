@@ -17,7 +17,6 @@ Exit codes:
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -26,6 +25,7 @@ import yaml
 
 from sas_migrator.core.config import ProjectConfig
 from sas_migrator.core.db.engine import build_engine
+from sas_migrator.core.utils.fsio import dump_json
 
 
 def verify(state_dir: Path, config: ProjectConfig | None = None) -> tuple[dict, int]:
@@ -73,9 +73,7 @@ def verify(state_dir: Path, config: ProjectConfig | None = None) -> tuple[dict, 
                 "note": f"Sin acceso a la BD ({conn_cfg.get('alias', '?')}): {e}",
                 "exists": [], "missing_targets": [], "missing_sources": [],
             }
-            (state_dir / "table_verification.json").write_text(
-                json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8"
-            )
+            dump_json(state_dir / "table_verification.json", report)
             return report, 3
 
     missing_targets = [m for m in missing if m["role"] in ("target", "both")]
@@ -91,9 +89,7 @@ def verify(state_dir: Path, config: ProjectConfig | None = None) -> tuple[dict, 
         "missing_targets": missing_targets,
         "missing_sources": missing_sources,
     }
-    (state_dir / "table_verification.json").write_text(
-        json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8"
-    )
+    dump_json(state_dir / "table_verification.json", report)
     return report, (2 if missing_targets else 0)
 
 

@@ -33,6 +33,8 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
+from sas_migrator.core.utils.fsio import dump_json
+
 try:
     import yaml
 except ImportError:  # yaml is a project dep; degrade gracefully for JSON-only inputs
@@ -351,7 +353,7 @@ def main() -> int:
         return 1
 
     out = state / "translation_plan.json"
-    out.write_text(json.dumps(plan, indent=2, ensure_ascii=False), encoding="utf-8")
+    dump_json(out, plan)
 
     n_nb = len({t["notebook_path"] for t in plan["targets"]})
     n_imp = sum(len(t["approved_improvements"]) for t in plan["targets"]) + len(plan["global_improvements"])

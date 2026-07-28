@@ -30,6 +30,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from sas_migrator.core.utils.fsio import atomic_write_text, dump_json
+
 
 @dataclass
 class Issue:
@@ -725,7 +727,7 @@ def run_audit(state_dir: Path, output_dir: Path) -> int:
 
     out_json = state_dir / "node_translation_audit.json"
     out_md = state_dir / "node_translation_audit.md"
-    out_json.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    dump_json(out_json, report)
 
     lines: list[str] = []
     lines.append("# Node Translation Audit")
@@ -752,7 +754,7 @@ def run_audit(state_dir: Path, output_dir: Path) -> int:
         lines.append("")
     lines.append(_issue_list_to_md(issues))
 
-    out_md.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    atomic_write_text(out_md, "\n".join(lines) + "\n")
 
     print(json.dumps(report["summary"], ensure_ascii=False))
     return 0

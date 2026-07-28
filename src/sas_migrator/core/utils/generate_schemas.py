@@ -12,7 +12,6 @@ segunda copia del mismo contrato sin consumidor.
 
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 
@@ -36,6 +35,7 @@ from sas_migrator.core.models.validation import (
     NodeTranslationAuditReport,
     ValidationReport,
 )
+from sas_migrator.core.utils.fsio import dump_json
 
 # Map schema_name → Pydantic model (1:1 con los nombres de GATE_REQUIREMENTS)
 SCHEMA_MAP: dict[str, type] = {
@@ -61,10 +61,7 @@ def generate(output_dir: Path) -> None:
     for name, model in SCHEMA_MAP.items():
         schema = model.model_json_schema()
         path = output_dir / f"{name}.schema.json"
-        path.write_text(
-            json.dumps(schema, indent=2, ensure_ascii=False) + "\n",
-            encoding="utf-8",
-        )
+        dump_json(path, schema, trailing_newline=True)
         print(f"  ✓ {path.name}")
 
 

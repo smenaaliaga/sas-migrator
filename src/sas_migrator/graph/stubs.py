@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
 
 import yaml
 
@@ -32,16 +31,9 @@ from sas_migrator.core.models.interview import (
     Question,
     QuestionBlock,
 )
-
-
-def _dump_yaml(path: Path, data: Any) -> None:
-    path.write_text(
-        yaml.safe_dump(data, allow_unicode=True, sort_keys=False), encoding="utf-8"
-    )
-
-
-def _dump_json(path: Path, data: Any) -> None:
-    path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+from sas_migrator.core.utils.fsio import atomic_write_text
+from sas_migrator.core.utils.fsio import dump_json as _dump_json
+from sas_migrator.core.utils.fsio import dump_yaml as _dump_yaml
 
 
 def _model_dump(model) -> dict:
@@ -309,8 +301,8 @@ def stub_docs(state_dir: Path, output_dir: Path) -> None:
     docs = output_dir / "docs"
     docs.mkdir(parents=True, exist_ok=True)
     for name in ("README.md", "LINEAGE.md", "DECISIONS.md", "IMPROVEMENTS.md", "RUNBOOK.md"):
-        (docs / name).write_text(
+        atomic_write_text(
+            docs / name,
             f"# {name[:-3]}\n\n[stub] Documento generado por stub de Etapa 1; "
             "la prosa real la escribe el nodo LLM doc-writer (Etapa 4).\n",
-            encoding="utf-8",
         )

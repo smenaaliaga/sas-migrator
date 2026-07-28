@@ -24,6 +24,8 @@ import json
 import sys
 from pathlib import Path
 
+from sas_migrator.core.utils.fsio import dump_json
+
 # Asegurar que src/ sea importable
 
 try:
@@ -172,10 +174,7 @@ def main():
 
     # Combinar con perfiles existentes
     all_profiles = existing_profiles + db_profiles
-    report_path.write_text(
-        json.dumps(all_profiles, indent=2, ensure_ascii=False) + "\n",
-        encoding="utf-8",
-    )
+    dump_json(report_path, all_profiles, trailing_newline=True)
     print(f"\n✅ Profile report actualizado: {report_path}")
     print(f"   {len(existing_profiles)} perfiles de archivos + {len(db_profiles)} perfiles de tablas DB")
 

@@ -39,6 +39,7 @@ _CSV_SEP: str = ";"
 # ---------------------------------------------------------------------------
 
 from sas_migrator.core.db.engine import build_engine  # noqa: E402
+from sas_migrator.core.utils.fsio import dump_json  # noqa: E402
 
 
 def load_reference(path: Path) -> pd.DataFrame | None:
@@ -374,9 +375,7 @@ def run_cascade(
 
     def write_report(report: dict) -> dict:
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(
-            json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8"
-        )
+        dump_json(output_path, report)
         return report
 
     if not ref_dir.exists() or not any(ref_dir.iterdir()):

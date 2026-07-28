@@ -7,31 +7,23 @@ su fase bloquea hasta que alguien lo resuelva. Nunca silencio.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
-import yaml
-
 from sas_migrator.core.models.state import NeedsHumanItem, NeedsHumanQueue
+from sas_migrator.core.utils import fsio
 
 FILENAME = "needs_human.yaml"
 
 
 def load_queue(state_dir: Path) -> NeedsHumanQueue:
-    path = Path(state_dir) / FILENAME
-    if not path.exists():
-        return NeedsHumanQueue()
-    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    data = fsio.load_yaml(Path(state_dir) / FILENAME) or {}
     return NeedsHumanQueue.model_validate(data)
 
 
 def _save(state_dir: Path, queue: NeedsHumanQueue) -> None:
-    import json
-
-    path = Path(state_dir) / FILENAME
-    path.write_text(
-        yaml.safe_dump(json.loads(queue.model_dump_json()), allow_unicode=True,
-                       sort_keys=False),
-        encoding="utf-8",
+    fsio.dump_yaml(
+        Path(state_dir) / FILENAME, json.loads(queue.model_dump_json())
     )
 
 

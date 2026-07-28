@@ -6,7 +6,6 @@ del grafo lo persiste el checkpointer.
 from __future__ import annotations
 
 import contextlib
-import json
 import sys
 from pathlib import Path
 
@@ -16,6 +15,7 @@ from sas_migrator.core.analysis import analyze as core_analyze
 from sas_migrator.core.analysis import indexes as core_indexes
 from sas_migrator.core.analysis import ledger as core_ledger
 from sas_migrator.core.extractors.egp import extract_egp
+from sas_migrator.core.utils.fsio import dump_json as _dump_json
 from sas_migrator.graph import stubs
 from sas_migrator.graph.state import MigrationGraphState
 
@@ -38,10 +38,6 @@ def _argv(args: list[str]):
         yield
     finally:
         sys.argv = old
-
-
-def _dump_json(path: Path, data) -> None:
-    path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
 # ── Fase 0: intake ───────────────────────────────────────────────────────────

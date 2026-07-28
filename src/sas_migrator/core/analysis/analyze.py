@@ -28,6 +28,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from sas_migrator.core.parser.statements import DEFAULT_DB_ENGINES, resolve_db_engines
+from sas_migrator.core.utils.fsio import dump_json
 
 # Consolas Windows cp1252 no soportan "✓" — forzar UTF-8 en stdout.
 if hasattr(sys.stdout, "reconfigure"):
@@ -497,9 +498,7 @@ def main(state_dir: Path | None = None):
         if "classification" not in meta:
             meta.update(classify_node(node, sinks))
 
-        (nodes_dir / f"{nid}.json").write_text(
-            json.dumps(node, indent=2, ensure_ascii=False), encoding="utf-8"
-        )
+        dump_json(nodes_dir / f"{nid}.json", node)
     print("  ✓ Nodos clasificados")
 
     # ── 2. Code smells ─────────────────────────────────────────
@@ -519,9 +518,7 @@ def main(state_dir: Path | None = None):
         },
         "smells": all_smells,
     }
-    (state / "code_smells.json").write_text(
-        json.dumps(code_smells, indent=2, ensure_ascii=False), encoding="utf-8"
-    )
+    dump_json(state / "code_smells.json", code_smells)
     print(f"  ✓ {len(all_smells)} smells detectados "
           f"(E:{code_smells['summary']['error']} "
           f"W:{code_smells['summary']['warning']} "
@@ -530,9 +527,7 @@ def main(state_dir: Path | None = None):
     # ── 3. Evidencia para fichas M-xxx ─────────────────────────
     print("Construyendo evidencia de análisis ...")
     evidence = build_evidence(nodes, all_smells, magic_numbers, db_engines)
-    (state / "analysis_evidence.json").write_text(
-        json.dumps(evidence, indent=2, ensure_ascii=False), encoding="utf-8"
-    )
+    dump_json(state / "analysis_evidence.json", evidence)
     print(f"  ✓ analysis_evidence.json: "
           f"{len(evidence['duplicated_code_blocks'])} bloques duplicados, "
           f"{len(evidence['repeated_expressions'])} expresiones repetidas, "
@@ -555,9 +550,7 @@ def main(state_dir: Path | None = None):
         "covered_nodes": len({e["node_id"] for e in entries}),
         "lineage": entries,
     }
-    (state / "lineage.json").write_text(
-        json.dumps(lineage, indent=2, ensure_ascii=False), encoding="utf-8"
-    )
+    dump_json(state / "lineage.json", lineage)
     print(f"  ✓ {len(lineage['lineage'])} entradas de linaje "
           f"({lineage['covered_nodes']}/{len(nodes)} nodos cubiertos)")
 

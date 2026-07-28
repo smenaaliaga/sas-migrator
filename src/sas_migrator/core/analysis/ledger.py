@@ -26,6 +26,8 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
+from sas_migrator.core.utils.fsio import dump_json
+
 LEDGER_FILE = "analysis_progress.json"
 
 
@@ -46,10 +48,7 @@ def save_ledger(state_dir: Path, ledger: dict) -> None:
     ledger["total_nodes"] = len(nodes)
     ledger["reviewed"] = sum(1 for n in nodes if n.get("status") == "reviewed")
     ledger["pending"] = ledger["total_nodes"] - ledger["reviewed"]
-    (state_dir / LEDGER_FILE).write_text(
-        json.dumps(ledger, ensure_ascii=False, separators=(",", ":")),
-        encoding="utf-8",
-    )
+    dump_json(state_dir / LEDGER_FILE, ledger, indent=None, separators=(",", ":"))
 
 
 def cmd_init(state_dir: Path) -> int:

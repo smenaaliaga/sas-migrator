@@ -22,6 +22,8 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from sas_migrator.core.utils.fsio import atomic_write_text
+
 TEMPLATE = '''#!/usr/bin/env python3
 """Ejecuta todos los notebooks en orden topológico.
 
@@ -97,8 +99,8 @@ def write_run_all(output_dir: Path) -> list[str]:
     if not notebooks:
         return []
     notebook_lines = "\n".join(f"    {nb!r}," for nb in notebooks)
-    (output_dir / "run_all.py").write_text(
-        TEMPLATE.format(notebook_lines=notebook_lines), encoding="utf-8"
+    atomic_write_text(
+        output_dir / "run_all.py", TEMPLATE.format(notebook_lines=notebook_lines)
     )
     return notebooks
 

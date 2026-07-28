@@ -1,47 +1,26 @@
-"""Lectura tolerante y escritura atómica de artefactos de state/."""
+"""Lectura tolerante y escritura atómica de artefactos de state/.
+
+La implementación vive en ``core.utils.fsio`` (única copia para todo el repo);
+este módulo re-exporta con los nombres históricos para no tocar los imports
+de las entrevistas.
+"""
 
 from __future__ import annotations
 
-import contextlib
-import json
-import os
-import tempfile
 from pathlib import Path
 from typing import Any
 
-import yaml
-
-
-def load_json(path: Path) -> Any:
-    """JSON de disco; None si no existe."""
-    if not path.exists():
-        return None
-    return json.loads(path.read_text(encoding="utf-8"))
-
-
-def load_yaml(path: Path) -> Any:
-    """YAML de disco; None si no existe."""
-    if not path.exists():
-        return None
-    return yaml.safe_load(path.read_text(encoding="utf-8"))
-
-
-def _atomic_write(path: Path, text: str) -> None:
-    """Escritura temp+rename: el artefacto nunca queda a medio escribir."""
-    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
-            f.write(text)
-        os.replace(tmp, path)
-    except BaseException:
-        with contextlib.suppress(OSError):
-            os.unlink(tmp)
-        raise
+from sas_migrator.core.utils.fsio import (  # noqa: F401  (re-export)
+    dump_json,
+    dump_yaml,
+    load_json,
+    load_yaml,
+)
 
 
 def atomic_write_yaml(path: Path, data: Any) -> None:
-    _atomic_write(path, yaml.safe_dump(data, allow_unicode=True, sort_keys=False))
+    dump_yaml(path, data)
 
 
 def atomic_write_json(path: Path, data: Any) -> None:
-    _atomic_write(path, json.dumps(data, indent=2, ensure_ascii=False))
+    dump_json(path, data)

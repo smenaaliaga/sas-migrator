@@ -16,6 +16,8 @@ from pathlib import Path
 import yaml
 
 from sas_migrator.core.models.translation import Confidence, NodeTranslation
+from sas_migrator.core.utils import fsio
+from sas_migrator.core.utils.fsio import dump_json as _dump_json
 from sas_migrator.core.utils.needs_human import record as record_needs_human
 from sas_migrator.llm import prompt_builder, runtime
 from sas_migrator.llm.contracts import (
@@ -48,11 +50,9 @@ ANALYSIS_EXCERPT_CHARS = 20_000
 
 
 def _load_json(path: Path):
-    return json.loads(path.read_text(encoding="utf-8"))
-
-
-def _dump_json(path: Path, data) -> None:
-    path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    # required=True: acá los artefactos los garantizan los gates previos — un
+    # faltante es un bug de secuencia, no un estado tolerable.
+    return fsio.load_json(path, required=True)
 
 
 def _seeded_improvements(state_dir: Path) -> list[dict]:
@@ -236,9 +236,7 @@ def run_analysis(state_dir: Path, workspace: Path) -> dict:
             "improvements": improvements,
             "category_scan_summary": {v.category: v.verdict for v in out.category_scan},
         }
-        (state_dir / "improvements_proposed.yaml").write_text(
-            yaml.safe_dump(doc, allow_unicode=True, sort_keys=False), encoding="utf-8"
-        )
+        fsio.dump_yaml(state_dir / "improvements_proposed.yaml", doc)
     except NeedsHuman as exc:
         record_needs_human(
             state_dir, phase=2, task="improvements", reason=exc.reason,
@@ -311,9 +309,7 @@ def run_matching(state_dir: Path, workspace: Path) -> dict:
         ]
     _dump_json(state_dir / "file_mapping.json", {"mappings": mappings})
     if profiles and not (state_dir / "column_mapping.yaml").exists():
-        (state_dir / "column_mapping.yaml").write_text(
-            yaml.safe_dump({"mappings": []}), encoding="utf-8"
-        )
+        fsio.dump_yaml(state_dir / "column_mapping.yaml", {"mappings": []})
     return {"mappings": len(mappings), "llm": True}
 
 
@@ -713,5 +709,5 @@ def run_docs(state_dir: Path, output_dir: Path, workspace: Path) -> bool:
         ("IMPROVEMENTS.md", out.improvements),
         ("RUNBOOK.md", out.runbook),
     ):
-        (docs_dir / name).write_text(text.strip() + "\n", encoding="utf-8")
+        fsio.atomic_write_text(docs_dir / name, text.strip() + "\n")
     return True

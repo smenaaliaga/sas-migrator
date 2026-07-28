@@ -17,6 +17,8 @@ from typing import Annotated, TypedDict
 
 from langgraph.graph import END, StateGraph
 
+from sas_migrator.core.utils.fsio import dump_json, load_json
+
 LOG_FILE = "iteration_log.json"
 
 
@@ -33,16 +35,11 @@ class IterationState(TypedDict, total=False):
 
 
 def _load_log(state_dir: Path) -> dict:
-    path = state_dir / LOG_FILE
-    if not path.exists():
-        return {"iterations": []}
-    return json.loads(path.read_text(encoding="utf-8"))
+    return load_json(state_dir / LOG_FILE) or {"iterations": []}
 
 
 def _save_log(state_dir: Path, log: dict) -> None:
-    (state_dir / LOG_FILE).write_text(
-        json.dumps(log, indent=2, ensure_ascii=False), encoding="utf-8"
-    )
+    dump_json(state_dir / LOG_FILE, log)
 
 
 def next_cycle(state_dir: Path) -> int:
