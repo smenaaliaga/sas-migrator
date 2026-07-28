@@ -449,6 +449,7 @@ class TranslationSetup:
     db_aliases: list[str]
     allowed: list[str]
     verify_mode: str  # off | low | all
+    max_workers: int = 1
 
 
 def _translation_context(state_dir: Path, plan: dict) -> TranslationSetup:
@@ -457,7 +458,8 @@ def _translation_context(state_dir: Path, plan: dict) -> TranslationSetup:
 
     conns = load_connections(state_dir)
     db_aliases = [str(c["alias"]) for c in conns if c.get("alias")]
-    tcfg = load_project_config(state_dir.parent).translation
+    cfg = load_project_config(state_dir.parent)
+    tcfg = cfg.translation
     context_block = prompt_builder.build_project_context(
         connections=conns,
         improvements=_approved_improvements(state_dir),
@@ -469,6 +471,7 @@ def _translation_context(state_dir: Path, plan: dict) -> TranslationSetup:
         db_aliases=db_aliases,
         allowed=list(tcfg.allowed_imports),
         verify_mode=tcfg.verify,
+        max_workers=max(1, int(cfg.llm.max_workers)),
     )
 
 
@@ -715,56 +718,108 @@ def _write_review_sidecar(state_dir: Path, reviews: dict[str, dict]) -> None:
     )
 
 
-def run_translation(state_dir: Path, output_dir: Path, workspace: Path) -> dict:
+def _translate_pending(
+    state_dir: Path,
+    output_dir: Path,
+    workspace: Path,
+    *,
+    plan: dict,
+    pending_ids: list[str],
+    phase: int,
+    iteration_note: str | None,
+    translations: dict[str, NodeTranslation],
+) -> tuple[dict[str, NodeTranslation], int, int]:
+    """Núcleo común de la fase 6 y la re-traducción de la fase 9.
+
+    Traduce (verificando y persistiendo por nodo), en secuencia o en paralelo
+    según ``llm.max_workers`` — con N>1 el PRIMER nodo va solo para calentar el
+    prompt cache, y el resto por pool. El ensamblado final es SIEMPRE
+    secuencial en el orden del plan: notebooks byte-idénticos con cualquier N.
+    Un Ctrl-C cancela lo pendiente y conserva lo ya persistido en disco.
+
+    Devuelve (translations, traducidos_en_esta_corrida, assembly_failures).
+    """
+    import threading
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
     from sas_migrator.core.assembly.notebook import assemble_notebooks
 
-    state_dir = Path(state_dir)
-    plan = _load_json(state_dir / "translation_plan.json")
     caller = runtime.get_caller(workspace)
     setup = _translation_context(state_dir, plan)
     review_notes = _review_notes(state_dir)
     targets_by_id = {str(t.get("node_id")): t for t in plan.get("targets", [])}
     reviews = _load_review_sidecar(state_dir)
-
-    # Persistir cada traducción apenas se obtiene (no al final del loop): si el
-    # proceso muere a mitad de camino, retomar la corrida salta los nodos que
-    # ya tengan .json en disco en vez de perder todo el trabajo en memoria.
     trans_dir = state_dir / "translations"
     trans_dir.mkdir(exist_ok=True)
-    translations = _load_valid_translations(trans_dir, setup.allowed)
+    sidecar_lock = threading.Lock()
 
-    for target in plan.get("targets", []):
-        nid = str(target.get("node_id"))
-        if nid in translations:
-            continue
+    def _do_node(nid: str) -> NodeTranslation | None:
+        target = targets_by_id.get(nid)
+        if target is None:
+            return None
         code = _node_code(state_dir, nid)
         deps_ctx = _deps_context(target, targets_by_id)
         try:
             nt = _translate_checked(
                 caller, system=setup.system, target=target,
                 code=code, db_aliases=setup.db_aliases,
+                iteration_note=iteration_note,
                 review_note=review_notes.get(nid),
                 dependencies_context=deps_ctx,
                 allowed_imports=setup.allowed,
             )
         except NeedsHuman as exc:
             record_needs_human(
-                state_dir, phase=6, task="translation", node_id=nid,
+                state_dir, phase=phase, task="translation", node_id=nid,
                 reason=exc.reason, detail=exc.detail, attempts=exc.attempts,
             )
-            continue
+            return None
         if _should_verify(setup.verify_mode, nt):
-            nt, reviews[nid] = _verify_and_revise(
+            nt, rec = _verify_and_revise(
                 caller, setup=setup, target=target, code=code, nt=nt,
                 review_note=review_notes.get(nid), dependencies_context=deps_ctx,
             )
-            _write_review_sidecar(state_dir, reviews)
+            with sidecar_lock:  # el sidecar es UN archivo: read-modify-write serializado
+                reviews[nid] = rec
+                _write_review_sidecar(state_dir, reviews)
         # Identidad defensiva: el mapping se construye con los ids del PLAN.
         nt = nt.model_copy(
             update={"node_id": nid, "node_label": target.get("node_label") or nid}
         )
-        translations[nid] = nt
+        # Persistir apenas se obtiene: si el proceso muere, retomar salta lo
+        # que ya tiene .json en disco. Archivos independientes — sin lock.
         _dump_json(trans_dir / f"{nid}.json", json.loads(nt.model_dump_json()))
+        return nt
+
+    translated_now = 0
+    pending = [nid for nid in pending_ids if nid in targets_by_id]
+    if setup.max_workers <= 1 or len(pending) <= 1:
+        for nid in pending:
+            nt = _do_node(nid)
+            if nt is not None:
+                translations[nid] = nt
+                translated_now += 1
+    else:
+        # El primer nodo va solo: escribe el prompt cache que el resto lee.
+        first, *rest = pending
+        nt = _do_node(first)
+        if nt is not None:
+            translations[first] = nt
+            translated_now += 1
+        executor = ThreadPoolExecutor(max_workers=setup.max_workers)
+        try:
+            futures = {executor.submit(_do_node, nid): nid for nid in rest}
+            for future in as_completed(futures):
+                nt = future.result()
+                if nt is not None:
+                    translations[futures[future]] = nt
+                    translated_now += 1
+        except BaseException:
+            # Ctrl-C (o un crash): cancelar lo no arrancado y salir. Lo ya
+            # persistido en state/translations/ queda — retomar no lo repite.
+            executor.shutdown(wait=False, cancel_futures=True)
+            raise
+        executor.shutdown(wait=True)
 
     mapping, failures = assemble_notebooks(
         plan, translations, Path(output_dir), db_bootstrap=bool(setup.db_aliases),
@@ -772,15 +827,33 @@ def run_translation(state_dir: Path, output_dir: Path, workspace: Path) -> dict:
     )
     for failure in failures:
         record_needs_human(
-            state_dir, phase=6, task="assembly", node_id=failure.node_id,
+            state_dir, phase=phase, task="assembly", node_id=failure.node_id,
             reason="static_check_failed", detail=f"{failure.reason}: {failure.detail}",
         )
     _dump_json(
         state_dir / "sas_python_mapping.json", json.loads(mapping.model_dump_json())
     )
+    return translations, translated_now, len(failures)
+
+
+def run_translation(state_dir: Path, output_dir: Path, workspace: Path) -> dict:
+    state_dir = Path(state_dir)
+    plan = _load_json(state_dir / "translation_plan.json")
+    setup = _translation_context(state_dir, plan)
+    translations = _load_valid_translations(state_dir / "translations", setup.allowed)
+    pending = [
+        str(t.get("node_id"))
+        for t in plan.get("targets", [])
+        if str(t.get("node_id")) not in translations
+    ]
+    translations, _, assembly_failures = _translate_pending(
+        state_dir, Path(output_dir), workspace,
+        plan=plan, pending_ids=pending, phase=6, iteration_note=None,
+        translations=translations,
+    )
     return {
         "translated": len(translations),
-        "assembly_failures": len(failures),
+        "assembly_failures": assembly_failures,
         "targets": len(plan.get("targets", [])),
     }
 
@@ -797,71 +870,23 @@ def retranslate_nodes(
     """Re-traduce SOLO los nodos afectados (con la instrucción de la iteración
     como contexto) y re-ensambla los notebooks con el resto de las
     traducciones persistidas intactas."""
-    from sas_migrator.core.assembly.notebook import assemble_notebooks
-
     state_dir = Path(state_dir)
     plan = _load_json(state_dir / "translation_plan.json")
-    targets_by_id = {str(t.get("node_id")): t for t in plan.get("targets", [])}
-    trans_dir = state_dir / "translations"
-
-    caller = runtime.get_caller(workspace)
     setup = _translation_context(state_dir, plan)
-    translations = _load_valid_translations(trans_dir, setup.allowed)
-    review_notes = _review_notes(state_dir)
-    reviews = _load_review_sidecar(state_dir)
+    translations = _load_valid_translations(state_dir / "translations", setup.allowed)
 
-    retranslated = 0
-    for nid in node_ids:
-        target = targets_by_id.get(nid)
-        if target is None:
-            continue
-        code = _node_code(state_dir, nid)
-        deps_ctx = _deps_context(target, targets_by_id)
-        try:
-            nt = _translate_checked(
-                caller, system=setup.system, target=target,
-                code=code, db_aliases=setup.db_aliases,
-                iteration_note=iteration_note,
-                review_note=review_notes.get(nid),
-                dependencies_context=deps_ctx,
-                allowed_imports=setup.allowed,
-            )
-        except NeedsHuman as exc:
-            record_needs_human(
-                state_dir, phase=9, task="translation", node_id=nid,
-                reason=exc.reason, detail=exc.detail, attempts=exc.attempts,
-            )
-            continue
-        if _should_verify(setup.verify_mode, nt):
-            nt, reviews[nid] = _verify_and_revise(
-                caller, setup=setup, target=target, code=code, nt=nt,
-                review_note=review_notes.get(nid), dependencies_context=deps_ctx,
-            )
-            _write_review_sidecar(state_dir, reviews)
-        nt = nt.model_copy(
-            update={"node_id": nid, "node_label": target.get("node_label") or nid}
-        )
-        translations[nid] = nt
-        trans_dir.mkdir(exist_ok=True)
-        _dump_json(trans_dir / f"{nid}.json", json.loads(nt.model_dump_json()))
-        retranslated += 1
-
-    mapping, failures = assemble_notebooks(
-        plan, translations, Path(output_dir), db_bootstrap=bool(setup.db_aliases),
-        allowed_imports=setup.allowed,
+    translations, retranslated, assembly_failures = _translate_pending(
+        state_dir, Path(output_dir), workspace,
+        plan=plan, pending_ids=[str(n) for n in node_ids], phase=9,
+        iteration_note=iteration_note, translations=translations,
     )
-    for failure in failures:
-        record_needs_human(
-            state_dir, phase=9, task="assembly", node_id=failure.node_id,
-            reason="static_check_failed", detail=f"{failure.reason}: {failure.detail}",
-        )
-    _dump_json(
-        state_dir / "sas_python_mapping.json", json.loads(mapping.model_dump_json())
-    )
-    notebooks = sorted({m.notebook_path for m in mapping.mappings})
+    mapping = fsio.load_json(state_dir / "sas_python_mapping.json") or {}
+    notebooks = sorted({
+        str(m.get("notebook_path", "")) for m in mapping.get("mappings", [])
+    })
     return {
         "retranslated": retranslated,
-        "assembly_failures": len(failures),
+        "assembly_failures": assembly_failures,
         "notebooks": notebooks,
     }
 

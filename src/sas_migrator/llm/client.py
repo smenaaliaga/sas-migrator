@@ -60,14 +60,33 @@ class AnthropicCaller:
                 "pip install sas-migrator[llm] (y la credencial en el entorno o .env)."
             ) from exc
 
+        import threading
+
         self._anthropic = anthropic
         self.config = config or LlmConfig()
-        self.last_usage: dict[str, Any] | None = None
-        self.last_model: str | None = None
+        # last_usage/last_model son POR THREAD: con traducción paralela, dos
+        # llamadas concurrentes no pueden pisarse el usage que el trace lee.
+        self._tls = threading.local()
         self._client = self._build_client(anthropic, self.config)
         # "auto" arranca nativo y degrada a tool en el primer rechazo del
         # backend; el modo resuelto se conserva para el resto de la corrida.
         self._mode = "tool" if self.config.structured_mode == "tool" else "native"
+
+    @property
+    def last_usage(self) -> dict[str, Any] | None:
+        return getattr(self._tls, "usage", None)
+
+    @last_usage.setter
+    def last_usage(self, value: dict[str, Any] | None) -> None:
+        self._tls.usage = value
+
+    @property
+    def last_model(self) -> str | None:
+        return getattr(self._tls, "model", None)
+
+    @last_model.setter
+    def last_model(self, value: str | None) -> None:
+        self._tls.model = value
 
     @staticmethod
     def _build_client(anthropic: Any, config: LlmConfig) -> Any:

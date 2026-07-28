@@ -73,6 +73,12 @@ class LlmConfig(BaseModel):
     # verificador ameritan el modelo fuerte; matching o docs pueden ir en un
     # tier menor. Ausente la clave, rige `model`.
     models_by_task: dict[str, str] = Field(default_factory=dict)
+    # Traducciones en paralelo (fase 6/9). Default 1 = secuencial (determinismo
+    # exacto de siempre); opt-in consciente. Con N>1 el primer nodo va solo
+    # (calienta el prompt cache: N requests simultáneos no leen lo que otro
+    # está escribiendo) y el resto por pool de threads. El ensamblado final es
+    # SIEMPRE secuencial en el orden del plan — notebooks byte-idénticos.
+    max_workers: int = 1
     max_tokens: int = 16000
     # Presupuesto de salida POR TAREA (analysis, matching, translate, verify,
     # diagnose, docs). Un solo max_tokens para 6 tareas obliga a dimensionar

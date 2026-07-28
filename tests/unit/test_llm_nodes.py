@@ -341,6 +341,24 @@ def test_verificador_revise_dispara_una_retraduccion_y_queda_en_el_sidecar(ws: P
     assert by_id["CodeTask-2"]["revised"] is True
 
 
+def test_traduccion_paralela_produce_lo_mismo_que_secuencial(ws: Path) -> None:
+    """max_workers>1 es una optimización, no un cambio de conducta: mismos
+    counts, mismo mapping, notebooks idénticos (el ensamblado es secuencial)."""
+    state = ws / "state"
+    shutil.rmtree(state / "translations", ignore_errors=True)
+    runtime.set_caller(FakeCaller({"translation": _translation_fake, "verify": _verify_fake}))
+    counts_seq = phases.run_translation(state, ws / "output", ws)
+    mapping_seq = (state / "sas_python_mapping.json").read_text(encoding="utf-8")
+
+    shutil.rmtree(state / "translations", ignore_errors=True)
+    (ws / "project_config.yaml").write_text("llm:\n  max_workers: 4\n", encoding="utf-8")
+    runtime.set_caller(FakeCaller({"translation": _translation_fake, "verify": _verify_fake}))
+    counts_par = phases.run_translation(state, ws / "output", ws)
+
+    assert counts_par == counts_seq
+    assert (state / "sas_python_mapping.json").read_text(encoding="utf-8") == mapping_seq
+
+
 def test_verificador_off_no_llama_y_revise_llega_al_audit(ws: Path) -> None:
     from sas_migrator.core.audit import run_audit as _run_audit
 

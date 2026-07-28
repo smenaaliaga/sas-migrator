@@ -40,6 +40,8 @@ class TracingCaller:
     """
 
     def __init__(self, inner: StructuredCaller, state_dir: Path):
+        import threading
+
         from sas_migrator.llm import costs
 
         self._inner = inner
@@ -48,11 +50,15 @@ class TracingCaller:
         self._budget_usd = float(getattr(config, "max_run_cost_usd", 0.0) or 0.0)
         self._price_overrides = dict(getattr(config, "prices", {}) or {})
         self._spent_usd = costs.run_totals(state_dir, self._price_overrides)["cost_usd"]
+        # Traducción paralela: el append al JSONL y el acumulado de gasto se
+        # serializan — dos workers no pueden intercalar media línea cada uno.
+        self._lock = threading.Lock()
 
     def _write(self, record: dict) -> None:
         self._trace_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(self._trace_path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+        with self._lock:
+            with open(self._trace_path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
     def call(
         self,
@@ -111,7 +117,8 @@ class TracingCaller:
                 )
                 if cost is not None:
                     record["cost_usd"] = round(cost, 6)
-                    self._spent_usd += cost
+                    with self._lock:
+                        self._spent_usd += cost
             self._write(record)
 
 
