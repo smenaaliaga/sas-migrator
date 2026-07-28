@@ -191,15 +191,30 @@ class MigrationSession:
         description: str,
         request_type: str = "enhancement",
         affected_nodes: list[str] | None = None,
+        *,
+        resume: bool = False,
     ) -> dict:
-        """Corre un ciclo de iteración post-migración (Fase 9, sub-grafo con
-        gate propio). Requiere una migración base completa."""
+        """Corre (o retoma con ``resume=True``) un ciclo de iteración
+        post-migración (Fase 9, sub-grafo con gate propio y su propio thread
+        en el MISMO sqlite del checkpointer). Requiere migración base
+        completa. Con ``resume``, ``description`` se ignora — el ciclo
+        retoma con la instrucción original."""
+        from langgraph.checkpoint.sqlite import SqliteSaver
+
         from sas_migrator.graph.iteration import run_iteration
 
-        return run_iteration(
-            self.workspace, description,
-            request_type=request_type, affected_nodes=affected_nodes,
+        self.state_dir.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(
+            str(self.state_dir / CHECKPOINT_FILE), check_same_thread=False
         )
+        try:
+            return run_iteration(
+                self.workspace, description,
+                request_type=request_type, affected_nodes=affected_nodes,
+                checkpointer=SqliteSaver(conn), resume=resume,
+            )
+        finally:
+            conn.close()
 
     def status(self) -> SessionResult:
         """Estado actual desde el checkpointer, sin avanzar el grafo."""

@@ -110,3 +110,74 @@ def test_session_iterate_wires_the_subgraph(ws: Path) -> None:
 
     result = MigrationSession(ws).iterate("mejora menor", affected_nodes=[])
     assert result["done"] is True and result["cycle"] == 1
+
+
+def test_iteracion_cortada_se_retoma_sin_duplicar_entry(ws: Path) -> None:
+    """Un corte a mitad de la re-traducción deja la entry in_progress; con el
+    checkpointer, `iterate --resume` retoma ESE ciclo y la entry queda una
+    sola vez, completada. La fase 9 era la única no reanudable del sistema."""
+    from sas_migrator.service import MigrationSession
+
+    session = MigrationSession(ws)
+    boom = {"armed": True}
+
+    def flaky(user: str) -> object:
+        if boom["armed"]:
+            boom["armed"] = False
+            raise RuntimeError("corte simulado a mitad de la re-traducción")
+        return fake_translation(user)
+
+    caller = default_fake_caller()
+    caller.responses["translation"] = flaky
+    runtime.set_caller(caller)
+
+    with pytest.raises(RuntimeError, match="corte simulado"):
+        session.iterate("ajuste con corte", affected_nodes=["CodeTask-2"])
+
+    entry = _log(ws)["iterations"][0]
+    assert entry["status"] == "in_progress", "el corte deja la entry a medias"
+
+    result = session.iterate("", resume=True)
+
+    assert result["done"] is True, result["errors"]
+    assert result["cycle"] == 1
+    entries = _log(ws)["iterations"]
+    assert len(entries) == 1, "retomar no duplica la entry del ciclo"
+    assert entries[0]["status"] == "completed"
+
+
+def test_ciclo_nuevo_deja_deferred_la_entry_colgada(ws: Path) -> None:
+    """Arrancar un ciclo nuevo con una in_progress huérfana no la pisa ni la
+    esconde: queda deferred, visible en el log y avisada en las notas."""
+    from sas_migrator.service import MigrationSession
+
+    session = MigrationSession(ws)
+    boom = {"armed": True}
+
+    def flaky(user: str) -> object:
+        if boom["armed"]:
+            boom["armed"] = False
+            raise RuntimeError("corte simulado")
+        return fake_translation(user)
+
+    caller = default_fake_caller()
+    caller.responses["translation"] = flaky
+    runtime.set_caller(caller)
+
+    with pytest.raises(RuntimeError):
+        session.iterate("primera con corte", affected_nodes=["CodeTask-2"])
+
+    result = session.iterate("segunda, limpia", affected_nodes=[])
+
+    assert result["cycle"] == 2 and result["done"] is True
+    entries = {e["cycle"]: e for e in _log(ws)["iterations"]}
+    assert entries[1]["status"] == "deferred"
+    assert entries[2]["status"] == "completed"
+    assert any("deferred" in n for n in result["notes"])
+
+
+def test_resume_sin_iteracion_colgada_es_error_claro(ws: Path) -> None:
+    from sas_migrator.service import MigrationSession
+
+    with pytest.raises(LookupError, match="no hay iteración in_progress"):
+        MigrationSession(ws).iterate("", resume=True)

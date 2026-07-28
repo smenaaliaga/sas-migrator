@@ -388,27 +388,38 @@ def iterate(
     request_type: RequestType = typer.Option(
         RequestType.enhancement, "--request-type", "-t", help="Tipo de pedido."
     ),
+    resume: bool = typer.Option(
+        False, "--resume", help="Retoma la iteración que quedó a medias (corte)."
+    ),
     describe: str = typer.Option(None, "--describe", hidden=True),
     nodes: str = typer.Option("", "--nodes", hidden=True),
 ) -> None:
     """Itera sobre una migración ya completada (fase 9).
 
     Re-traduce solo los nodos afectados y vuelve a correr auditoría y
-    validación: una iteración no cierra sin re-validar.
+    validación: una iteración no cierra sin re-validar. Si un corte dejó un
+    ciclo a medias, `iterate --resume` lo retoma; arrancar un ciclo nuevo lo
+    marca deferred (visible en iteration_log.json).
 
         sas-migrator iterate "corregir el redondeo de montos" -n CodeTask-3
     """
     # `--describe` y `--nodes "a,b"` son las formas viejas: siguen andando sin
     # figurar en el help para no enseñar dos maneras de lo mismo.
     text = description or describe
-    if not text:
+    if not text and not resume:
         raise _die(
             "Falta la descripción de la iteración.",
             hint='sas-migrator iterate "corregir el redondeo de montos"',
         )
     node_ids = list(node) + [n.strip() for n in nodes.split(",") if n.strip()]
     session = _session(_resolve_ws(workspace))
-    result = session.iterate(text, request_type=request_type.value, affected_nodes=node_ids)
+    try:
+        result = session.iterate(
+            text or "", request_type=request_type.value,
+            affected_nodes=node_ids, resume=resume,
+        )
+    except LookupError as exc:
+        raise _die(str(exc), hint='sas-migrator iterate "<qué ajustar>"') from exc
     for note in result.get("notes", []):
         typer.echo(note)
     if result.get("done"):

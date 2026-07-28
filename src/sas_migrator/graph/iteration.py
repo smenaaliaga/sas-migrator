@@ -43,7 +43,37 @@ def _save_log(state_dir: Path, log: dict) -> None:
 
 
 def next_cycle(state_dir: Path) -> int:
-    return len(_load_log(Path(state_dir)).get("iterations", [])) + 1
+    """max+1, no len+1: borrar una entry a mano no puede hacer colisionar ids."""
+    cycles = [
+        int(e.get("cycle", 0))
+        for e in _load_log(Path(state_dir)).get("iterations", [])
+    ]
+    return max(cycles, default=0) + 1
+
+
+def last_in_progress_cycle(state_dir: Path) -> int | None:
+    """Ciclo de la última entry que quedó a medias (corte durante iterate)."""
+    stale = [
+        int(e.get("cycle", 0))
+        for e in _load_log(Path(state_dir)).get("iterations", [])
+        if e.get("status") == "in_progress"
+    ]
+    return max(stale) if stale else None
+
+
+def _defer_stale(state_dir: Path) -> list[int]:
+    """Entries in_progress huérfanas → deferred, visibles. Nada queda a medias
+    en silencio: arrancar un ciclo nuevo declara qué pasó con el anterior."""
+    log = _load_log(state_dir)
+    deferred: list[int] = []
+    for e in log.get("iterations", []):
+        if e.get("status") == "in_progress":
+            e["status"] = "deferred"
+            e["validation_result"] = e.get("validation_result") or None
+            deferred.append(int(e.get("cycle", 0)))
+    if deferred:
+        _save_log(state_dir, log)
+    return deferred
 
 
 def iterate_apply(state: IterationState) -> dict:
@@ -65,8 +95,16 @@ def iterate_apply(state: IterationState) -> dict:
         affected_nodes=affected,
         status="in_progress",
     )
+    # Upsert por cycle: el nodo se re-ejecuta al reanudar (mismo contrato que
+    # ADR-0002) y no puede duplicar la entry que dejó a medias.
     log = _load_log(st)
-    log["iterations"].append(json.loads(entry.model_dump_json()))
+    existing = next(
+        (e for e in log["iterations"] if e.get("cycle") == cycle), None
+    )
+    if existing is not None:
+        existing.update(json.loads(entry.model_dump_json()))
+    else:
+        log["iterations"].append(json.loads(entry.model_dump_json()))
     _save_log(st, log)
 
     notes: list[str] = []
@@ -118,14 +156,14 @@ def iteration_gate(state: IterationState) -> dict:
     return {"done": passed, "errors": errors, "notes": [note]}
 
 
-def build_iteration_graph():
+def build_iteration_graph(checkpointer=None):
     g = StateGraph(IterationState)
     g.add_node("iterate_apply", iterate_apply)
     g.add_node("iteration_gate", iteration_gate)
     g.set_entry_point("iterate_apply")
     g.add_edge("iterate_apply", "iteration_gate")
     g.add_edge("iteration_gate", END)
-    return g.compile()
+    return g.compile(checkpointer=checkpointer)
 
 
 def run_iteration(
@@ -133,17 +171,55 @@ def run_iteration(
     description: str,
     request_type: str = "enhancement",
     affected_nodes: list[str] | None = None,
+    *,
+    checkpointer=None,
+    resume: bool = False,
 ) -> dict:
-    """Corre un ciclo de iteración completo y devuelve su resultado."""
+    """Corre (o retoma) un ciclo de iteración y devuelve su resultado.
+
+    Con ``checkpointer``, cada ciclo vive en su thread
+    (``iteration-{cycle:03d}``) del MISMO sqlite que la migración base: un
+    corte a mitad de la re-traducción se retoma con ``resume=True`` — la
+    fase 9 era la única no reanudable del sistema. Arrancar un ciclo NUEVO
+    con una entry in_progress colgada la pasa a ``deferred`` (visible, nunca
+    silencio).
+    """
     ws = Path(workspace).resolve()
-    cycle = next_cycle(ws / "state")
-    result = build_iteration_graph().invoke({
-        "workspace": str(ws),
-        "cycle": cycle,
-        "request_type": request_type,
-        "description": description,
-        "affected_nodes": affected_nodes or [],
-    })
+    state_dir = ws / "state"
+    graph = build_iteration_graph(checkpointer=checkpointer)
+
+    if resume:
+        cycle = last_in_progress_cycle(state_dir)
+        if cycle is None:
+            raise LookupError("no hay iteración in_progress para retomar")
+        if checkpointer is None:
+            raise LookupError(
+                "retomar exige el checkpointer de la sesión (usar "
+                "MigrationSession.iterate(resume=True))"
+            )
+        config = {"configurable": {"thread_id": f"iteration-{cycle:03d}"}}
+        result = graph.invoke(None, config)
+    else:
+        deferred = _defer_stale(state_dir)
+        cycle = next_cycle(state_dir)
+        payload: IterationState = {
+            "workspace": str(ws),
+            "cycle": cycle,
+            "request_type": request_type,
+            "description": description,
+            "affected_nodes": affected_nodes or [],
+        }
+        if checkpointer is not None:
+            config = {"configurable": {"thread_id": f"iteration-{cycle:03d}"}}
+            result = graph.invoke(payload, config)
+        else:
+            result = graph.invoke(payload)
+        if deferred:
+            result.setdefault("notes", [])
+            result["notes"] = list(result["notes"]) + [
+                f"ciclo(s) {deferred} quedaron deferred (estaban in_progress); "
+                "retomalos con `iterate --resume` antes de que se pisen"
+            ]
     return {
         "cycle": cycle,
         "entry_id": result.get("entry_id", f"IT-{cycle:03d}"),
