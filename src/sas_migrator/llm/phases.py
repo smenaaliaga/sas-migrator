@@ -217,7 +217,7 @@ def run_analysis(state_dir: Path, workspace: Path) -> dict:
     head = prompt_builder.header_line({"smell_categories": smell_cats})
     user = (
         f"{head}\n\n## analysis_evidence.json\n```json\n"
-        + json.dumps(evidence, ensure_ascii=False)[:40_000]
+        + prompt_builder.json_excerpt(evidence, 40_000)
         + "\n```\n\n## code_smells.json (resumen)\n```json\n"
         + json.dumps(smells.get("summary", {}), ensure_ascii=False)
         + "\n```\n"
@@ -281,9 +281,9 @@ def run_matching(state_dir: Path, workspace: Path) -> dict:
     )
     user = (
         f"{head}\n\n## Perfiles\n```json\n"
-        + json.dumps(profiles, ensure_ascii=False)[:40_000]
+        + prompt_builder.json_excerpt(profiles, 40_000)
         + "\n```\n\n## Nodos\n```json\n"
-        + json.dumps(node_summaries, ensure_ascii=False)[:40_000]
+        + prompt_builder.json_excerpt(node_summaries, 40_000)
         + "\n```\n"
     )
     caller = runtime.get_caller(workspace)
@@ -761,7 +761,7 @@ def run_mismatch_diagnosis(
     )
     user = (
         f"{head}\n\n## Resultados fallidos de la cascada\n```json\n"
-        + json.dumps(failed, ensure_ascii=False, default=str)[:40_000]
+        + prompt_builder.json_excerpt(failed, 40_000)
         + "\n```\n"
     )
     try:
@@ -818,7 +818,7 @@ def run_docs(state_dir: Path, output_dir: Path, workspace: Path) -> bool:
     )
     user = (
         f"{head}\n\n## Contexto de la migración\n```json\n"
-        + json.dumps(context, ensure_ascii=False, default=str)[:60_000]
+        + prompt_builder.json_excerpt(context, 60_000)
         + "\n```\n"
     )
     caller = runtime.get_caller(workspace)

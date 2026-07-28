@@ -9,6 +9,7 @@ en el user.
 from __future__ import annotations
 
 import json
+import re
 from importlib.resources import files
 
 
@@ -133,6 +134,73 @@ def build_project_context(
     if len(parts) == 1:
         return None
     return "\n".join(parts)
+
+
+_OMITTED_MARK = re.compile(r"^… \(\d+ items omitidos\)$")
+
+
+def _iter_lists(obj):
+    if isinstance(obj, list):
+        yield obj
+        for v in obj:
+            yield from _iter_lists(v)
+    elif isinstance(obj, dict):
+        for v in obj.values():
+            yield from _iter_lists(v)
+
+
+def _kept_items(lst: list) -> list:
+    """Los items reales de la lista (sin el marcador de omisión)."""
+    if lst and isinstance(lst[-1], str) and _OMITTED_MARK.match(lst[-1]):
+        return lst[:-1]
+    return lst
+
+
+def _halve(lst: list) -> None:
+    kept = _kept_items(lst)
+    previos = 0
+    if len(kept) != len(lst):
+        previos = int(re.search(r"\d+", lst[-1]).group())
+    quedan = max(1, len(kept) // 2)
+    omitidos = previos + (len(kept) - quedan)
+    lst[:] = kept[:quedan] + [f"… ({omitidos} items omitidos)"]
+
+
+def json_excerpt(data, limit: int = 40_000) -> str:
+    """JSON de a lo sumo ~limit chars que SIGUE SIENDO JSON válido.
+
+    El slicing crudo (``json.dumps(x)[:40_000]``) mandaba al modelo un objeto
+    cortado a mitad de una llave, sin avisar: el modelo lo "repara" mentalmente
+    y razona sobre datos que no existen. Acá se recortan ITEMS de las listas
+    (las más pesadas primero) y cada recorte se anuncia dentro del propio JSON
+    con "… (K items omitidos)". Si no hay listas que achicar, el fallback
+    envuelve el texto cortado en un objeto que declara el recorte.
+    """
+    text = json.dumps(data, ensure_ascii=False, default=str)
+    if len(text) <= limit:
+        return text
+    data = json.loads(text)  # copia mutable ya normalizada por default=str
+    for _ in range(500):
+        shrinkable = [l for l in _iter_lists(data) if len(_kept_items(l)) > 1]
+        if not shrinkable:
+            break
+        target = max(
+            shrinkable, key=lambda l: len(json.dumps(l, ensure_ascii=False))
+        )
+        _halve(target)
+        text = json.dumps(data, ensure_ascii=False)
+        if len(text) <= limit:
+            return text
+    return json.dumps(
+        {
+            "_recorte": (
+                "objeto sin listas reducibles; texto JSON cortado — NO es el "
+                "documento completo"
+            ),
+            "_texto": text[:limit],
+        },
+        ensure_ascii=False,
+    )
 
 
 def header_line(payload: dict) -> str:

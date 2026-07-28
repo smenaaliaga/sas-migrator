@@ -104,6 +104,32 @@ def test_user_sin_extras_no_agrega_secciones_vacias() -> None:
     assert "Nota del analista" not in user
 
 
+# ── json_excerpt: recorte que sigue siendo JSON ─────────────────────────────
+
+def test_json_excerpt_bajo_el_limite_no_toca_nada() -> None:
+    data = {"a": [1, 2, 3], "b": "x"}
+    assert json.loads(prompt_builder.json_excerpt(data, 1000)) == data
+
+
+def test_json_excerpt_recorta_items_y_lo_anuncia() -> None:
+    data = {"meta": "v1", "items": [{"id": i, "texto": "x" * 50} for i in range(200)]}
+    out = prompt_builder.json_excerpt(data, 2000)
+    assert len(out) <= 2000
+    parsed = json.loads(out)  # ← el slicing crudo fallaba exactamente acá
+    assert parsed["meta"] == "v1", "lo que no es lista sobrevive intacto"
+    assert "items omitidos" in parsed["items"][-1], "el recorte se anuncia"
+    kept = len(parsed["items"]) - 1
+    omitted = int(parsed["items"][-1].split("(")[1].split(" ")[0])
+    assert kept + omitted == 200, "la cuenta cierra"
+
+
+def test_json_excerpt_sin_listas_declara_el_corte() -> None:
+    data = {"texto": "y" * 5000}
+    out = prompt_builder.json_excerpt(data, 1000)
+    parsed = json.loads(out)
+    assert "_recorte" in parsed and "NO es el documento completo" in parsed["_recorte"]
+
+
 # ── helpers de fases: contexto de dependencias y review notes ───────────────
 
 def test_deps_context_cap_declarado() -> None:
