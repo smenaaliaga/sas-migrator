@@ -184,16 +184,30 @@ def compare_values(ref: pd.DataFrame, gen: pd.DataFrame, tolerance: float = 1e-6
     ref_sub = ref[shared_cols].head(min_rows).copy()
     gen_sub = gen[shared_cols].head(min_rows).copy()
 
-    # Normalize types: coerce numeric columns in both to float for consistent sort & comparison
+    # Normalize types: coerce numeric columns in both to float for consistent
+    # sort & comparison. Una columna cuyos valores NO nulos son todos numéricos
+    # es numérica aunque tenga 50%+ de NaN — mandarla a la rama string hacía
+    # que un NaN presente en AMBOS lados contara como mismatch.
     for col in shared_cols:
         r_num = pd.to_numeric(ref_sub[col], errors="coerce")
         g_num = pd.to_numeric(gen_sub[col], errors="coerce")
-        if r_num.notna().mean() > 0.5 and g_num.notna().mean() > 0.5:
+        r_all_num = bool((r_num.notna() | ref_sub[col].isna()).all())
+        g_all_num = bool((g_num.notna() | gen_sub[col].isna()).all())
+        has_values = bool(r_num.notna().any() or g_num.notna().any())
+        if (r_all_num and g_all_num and has_values) or (
+            r_num.notna().mean() > 0.5 and g_num.notna().mean() > 0.5
+        ):
             ref_sub[col] = r_num
             gen_sub[col] = g_num
         else:
-            ref_sub[col] = ref_sub[col].astype(str).str.strip().str.lower()
-            gen_sub[col] = gen_sub[col].astype(str).str.strip().str.lower()
+            # fillna al final: en pandas 3 astype(str) conserva el NA, y
+            # NA != NA fabricaba un mismatch de un nulo contra sí mismo.
+            ref_sub[col] = (
+                ref_sub[col].astype(str).str.strip().str.lower().fillna("<null>")
+            )
+            gen_sub[col] = (
+                gen_sub[col].astype(str).str.strip().str.lower().fillna("<null>")
+            )
 
     # Choose sort columns: KEY columns (string + low-cardinality numeric) to avoid
     # positional mismatches caused by tiny value differences in high-cardinality columns

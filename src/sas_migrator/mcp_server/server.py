@@ -4,10 +4,11 @@ Un servidor por workspace (``sas-migrator serve --workspace ...``), transporte
 stdio. Las tools NO contienen lógica: delegan en la misma `MigrationSession`
 que usa la CLI, así ambos frentes ejecutan exactamente el mismo camino.
 
-`authorize_execution` e `iterate` existen desde ya (contrato estable para
-clientes) pero responden `not_available` honesto: la ejecución de notebooks
-llega en la Etapa 5 y la iteración post-migración en la Etapa 7. Nunca fingen
-éxito ni escriben nada.
+`authorize_execution` responde la pausa sagrada de la fase 7 (por defecto NO
+ejecutar) e `iterate` dispara el ciclo post-migración de la fase 9 — ambos
+implementados de verdad desde la Etapa 5. Cuando falta el insumo (no hay
+pregunta pendiente, no hay migración completa que iterar) responden un error
+honesto: nunca fingen éxito ni escriben nada.
 """
 
 from __future__ import annotations

@@ -32,9 +32,8 @@ class MigrationGraphState(TypedDict, total=False):
     # Historial completo de gates (append-only vía reducer)
     gate_history: Annotated[list[GateRecord], operator.add]
 
-    # Etapa 1: los nodos LLM son stubs deterministas. Cuando existan nodos LLM
-    # reales, este flag permite seguir corriendo el pipeline completo sin API
-    # key (tests, golden runs, CI).
+    # True = pipeline completo con stubs deterministas, sin API key (tests,
+    # golden runs, CI, smoke). False = entrevistas reales + nodos LLM reales.
     stub_mode: bool
 
     # Espacio para que los nodos dejen notas de ejecución (no decisiones).

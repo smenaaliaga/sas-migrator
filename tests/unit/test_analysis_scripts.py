@@ -195,6 +195,40 @@ def test_cascade_detects_missing_column():
     assert not result["passed"] and result["missing_columns"] == ["B"]
 
 
+def test_compare_values_nan_contra_nan_no_es_mismatch():
+    """NaN != NaN en float crudo; la comparación no puede castigar un nulo
+    presente en AMBOS lados."""
+    import numpy as np
+
+    ref = pd.DataFrame({"K": ["a", "b"], "MONTO": [1.0, np.nan]})
+    gen = pd.DataFrame({"K": ["a", "b"], "MONTO": [1.0, np.nan]})
+    assert rv.compare_values(ref, gen)["passed"]
+
+
+def test_compare_values_tolerancia_de_flotantes():
+    """Diferencias de redondeo bajo la tolerancia no son un FAIL; sobre la
+    tolerancia sí."""
+    ref = pd.DataFrame({"K": ["a"], "MONTO": [1.0]})
+    casi = pd.DataFrame({"K": ["a"], "MONTO": [1.0 + 1e-9]})
+    lejos = pd.DataFrame({"K": ["a"], "MONTO": [1.01]})
+    assert rv.compare_values(ref, casi)["passed"]
+    assert not rv.compare_values(ref, lejos)["passed"]
+
+
+def test_compare_values_fechas_como_texto_normalizadas():
+    """Las fechas suelen llegar como texto de ambos lados (CSV vs read_sql);
+    espacios y mayúsculas no pueden fabricar un mismatch."""
+    ref = pd.DataFrame({"FECHA": ["2026-01-31 ", "2026-02-28"], "V": [1.0, 2.0]})
+    gen = pd.DataFrame({"FECHA": ["2026-01-31", "2026-02-28"], "V": [1.0, 2.0]})
+    assert rv.compare_values(ref, gen)["passed"]
+
+
+def test_compare_values_orden_de_filas_distinto_no_es_mismatch():
+    ref = pd.DataFrame({"K": ["a", "b"], "MONTO": [1.0, 2.0]})
+    gen = pd.DataFrame({"K": ["b", "a"], "MONTO": [2.0, 1.0]})
+    assert rv.compare_values(ref, gen)["passed"]
+
+
 def test_load_target_tables_normalizes_names(tmp_path):
     plan = {"targets": [{"output_tables": ["GOBGENER.EJECUCION", "entidades"]},
                         {"output_tables": []}]}
