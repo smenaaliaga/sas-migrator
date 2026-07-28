@@ -1,34 +1,99 @@
-"""CLI de referencia — `sas-migrator run|resume|status|serve`.
+"""CLI de referencia — `sas-migrator doctor|run|resume|rewind|reset|status|iterate|serve`.
 
-Cliente de referencia de la Etapa 3: usa `MigrationSession` in-process (la
-misma capa que envuelven las tools MCP) y renderiza los interrupts de
-entrevista en terminal con el estilo lean. `serve` expone la sesión como
-servidor MCP por stdio para VS Code / Claude Code.
+Cliente de referencia: usa `MigrationSession` in-process (la misma capa que
+envuelven las tools MCP) y renderiza los interrupts de entrevista en terminal
+con el estilo lean. `serve` expone la sesión como servidor MCP por stdio para
+VS Code / Claude Code.
+
+Dos reglas de este archivo:
+
+* El docstring de un comando ES su `--help`. Va el qué y el cuándo, en dos o
+  tres líneas; el por qué de una decisión va en un comentario como este, que el
+  usuario no tiene que leer para usar el comando.
+* Los errores van a stderr con código de salida estable (ver `EXIT_CODES`), y
+  ninguno termina sin decir qué hacer a continuación.
 """
 
 from __future__ import annotations
 
 import json
 import sys
+from enum import Enum
 from pathlib import Path
 
+import click
 import typer
 import yaml
 
 from sas_migrator.cli.render import (
     FREE_TEXT_HINT,
+    PHASE_NAMES,
     answers_from_script,
     parse_answer,
     render_card_header,
+    render_phases,
     render_question,
 )
 
-app = typer.Typer(help="Migrador SAS EG → Python (v2, LangGraph)")
+# Códigos de salida, estables para scripts y CI.
+EXIT_OK = 0
+EXIT_BLOCKED = 1  # el pipeline corrió y algo bloquea (gate, chequeo, iteración)
+EXIT_USAGE = 2  # el entorno o los argumentos no permiten ni empezar
+EXIT_INTERRUPTED = 130  # Ctrl-C
+
+# Grupos del `--help`. Ocho comandos sin agrupar se leen como una lista de
+# supermercado; agrupados se ve de un saque cuál es el camino normal.
+PANEL_RUN = "Corrida"
+PANEL_RECOVER = "Recuperación"
+PANEL_INSPECT = "Inspección"
+PANEL_INTEGRATION = "Integración"
+
+app = typer.Typer(
+    help="Migrador de proyectos SAS Enterprise Guide (.egp) a Python.",
+    epilog=(
+        "Camino normal: [bold]doctor[/bold] → [bold]run[/bold] → contestar las "
+        "entrevistas → [bold]status[/bold].\n\n"
+        "El workspace por defecto es el directorio actual, así que lo habitual "
+        "es pararse en la migración y omitir --workspace.\n\n"
+        "Salida: 0 ok · 1 bloqueado · 2 error de uso o entorno · 130 interrumpido."
+    ),
+    no_args_is_help=True,
+    context_settings={"help_option_names": ["-h", "--help"]},
+)
+
+
+def _version_callback(value: bool) -> None:
+    if not value:
+        return
+    from importlib.metadata import PackageNotFoundError, version
+
+    try:
+        typer.echo(f"sas-migrator {version('sas-migrator')}")
+    except PackageNotFoundError:  # corriendo desde el repo sin instalar
+        typer.echo("sas-migrator (sin instalar)")
+    raise typer.Exit(code=EXIT_OK)
+
+
+@app.callback()
+def _root(
+    version: bool = typer.Option(
+        None,
+        "--version",
+        "-V",
+        callback=_version_callback,
+        is_eager=True,
+        help="Mostrar la versión y salir.",
+    ),
+) -> None:
+    # Sin docstring a propósito: el help del grupo es el `help=` de Typer(), que
+    # además lleva epilog.
+    pass
 
 
 def _utf8_stdout() -> None:
-    if hasattr(sys.stdout, "reconfigure"):
-        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
 
 
 def main() -> None:
@@ -43,10 +108,75 @@ def main() -> None:
     app()
 
 
+# ── Opciones compartidas ─────────────────────────────────────────────────────
+#
+# `--workspace` se resuelve en el cuerpo del comando, no como default del
+# parámetro: un `Path.cwd()` en la firma se congela al importar el módulo.
+
+
+def _ws_option() -> Path | None:
+    return typer.Option(
+        None,
+        "--workspace",
+        "-w",
+        show_default="directorio actual",
+        help="Raíz del workspace (input/, state/, output/).",
+    )
+
+
+def _answers_option() -> Path | None:
+    return typer.Option(
+        None,
+        "--answers-file",
+        "-a",
+        exists=True,
+        dir_okay=False,
+        help="Guion YAML de respuestas para correr sin interacción (CI, replay).",
+    )
+
+
+def _resolve_ws(workspace: Path | None) -> Path:
+    return (workspace or Path.cwd()).resolve()
+
+
+class RequestType(str, Enum):
+    """Tipos de iteración (fase 9). Enum y no texto libre: así el CLI valida
+    antes de arrancar el sub-grafo y el shell puede completar el valor."""
+
+    bug_fix = "bug_fix"
+    enhancement = "enhancement"
+    postponed_improvement = "postponed_improvement"
+    new_requirement = "new_requirement"
+    data_change = "data_change"
+    context_update = "context_update"
+
+
+# ── Salida ───────────────────────────────────────────────────────────────────
+
+
+def _err(message: str, *, hint: str = "") -> None:
+    """Un error a stderr. Mezclarlo con stdout arruina `status --json | jq`."""
+    typer.secho(message, err=True, fg=typer.colors.RED)
+    if hint:
+        typer.secho(f"  → {hint}", err=True, fg=typer.colors.YELLOW)
+
+
+def _die(message: str, *, hint: str = "", code: int = EXIT_USAGE) -> typer.Exit:
+    _err(message, hint=hint)
+    return typer.Exit(code=code)
+
+
+def _next_step(cmd: str, why: str = "") -> None:
+    typer.echo("")
+    typer.secho(f"Próximo paso: {cmd}", fg=typer.colors.CYAN, bold=True)
+    if why:
+        typer.echo(f"  {why}")
+
+
 def _session(workspace: Path):
     from sas_migrator.service import MigrationSession
 
-    return MigrationSession(workspace.resolve())
+    return MigrationSession(workspace)
 
 
 def _echo_messages(result) -> None:
@@ -81,16 +211,33 @@ def _prompt_card(card: dict) -> dict:
 
 
 def _drive(session, result, script: dict | None):
-    """Responde interrupts hasta terminar (interactivo o por guion)."""
+    """Responde interrupts hasta terminar (interactivo o por guion).
+
+    Ctrl-C a mitad de una entrevista no es un accidente que haya que castigar
+    con un traceback: lo contestado vive en el checkpointer y `resume` retoma
+    exactamente ahí. Decirlo es la diferencia entre una pausa y un susto.
+    """
     _echo_messages(result)
-    while result.pending_card is not None:
-        card = result.pending_card.model_dump(mode="json")
-        if script is not None:
-            payload = answers_from_script(card, script)
-        else:
-            payload = _prompt_card(card)
-        result = session.answer(payload)
-        _echo_messages(result)
+    try:
+        while result.pending_card is not None:
+            card = result.pending_card.model_dump(mode="json")
+            if script is not None:
+                payload = answers_from_script(card, script)
+            else:
+                payload = _prompt_card(card)
+            result = session.answer(payload)
+            _echo_messages(result)
+    except (KeyboardInterrupt, click.exceptions.Abort):
+        typer.echo("")
+        typer.secho("⏸ Interrumpido.", fg=typer.colors.YELLOW)
+        typer.echo("   Lo contestado quedó en el checkpoint.")
+        _next_step("sas-migrator resume", "retoma en la misma pregunta.")
+        raise typer.Exit(code=EXIT_INTERRUPTED) from None
+    except KeyError as exc:  # guion incompleto: falta una tarjeta
+        raise _die(
+            f"Guion de respuestas incompleto: {exc.args[0] if exc.args else exc}",
+            hint="Agregá la tarjeta al YAML o poné `default: recommended`.",
+        ) from exc
     return result
 
 
@@ -100,78 +247,217 @@ def _report(result) -> None:
     if result.status == SessionStatus.COMPLETED:
         return  # el mensaje final ya salió por messages
     if result.status == SessionStatus.BLOCKED:
-        typer.echo(f"⛔ Bloqueado (fase {result.phase}):")
+        _err(f"⛔ Bloqueado en la fase {result.phase} ({PHASE_NAMES.get(result.phase, '?')}):")
         for err in result.gate_errors[:10]:
-            typer.echo(f"   - {err}")
-        raise typer.Exit(code=1)
+            _err(f"   - {err}")
+        if len(result.gate_errors) > 10:
+            _err(f"   … y {len(result.gate_errors) - 10} más")
+        _next_step("sas-migrator status", "muestra el detalle y qué falta resolver.")
+        raise typer.Exit(code=EXIT_BLOCKED)
 
 
 def _load_script(answers_file: Path | None) -> dict | None:
     if answers_file is None:
         return None
-    return yaml.safe_load(answers_file.read_text(encoding="utf-8")) or {}
+    try:
+        return yaml.safe_load(answers_file.read_text(encoding="utf-8")) or {}
+    except yaml.YAMLError as exc:
+        raise _die(f"El guion de respuestas no es YAML válido: {exc}") from exc
 
 
-@app.command()
+# ── Corrida ──────────────────────────────────────────────────────────────────
+
+
+@app.command(rich_help_panel=PANEL_RUN)
+def doctor(
+    workspace: Path = _ws_option(),
+    stub: bool = typer.Option(False, help="Verificar solo lo que el modo --stub necesita."),
+) -> None:
+    """Verifica que el workspace pueda correr, antes de gastar tiempo y tokens.
+
+    Revisa estructura (input/egp/, referencias), project_config.yaml, la
+    credencial del proveedor configurado —en los mismos .env donde la busca una
+    corrida real— y los extras instalados. No toca la red.
+
+    Sale 0 si nada bloquea (los ⚠ no bloquean: describen lo que faltará más
+    tarde), 1 si hay algo que impide correr.
+    """
+    from sas_migrator.service.preflight import FAIL, OK, WARN, run_checks
+
+    ws = _resolve_ws(workspace)
+    report = run_checks(ws, stub=stub)
+    icon = {OK: "✅", WARN: "⚠ ", FAIL: "⛔"}
+    color = {OK: typer.colors.GREEN, WARN: typer.colors.YELLOW, FAIL: typer.colors.RED}
+
+    typer.echo(f"Workspace: {ws}")
+    typer.echo("")
+    for check in report.checks:
+        line = f"{icon[check.status]} {check.name:26} {check.detail}"
+        typer.secho(line.rstrip(), fg=color[check.status])
+        if check.hint and check.status != OK:
+            for hint_line in check.hint.splitlines():
+                typer.echo(f"     {hint_line}")
+    typer.echo("")
+
+    if not report.ok:
+        _err(f"⛔ {len(report.failures)} chequeo(s) bloquean la corrida.")
+        raise typer.Exit(code=EXIT_BLOCKED)
+    if report.warnings:
+        typer.secho(
+            f"✅ Se puede correr, con {len(report.warnings)} advertencia(s).",
+            fg=typer.colors.GREEN,
+        )
+    else:
+        typer.secho("✅ Todo en orden.", fg=typer.colors.GREEN)
+    # Con checkpoint, `run` arranca de cero sobre una migración que ya existe:
+    # el próximo paso honesto es mirar dónde quedó.
+    if any(c.name == "checkpoint" and "en curso" in c.detail for c in report.checks):
+        _next_step("sas-migrator status", "hay una migración en curso.")
+    else:
+        _next_step("sas-migrator run")
+
+
+@app.command(rich_help_panel=PANEL_RUN)
 def run(
-    workspace: Path = typer.Option(Path.cwd(), help="Raíz del workspace (input/, state/, output/)"),
-    egp: Path = typer.Option(None, help="Ruta al .egp (default: único .egp en input/egp/)"),
-    stub: bool = typer.Option(
-        False, help="Stubs deterministas sin LLM ni entrevistas (CI, smoke test)."
+    workspace: Path = _ws_option(),
+    egp: Path = typer.Option(
+        None, exists=True, dir_okay=False,
+        show_default="el único .egp en input/egp/",
+        help="Ruta al .egp a migrar.",
     ),
-    answers_file: Path = typer.Option(
-        None, help="Guion YAML de respuestas (ver cli/render.py)"
+    stub: bool = typer.Option(
+        False, help="Stubs deterministas: sin LLM ni entrevistas (CI, smoke test)."
+    ),
+    answers_file: Path = _answers_option(),
+    check: bool = typer.Option(
+        True, "--check/--no-check", help="Verificar la credencial antes de arrancar."
     ),
 ) -> None:
     """Corre la migración completa desde la fase 0.
 
-    Por defecto es una corrida REAL: entrevistas y LLM. `--stub` es el modo
-    determinista de CI. El default era el inverso, y contradecía a los otros
-    dos frentes de la misma sesión (`MigrationSession.start` y la tool MCP
-    `start_migration` ya arrancaban en real): migrar es lo que hace esta
-    herramienta, y era lo único que exigía un flag.
+    Es una corrida REAL: entrevistas y LLM. Se detiene en la primera pregunta,
+    así que una corrida arrancada por error no gasta más que las fases 0-1.
+
+    Con --answers-file corre sin interacción. Con --stub corre el pipeline
+    entero sin proveedor ni preguntas.
     """
-    session = _session(workspace)
+    # El default era `--stub`, y contradecía a los otros dos frentes de la misma
+    # sesión (`MigrationSession.start` y la tool MCP `start_migration` ya
+    # arrancaban en real): migrar es lo que hace esta herramienta, y era lo único
+    # que exigía un flag.
+    ws = _resolve_ws(workspace)
     typer.echo(
         "▶ modo STUB: sin LLM ni entrevistas (determinista)"
         if stub
         else "▶ modo REAL: entrevistas y LLM — se detiene en la primera pregunta"
     )
+    if check and not stub:
+        # Falta de credencial es el fallo más caro de descubrir tarde: pega en la
+        # fase 2, después de la entrevista inicial ya contestada.
+        from sas_migrator.service.preflight import credential_report
+
+        report = credential_report(ws)
+        if not report.ok:
+            for failed in report.failures:
+                _err(f"⛔ {failed.name}: {failed.detail}")
+                for hint_line in failed.hint.splitlines():
+                    _err(f"   {hint_line}")
+            raise _die(
+                "No se puede correr en modo real sin credencial.",
+                hint="`sas-migrator doctor` lista todo lo que falta; --no-check la saltea.",
+            )
+
+    session = _session(ws)
     try:
         result = session.start(egp, stub_mode=stub)
     except FileNotFoundError as exc:
-        typer.echo(f"Error: {exc}")
-        raise typer.Exit(code=2) from exc
+        raise _die(str(exc), hint="`sas-migrator doctor` o `run --egp <ruta>`.") from exc
     result = _drive(session, result, _load_script(answers_file))
     _report(result)
 
 
-@app.command()
-def resume(
-    workspace: Path = typer.Option(Path.cwd(), help="Raíz del workspace"),
-    answers_file: Path = typer.Option(None, help="Guion YAML de respuestas"),
+@app.command(rich_help_panel=PANEL_RUN)
+def iterate(
+    description: str = typer.Argument(
+        None, metavar="DESCRIPCION", help="Qué ajustar, en una frase."
+    ),
+    workspace: Path = _ws_option(),
+    node: list[str] = typer.Option(
+        [], "--node", "-n", help="node_id afectado. Repetible: -n A -n B."
+    ),
+    request_type: RequestType = typer.Option(
+        RequestType.enhancement, "--request-type", "-t", help="Tipo de pedido."
+    ),
+    describe: str = typer.Option(None, "--describe", hidden=True),
+    nodes: str = typer.Option("", "--nodes", hidden=True),
 ) -> None:
-    """Reanuda una migración interrumpida desde el checkpoint (incluida una
-    entrevista a mitad de camino)."""
-    session = _session(workspace)
+    """Itera sobre una migración ya completada (fase 9).
+
+    Re-traduce solo los nodos afectados y vuelve a correr auditoría y
+    validación: una iteración no cierra sin re-validar.
+
+        sas-migrator iterate "corregir el redondeo de montos" -n CodeTask-3
+    """
+    # `--describe` y `--nodes "a,b"` son las formas viejas: siguen andando sin
+    # figurar en el help para no enseñar dos maneras de lo mismo.
+    text = description or describe
+    if not text:
+        raise _die(
+            "Falta la descripción de la iteración.",
+            hint='sas-migrator iterate "corregir el redondeo de montos"',
+        )
+    node_ids = list(node) + [n.strip() for n in nodes.split(",") if n.strip()]
+    session = _session(_resolve_ws(workspace))
+    result = session.iterate(text, request_type=request_type.value, affected_nodes=node_ids)
+    for note in result.get("notes", []):
+        typer.echo(note)
+    if result.get("done"):
+        typer.secho(
+            f"✅ Iteración {result['entry_id']} cerrada (ciclo {result['cycle']}).",
+            fg=typer.colors.GREEN,
+        )
+        return
+    _err(f"⛔ Iteración {result['entry_id']} bloqueada:")
+    for err in result.get("errors", [])[:10]:
+        _err(f"   - {err}")
+    raise typer.Exit(code=EXIT_BLOCKED)
+
+
+# ── Recuperación ─────────────────────────────────────────────────────────────
+
+
+@app.command(rich_help_panel=PANEL_RECOVER)
+def resume(
+    workspace: Path = _ws_option(),
+    answers_file: Path = _answers_option(),
+) -> None:
+    """Retoma la migración donde quedó, incluida una entrevista a medio contestar.
+
+    Las respuestas viven en el checkpoint, no en state/: retomar no repite lo
+    que ya contestaste. Para volver a preguntar desde cero, `rewind`.
+    """
+    ws = _resolve_ws(workspace)
+    session = _session(ws)
     result = _drive(session, session.resume(), _load_script(answers_file))
     _report(result)
 
 
-@app.command()
+@app.command(rich_help_panel=PANEL_RECOVER)
 def rewind(
-    phase: int = typer.Option(..., help="Fase a rehacer desde cero (0-8)"),
-    workspace: Path = typer.Option(Path.cwd(), help="Raíz del workspace"),
-    answers_file: Path = typer.Option(None, help="Guion YAML de respuestas"),
-    backup: bool = typer.Option(True, help="Copia el checkpoint antes de rebobinar"),
+    phase: int = typer.Option(..., "--phase", "-p", min=0, max=9, help="Fase a rehacer (0-9)."),
+    workspace: Path = _ws_option(),
+    answers_file: Path = _answers_option(),
+    backup: bool = typer.Option(
+        True, "--backup/--no-backup", help="Copiar el checkpoint a .bak antes de rebobinar."
+    ),
 ) -> None:
-    """Rebobina al inicio de una fase y la vuelve a correr desde cero.
+    """Rehace una fase desde cero, descartando lo hecho desde su inicio.
 
-    Para rehacer una entrevista ya contestada a medias: `resume` la continúa
-    donde iba (las respuestas viven en el checkpointer), `rewind` la reinicia.
-    Las fases anteriores no se recalculan — sus artefactos en `state/` quedan.
+    `resume` continúa una entrevista donde iba; `rewind --phase N` la reinicia
+    desde la primera tarjeta. Las fases anteriores no se recalculan: sus
+    artefactos en state/ quedan como están.
     """
-    ws = workspace.resolve()
+    ws = _resolve_ws(workspace)
     if backup:
         import shutil
 
@@ -187,24 +473,27 @@ def rewind(
     try:
         result = session.rewind_to_phase(phase)
     except (ValueError, LookupError) as exc:
-        typer.echo(f"Error: {exc}")
-        raise typer.Exit(code=2) from exc
+        raise _die(
+            str(exc),
+            hint="`sas-migrator status` muestra hasta qué fase llegó la migración.",
+        ) from exc
     result = _drive(session, result, _load_script(answers_file))
     _report(result)
 
 
-@app.command()
+@app.command(rich_help_panel=PANEL_RECOVER)
 def reset(
-    workspace: Path = typer.Option(Path.cwd(), help="Raíz del workspace"),
+    workspace: Path = _ws_option(),
     keep_output: bool = typer.Option(
-        False, help="Conservar output/ (borra solo state/ y el checkpoint)"
+        False, help="Conservar output/ (borra solo state/ y el checkpoint)."
     ),
-    yes: bool = typer.Option(False, "--yes", "-y", help="No preguntar (scripts, CI)"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="No preguntar (scripts, CI)."),
 ) -> None:
-    """Borra los artefactos derivados y deja el workspace listo para empezar de cero.
+    """Borra lo derivado y deja el workspace listo para empezar de cero.
 
-    `rewind` rehace UNA fase; esto tira todo: `state/` (artefactos y
-    checkpoint) y `output/`. `input/` y `project_config.yaml` no se tocan.
+    `rewind` rehace UNA fase; esto tira todo: state/ (artefactos y checkpoint) y
+    output/. input/ y project_config.yaml no se tocan. Pide confirmación y antes
+    lista qué decisiones humanas habrá que volver a contestar.
     """
     from sas_migrator.core.utils.workspace_reset import (
         PRESERVED,
@@ -213,15 +502,15 @@ def reset(
         plan_reset,
     )
 
+    ws = _resolve_ws(workspace)
     try:
-        plan = plan_reset(workspace, keep_output=keep_output)
+        plan = plan_reset(ws, keep_output=keep_output)
     except ValueError as exc:
-        typer.echo(f"Error: {exc}")
-        raise typer.Exit(code=2) from exc
+        raise _die(str(exc), hint="Corré `reset` parado en el workspace, o pasá -w.") from exc
 
     if plan.is_empty:
         typer.echo(f"Nada que borrar en {plan.workspace} — el workspace ya está limpio.")
-        raise typer.Exit(code=0)
+        raise typer.Exit(code=EXIT_OK)
 
     typer.echo(f"Workspace: {plan.workspace}")
     if plan.phase is not None:
@@ -233,9 +522,10 @@ def reset(
     # El conteo de archivos no mide lo que duele: lo caro de un reset es volver
     # a contestar, no volver a calcular.
     if plan.decisions:
-        typer.echo(
+        typer.secho(
             f"⚠ Incluye {len(plan.decisions)} artefacto(s) de decisiones tuyas que "
-            "habrá que volver a contestar:"
+            "habrá que volver a contestar:",
+            fg=typer.colors.YELLOW,
         )
         for name in plan.decisions:
             typer.echo(f"    · {name}")
@@ -244,65 +534,182 @@ def reset(
         typer.confirm("¿Borrar y empezar de cero?", default=False, abort=True)
 
     done = apply_reset(plan)
-    typer.echo(f"🗑 Borrado: {', '.join(f'{n}/' for n in done)} — listo para `run`.")
+    typer.echo(f"🗑 Borrado: {', '.join(f'{n}/' for n in done)}")
+    _next_step("sas-migrator run")
 
 
-@app.command()
+# ── Inspección ───────────────────────────────────────────────────────────────
+
+
+def _needs_human_items(state_dir: Path) -> list:
+    from sas_migrator.core.utils.needs_human import unresolved
+
+    try:
+        return unresolved(state_dir)
+    except Exception:  # cola corrupta: no es motivo para no mostrar el resto
+        return []
+
+
+def _trace_summary(state_dir: Path) -> dict:
+    try:
+        from sas_migrator.llm.trace import summarize
+
+        return summarize(state_dir)
+    except Exception:
+        return {"calls": 0, "by_task": {}}
+
+
+@app.command(rich_help_panel=PANEL_INSPECT)
 def status(
-    workspace: Path = typer.Option(Path.cwd(), help="Raíz del workspace"),
+    workspace: Path = _ws_option(),
+    as_json: bool = typer.Option(False, "--json", help="Salida JSON para scripts."),
 ) -> None:
-    """Muestra fase actual, gates y entrevista pendiente."""
+    """Dónde quedó la migración: fases, gate bloqueado, needs_human y qué sigue.
+
+    Muestra las 10 fases con su estado, el detalle del gate que bloquea, los
+    items de la cola needs_human (que bloquean el gate de su fase hasta
+    resolverse) y un resumen de las llamadas LLM.
+    """
     from sas_migrator.service import SessionStatus
 
-    ws = workspace.resolve()
-    ms_path = ws / "state" / "migration_state.json"
-    if ms_path.exists():
-        ms = json.loads(ms_path.read_text(encoding="utf-8"))
-        typer.echo(f"Proyecto: {ms.get('project_name', '?')}")
-        typer.echo(f"EGP: {ms.get('egp_file', '?')}")
-        typer.echo(f"Fase actual: {ms.get('current_phase', '?')}")
+    ws = _resolve_ws(workspace)
+    state_dir = ws / "state"
     result = _session(ws).status()
-    if result.status == SessionStatus.NOT_STARTED:
+
+    project: dict = {}
+    ms_path = state_dir / "migration_state.json"
+    if ms_path.exists():
+        try:
+            project = json.loads(ms_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            project = {}
+
+    started = result.status != SessionStatus.NOT_STARTED
+    items = _needs_human_items(state_dir) if started else []
+    trace = _trace_summary(state_dir) if started else {"calls": 0, "by_task": {}}
+
+    if as_json:
+        typer.echo(
+            json.dumps(
+                {
+                    "workspace": str(ws),
+                    "project_name": project.get("project_name"),
+                    "egp_file": project.get("egp_file"),
+                    "status": result.status.value,
+                    "phase": result.phase,
+                    "completed_phases": result.completed_phases,
+                    "gate_errors": result.gate_errors,
+                    "pending_card": (
+                        result.pending_card.model_dump(mode="json")
+                        if result.pending_card
+                        else None
+                    ),
+                    "needs_human": [i.model_dump(mode="json") for i in items],
+                    "llm": trace,
+                },
+                indent=2,
+                ensure_ascii=False,
+            )
+        )
+        return
+
+    if not started:
+        typer.echo(f"Workspace: {ws}")
         typer.echo("Sin migración iniciada.")
-        raise typer.Exit(code=0)
-    typer.echo(f"Estado: {result.status.value}")
-    if result.pending_card is not None:
-        typer.echo(f"Entrevista pendiente: {result.pending_card.card_id}")
+        _next_step("sas-migrator doctor", "verifica el workspace antes de arrancar.")
+        raise typer.Exit(code=EXIT_OK)
 
+    typer.echo(f"Proyecto: {project.get('project_name', '?')}")
+    typer.echo(f"EGP:      {project.get('egp_file', '?')}")
+    typer.echo(f"Estado:   {result.status.value}")
+    typer.echo("")
+    typer.echo(render_phases(result.phase, result.completed_phases))
 
-@app.command()
-def iterate(
-    describe: str = typer.Option(..., help="Qué ajustar (instrucción de la iteración)"),
-    workspace: Path = typer.Option(Path.cwd(), help="Raíz del workspace"),
-    nodes: str = typer.Option("", help="node_ids afectados, separados por coma"),
-    request_type: str = typer.Option(
-        "enhancement",
-        help="bug_fix | enhancement | postponed_improvement | new_requirement | data_change | context_update",
-    ),
-) -> None:
-    """Itera sobre una migración completada (Fase 9, sub-grafo con gate)."""
-    session = _session(workspace)
-    node_ids = [n.strip() for n in nodes.split(",") if n.strip()]
-    result = session.iterate(describe, request_type=request_type, affected_nodes=node_ids)
-    for note in result.get("notes", []):
-        typer.echo(note)
-    if result.get("done"):
-        typer.echo(f"✅ Iteración {result['entry_id']} cerrada (ciclo {result['cycle']}).")
-    else:
-        typer.echo(f"⛔ Iteración {result['entry_id']} bloqueada:")
-        for err in result.get("errors", [])[:10]:
+    if result.gate_errors:
+        # Los errores de gate por needs_human se colapsan a un renglón: el
+        # detalle está en el bloque de abajo, y volcarlos dos veces convierte un
+        # tablero en una pared de texto (20 items = 40 líneas idénticas).
+        others = [e for e in result.gate_errors if "needs_human sin resolver" not in e]
+        from_queue = len(result.gate_errors) - len(others)
+        typer.echo("")
+        typer.secho(f"⛔ Gate {result.phase} bloqueado:", fg=typer.colors.RED)
+        for err in others[:10]:
             typer.echo(f"   - {err}")
-        raise typer.Exit(code=1)
+        if len(others) > 10:
+            typer.echo(f"   … y {len(others) - 10} más")
+        if from_queue:
+            typer.echo(f"   - {from_queue} item(s) de needs_human sin resolver (detalle abajo)")
+
+    if items:
+        typer.echo("")
+        typer.secho(
+            f"⚠ needs_human sin resolver ({len(items)}) — bloquean el gate de su fase:",
+            fg=typer.colors.YELLOW,
+        )
+        for item in items[:10]:
+            node = f" · {item.node_id}" if item.node_id else ""
+            # El `detail` es lo que distingue un item de otro cuando veinte
+            # comparten el mismo `reason` (`static_check_failed`, siempre).
+            detail = (item.detail or "").strip().splitlines()
+            head = f" — {detail[0][:70]}" if detail else ""
+            typer.echo(f"   {item.id} (fase {item.phase}{node}) {item.reason}{head}")
+        if len(items) > 10:
+            typer.echo(f"   … y {len(items) - 10} más")
+        typer.echo(f"   Se resuelven en {state_dir / 'needs_human.yaml'} (resolved: true).")
+
+    if trace.get("calls"):
+        by_task = trace["by_task"].values()
+        agg = {k: sum(t.get(k, 0) for t in by_task) for k in ("ok", "needs_human", "errors")}
+        seconds = sum(t.get("duration_ms", 0) for t in by_task) / 1000
+        typer.echo("")
+        typer.echo(
+            f"LLM: {trace['calls']} llamadas · {agg['ok']} ok · "
+            f"{agg['needs_human']} needs_human · {agg['errors']} error(es) · "
+            f"{int(seconds // 60)}m {int(seconds % 60):02d}s"
+        )
+
+    if result.pending_card is not None:
+        card = result.pending_card
+        progress = card.progress
+        tag = f"  [{progress.index}/{progress.total or '?'}]" if progress else ""
+        typer.echo("")
+        typer.echo(f"Entrevista pendiente: {card.card_id} — {card.title}{tag}")
+
+    if result.status == SessionStatus.COMPLETED:
+        _next_step('sas-migrator iterate "<qué ajustar>"', "la migración base está completa.")
+    elif result.status == SessionStatus.WAITING_USER:
+        _next_step("sas-migrator resume", "retoma en la pregunta pendiente.")
+    elif items:
+        _next_step(
+            "sas-migrator resume",
+            "después de marcar los needs_human como resolved en el YAML.",
+        )
+    else:
+        _next_step("sas-migrator resume", "reintenta la fase bloqueada.")
 
 
-@app.command()
+# ── Integración ──────────────────────────────────────────────────────────────
+
+
+@app.command(rich_help_panel=PANEL_INTEGRATION)
 def serve(
-    workspace: Path = typer.Option(Path.cwd(), help="Raíz del workspace"),
+    workspace: Path = _ws_option(),
 ) -> None:
-    """Levanta el servidor MCP (stdio) sobre este workspace."""
-    from sas_migrator.mcp_server.server import serve_workspace
+    """Levanta el servidor MCP (stdio) sobre este workspace.
 
-    serve_workspace(workspace.resolve())
+    Un servidor por workspace. Es el frente cómodo para las entrevistas: las
+    tarjetas llegan como JSON tipado y se contestan en lenguaje natural. Ver el
+    README para registrarlo en un host MCP.
+    """
+    try:
+        from sas_migrator.mcp_server.server import serve_workspace
+    except ModuleNotFoundError as exc:
+        raise _die(
+            f"Falta el extra 'mcp': {exc}",
+            hint='pip install -e ".[mcp]"',
+        ) from exc
+
+    serve_workspace(_resolve_ws(workspace))
 
 
 if __name__ == "__main__":

@@ -93,7 +93,8 @@ Sirve desde cualquier carpeta y no duplica el secreto por workspace. Va último
 en la precedencia justamente para que un workspace pueda pisarlo.
 
 Si falta la credencial, el error lista los `.env` que se consultaron y si
-existían — no hay que adivinar cuál se leyó.
+existían — no hay que adivinar cuál se leyó. `sas-migrator doctor` lo dice antes
+de arrancar, no en la fase 2.
 
 Una corrida real además necesita `db.default_server` en la config (lo usa la
 fase 7 para `verify_tables`) y referencias en `input/data/`.
@@ -119,43 +120,83 @@ corre, solo cómo se contestan las entrevistas.
 
 ### CLI
 
-Siete comandos, y no hay más. `--workspace` es una opción, no un posicional;
-sin ella se usa el directorio actual.
+Ocho comandos, y no hay más. `--workspace` (`-w`) es una opción, no un
+posicional; sin ella se usa el directorio actual. El camino normal es
+**`doctor` → `run` → contestar → `status`**.
 
-| Comando | Para qué |
-|---|---|
-| `run` | Corrida completa desde la fase 0 |
-| `resume` | Retomar donde quedó, incluida una entrevista a medio contestar |
-| `rewind` | Rehacer una fase desde cero |
-| `reset` | Borrar lo derivado y empezar de cero (pide confirmación) |
-| `status` | Fase actual, gates y entrevista pendiente |
-| `iterate` | Iteración post-migración (fase 9) |
-| `serve` | Servidor MCP por stdio sobre el workspace |
+| Comando | Para qué | Grupo |
+|---|---|---|
+| `doctor` | Verificar que el workspace pueda correr (no toca la red) | Corrida |
+| `run` | Corrida completa desde la fase 0 | Corrida |
+| `iterate` | Iteración post-migración (fase 9) | Corrida |
+| `resume` | Retomar donde quedó, incluida una entrevista a medio contestar | Recuperación |
+| `rewind` | Rehacer una fase desde cero | Recuperación |
+| `reset` | Borrar lo derivado y empezar de cero (pide confirmación) | Recuperación |
+| `status` | Tablero: fases, gate bloqueado, needs_human, LLM, qué sigue | Inspección |
+| `serve` | Servidor MCP por stdio sobre el workspace | Integración |
+
+Códigos de salida, estables para scripts y CI: **0** ok · **1** bloqueado (gate,
+chequeo de `doctor`, iteración) · **2** error de uso o de entorno · **130**
+interrumpido con Ctrl-C. Los errores van a **stderr**, así que
+`status --json | jq` no se ensucia.
 
 ```bash
+# Antes de gastar tiempo y tokens: estructura, config, credencial, extras
+sas-migrator doctor -w mi_migracion
+
 # Corrida real: entrevistas + LLM. Es el default — migrar no exige un flag.
-sas-migrator run --workspace mi_migracion
+sas-migrator run -w mi_migracion
 
 # Corrida determinista sin LLM ni entrevistas (CI, smoke test)
-sas-migrator run --workspace mi_migracion --stub
+sas-migrator run -w mi_migracion --stub
 
 # Reanudar donde quedó, incluida una entrevista a medio contestar
-sas-migrator resume --workspace mi_migracion
+sas-migrator resume -w mi_migracion
 
 # Rehacer una fase DESDE CERO (resume la continúa; rewind la reinicia)
-sas-migrator rewind --phase 6 --workspace mi_migracion
+sas-migrator rewind -p 6 -w mi_migracion
 
-# Estado de fases y gates
-sas-migrator status --workspace mi_migracion
+# Tablero de estado, o JSON para scriptear
+sas-migrator status -w mi_migracion
+sas-migrator status -w mi_migracion --json
 
 # Iteración post-migración (Fase 9)
-sas-migrator iterate --workspace mi_migracion \
-  --describe "corregir el redondeo de montos" --nodes CodeTask-3
+sas-migrator iterate "corregir el redondeo de montos" -w mi_migracion -n CodeTask-3
 ```
 
 `run` anuncia su modo en la primera línea (`▶ modo REAL` / `▶ modo STUB`) y se
 detiene en la primera pregunta de entrevista: una corrida arrancada por error
-no gasta más que las fases 0–1.
+no gasta más que las fases 0–1. En modo real chequea la credencial antes de
+arrancar (`--no-check` lo saltea): faltarla es el fallo más caro de descubrir
+tarde, porque pega en la fase 2 con la entrevista inicial ya contestada.
+
+Ctrl-C a mitad de una entrevista es una pausa, no un accidente: lo contestado
+queda en el checkpoint y `resume` retoma en la misma pregunta.
+
+### `doctor`
+
+```bash
+sas-migrator doctor -w mi_migracion         # todo lo que una corrida real necesita
+sas-migrator doctor -w mi_migracion --stub  # solo lo que el modo stub necesita
+```
+
+Chequea, de solo lectura y sin red: `input/egp/` con exactamente un `.egp`,
+referencias en `input/data/`, que `project_config.yaml` parsee y tenga BD,
+`run.macro_params`, la credencial del proveedor que elige la config —buscada en
+los mismos `.env` y en el mismo orden que una corrida real— y los extras
+instalados. Sale 1 si algo bloquea; los `⚠` no bloquean: describen lo que
+faltará más tarde (sin `input/data/` la cascada de la fase 7 queda sin ground
+truth, sin `macro_params` el notebook falla al ejecutar). Cada chequeo que no
+pasa dice cómo arreglarlo.
+
+### `status`
+
+Además de la fase actual muestra las 10 fases con su estado (`✅` pasada, `▶`
+acá, `·` pendiente), los errores del gate que bloquea, la cola `needs_human`
+—con el `detail` que distingue un item de otro y la ruta del YAML donde se
+resuelven—, el resumen de llamadas LLM del `llm_trace.jsonl` y el próximo
+comando a correr. Los items de `needs_human` no se imprimen dos veces: el gate
+los colapsa a un renglón.
 
 `resume` vs `rewind`: las respuestas de entrevista viven en el checkpointer, no
 en `state/`. `resume` retoma donde iba; `rewind --phase N` descarta el tramo y
@@ -290,7 +331,9 @@ live y el harness real corren en el nightly (`nightly.yml`) o a mano.
 ## Observabilidad
 
 Cada llamada LLM real queda en `state/llm_trace.jsonl` (task, hash del prompt,
-outcome, intentos, duración, tokens). Resumen rápido:
+outcome, intentos, duración, tokens). `sas-migrator status` imprime el agregado
+(llamadas, ok, needs_human, errores, tiempo total) y `--json` lo devuelve por
+task. Desde Python, el mismo resumen: 
 
 ```python
 from sas_migrator.llm.trace import summarize

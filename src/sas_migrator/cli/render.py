@@ -24,6 +24,44 @@ WIDTH = 78
 BODY = "      "
 
 
+# Nombres de fase para el tablero de `status`. Viven acá porque son texto para
+# humanos: el grafo las conoce por nombre de nodo (`analysis`, `planning`), que
+# no es lo que uno quiere leer cuando pregunta dónde quedó la migración.
+PHASE_NAMES: dict[int, str] = {
+    0: "Intake",
+    1: "Entrevista inicial",
+    2: "Análisis SAS",
+    3: "Profiling + matching",
+    4: "Entrevista post-análisis",
+    5: "Plan de traducción",
+    6: "Generación",
+    7: "Validación",
+    8: "Documentación",
+    9: "Post-migración",
+}
+
+
+def render_phases(current: int, completed: list[int]) -> str:
+    """Las fases con su estado: ✅ pasada, ▶ acá, · pendiente.
+
+    Un `Fase actual: 4` suelto no dice si 0-3 pasaron ni cuánto falta. La lista
+    completa cuesta diez líneas y responde las dos preguntas de una.
+    """
+    done = set(completed)
+    lines = []
+    for phase, name in PHASE_NAMES.items():
+        # Los marcadores se alinean por ANCHO de columna, no por cantidad de
+        # caracteres: el emoji ocupa dos y las flechas una.
+        if phase == current:
+            marker, suffix = " ▶", "   ← acá"
+        elif phase in done:
+            marker, suffix = "✅", ""
+        else:
+            marker, suffix = " ·", ""
+        lines.append(f"  {marker} {phase}  {name}{suffix}")
+    return "\n".join(lines)
+
+
 def _wrap(text: str, initial: str, subsequent: str) -> list[str]:
     """Pliega respetando los saltos de línea que el texto ya traía."""
     out: list[str] = []

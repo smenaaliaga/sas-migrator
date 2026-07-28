@@ -285,7 +285,7 @@ BD, exit 1 si algo falla. Hace el output autónomo: operable sin el migrador.
 
 ## 7. Post-migración (fase 9)
 
-`sas-migrator iterate "petición" --nodes ...`: cada iteración es un
+`sas-migrator iterate "petición" -n <node_id>`: cada iteración es un
 sub-grafo con su propio gate — clasifica la petición, pregunta contexto si
 falta, re-traduce **solo** los nodos afectados, re-ensambla, re-valida, y
 registra todo en `iteration_log.json`. El gate 9 impide cerrar una iteración
@@ -300,19 +300,22 @@ sin re-validación.
 SASMIG_REAL_EGP=C:/ruta/proyecto.egp pytest tests/integration -q
 #   → nodos, flujos, residuo, nodos macro-dependientes → backlog JSON
 
+# Preflight: estructura, config, credencial y extras (sin red, sin costo):
+sas-migrator doctor -w D:\Migraciones\mi_proyecto
+
 # Migración real (entrevistas + LLM + pausa antes de tocar la BD) — el default:
-sas-migrator run --workspace D:\Migraciones\mi_proyecto
+sas-migrator run -w D:\Migraciones\mi_proyecto
 # (`--stub` es el modo determinista sin LLM ni entrevistas, para CI)
 
 # Estado / reanudar (checkpointer sqlite, sobrevive cortes):
-sas-migrator status --workspace D:\Migraciones\mi_proyecto
-sas-migrator resume --workspace D:\Migraciones\mi_proyecto
+sas-migrator status -w D:\Migraciones\mi_proyecto
+sas-migrator resume -w D:\Migraciones\mi_proyecto
 
 # Rehacer una fase desde cero (resume la continúa, rewind la reinicia):
-sas-migrator rewind --phase 6 --workspace D:\Migraciones\mi_proyecto
+sas-migrator rewind -p 6 -w D:\Migraciones\mi_proyecto
 
 # Conducirlo desde un chat (Claude Desktop, VS Code/Copilot — cualquier host MCP):
-sas-migrator serve --workspace D:\Migraciones\mi_proyecto
+sas-migrator serve -w D:\Migraciones\mi_proyecto
 ```
 
 Los tres frentes —CLI, MCP y `MigrationSession` en Python— son el mismo camino

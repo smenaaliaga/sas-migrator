@@ -20,6 +20,16 @@ def set_caller(caller: StructuredCaller | None) -> None:
     _override = caller
 
 
+def caller_injected() -> bool:
+    """True si hay un caller inyectado: nadie va a pedir credencial.
+
+    Lo consulta el preflight de `run`: con un FakeCaller puesto (tests, evals,
+    replay) una corrida no-stub es perfectamente válida sin key, y exigirla
+    sería un chequeo que solo sabe rechazar corridas que sí funcionan.
+    """
+    return _override is not None
+
+
 def get_caller(workspace: Path | str) -> StructuredCaller:
     if _override is not None:
         return _override
