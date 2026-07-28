@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "sas-migrator"
-version = "2.0.0a0"
+version = "2.0.0a1"
 description = "SAS EG to Python migration pipeline — LangGraph orchestration over a deterministic core"
 requires-python = ">=3.11"
 # Pisos verificados con techo de major: un major nuevo de pandas/pydantic/
