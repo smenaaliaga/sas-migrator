@@ -56,6 +56,10 @@ translation:
     - requests
     - scipy
     - sqlalchemy
+  # Verificador LLM post-chequeo estático (fase 6): compara SAS vs traducción
+  # buscando semántica perdida o cambiada. all = todos los nodos (default),
+  # low = solo los de confianza baja, off = sin verificador.
+  verify: all
 
 run:
   # Valores de las variables macro que el SAS heredaba del entorno (autoexec

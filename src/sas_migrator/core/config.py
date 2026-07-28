@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 CONFIG_FILENAME = "project_config.yaml"
 
@@ -117,6 +117,24 @@ class TranslationConfig(BaseModel):
             "sqlalchemy",
         ]
     )
+    # Verificador LLM post-chequeo estático (fase 6): un segundo par de ojos
+    # que compara SAS vs traducción buscando semántica perdida o cambiada.
+    #   all → todos los nodos (default: el costo de UN nodo mal traducido en
+    #         producción supera el de verificar los 75)
+    #   low → solo los nodos cuya traducción declaró confidence=low
+    #   off → sin verificador
+    verify: Literal["off", "low", "all"] = "all"
+
+    @field_validator("verify", mode="before")
+    @classmethod
+    def _yaml_bool_is_verify_mode(cls, v):
+        # YAML 1.1 parsea `off` como False: escribir `verify: off` sin comillas
+        # es lo natural y no puede ser un error de validación.
+        if v is False:
+            return "off"
+        if v is True:
+            return "all"
+        return v
 
 
 class ParserConfig(BaseModel):

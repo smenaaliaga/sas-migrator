@@ -54,6 +54,32 @@ def build_docs_system() -> list[str]:
     return [_read("doc_writer.md")]
 
 
+def build_verify_system() -> list[str]:
+    return [_read("verify_system.md")]
+
+
+def build_verify_user(target: dict, node_code: str, translation_json: str) -> str:
+    """User del verificador: header + SAS original + traducción a revisar."""
+    head = header_line(
+        {
+            "node_id": target.get("node_id"),
+            "node_label": target.get("node_label", ""),
+            "strategy": target.get("strategy", "pandas"),
+            "input_datasets": target.get("input_datasets", []),
+            "output_datasets": target.get("output_datasets", []),
+            "output_tables": target.get("output_tables", []),
+        }
+    )
+    return (
+        head
+        + "\n\n## SAS original\n```sas\n"
+        + (node_code or "(sin código)")
+        + "\n```\n\n## Traducción a verificar (NodeTranslation)\n```json\n"
+        + translation_json
+        + "\n```\n"
+    )
+
+
 def build_translation_system(project_context: str | None = None) -> list[str]:
     """System de traducción en (hasta) TRES bloques con cache escalonado.
 

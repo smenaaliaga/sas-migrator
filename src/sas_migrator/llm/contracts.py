@@ -8,10 +8,13 @@ escribir el artefacto.
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 from sas_migrator.core.models.analysis import Improvement
 from sas_migrator.core.models.data import FileMapping
+from sas_migrator.core.models.translation import Confidence
 from sas_migrator.core.models.validation import MismatchDiagnosis
 
 
@@ -51,6 +54,47 @@ class DiagnosesOut(BaseModel):
     tipado con los 8 patrones de causa (MismatchCause)."""
 
     diagnoses: list[MismatchDiagnosis] = Field(default_factory=list)
+
+
+class VerifyIssue(BaseModel):
+    """Un problema concreto que el verificador encontró en la traducción."""
+
+    kind: Literal[
+        "missing_logic",      # una parte del SAS no aparece en el Python
+        "wrong_semantics",    # el Python hace OTRA cosa (filtro, join, agregación)
+        "wrong_write",        # la semántica de escritura a BD no replica al SAS
+        "wrong_names",        # datasets/columnas con nombre equivocado
+        "other",
+    ] = Field(description="Tipo del problema.")
+    detail: str = Field(
+        description="Qué está mal y dónde, citando el SAS y el Python relevantes."
+    )
+
+
+class TranslationVerdict(BaseModel):
+    """Salida del verificador independiente de traducciones (fase 6).
+
+    Es el segundo par de ojos: compara el SAS original contra la traducción
+    que YA pasó los chequeos estáticos, buscando lo que ellos no ven —
+    semántica perdida o cambiada.
+    """
+
+    node_id: str = Field(description="Copia exacta del node_id del user.")
+    verdict: Literal["approve", "revise"] = Field(
+        description=(
+            "'revise' SOLO por problemas sustantivos de semántica (la cifra "
+            "saldría distinta). Estilo, nombres de variables internos o "
+            "equivalencias válidas NO ameritan revise."
+        )
+    )
+    issues: list[VerifyIssue] = Field(
+        default_factory=list,
+        description="Vacía si approve; con revise, los problemas concretos.",
+    )
+    confidence: Confidence = Field(
+        default=Confidence.MEDIUM,
+        description="Confianza del verificador en que la traducción es correcta.",
+    )
 
 
 class DocsOut(BaseModel):

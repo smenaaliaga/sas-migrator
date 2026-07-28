@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import re
+from dataclasses import dataclass
 from pathlib import Path
 
 import yaml
@@ -440,23 +441,35 @@ def _approved_improvements(state_dir: Path) -> list[dict]:
     return out
 
 
-def _translation_context(
-    state_dir: Path, plan: dict
-) -> tuple[list[str], list[str], list[str]]:
-    """(system_blocks, db_aliases, allowed_imports) para la fase de traducción."""
+@dataclass
+class TranslationSetup:
+    """Insumos compartidos de la fase de traducción (y la re-traducción de F9)."""
+
+    system: list[str]
+    db_aliases: list[str]
+    allowed: list[str]
+    verify_mode: str  # off | low | all
+
+
+def _translation_context(state_dir: Path, plan: dict) -> TranslationSetup:
     from sas_migrator.core.config import load_project_config
     from sas_migrator.core.db.connections import load_connections
 
     conns = load_connections(state_dir)
     db_aliases = [str(c["alias"]) for c in conns if c.get("alias")]
-    allowed = list(load_project_config(state_dir.parent).translation.allowed_imports)
+    tcfg = load_project_config(state_dir.parent).translation
     context_block = prompt_builder.build_project_context(
         connections=conns,
         improvements=_approved_improvements(state_dir),
         macro_param_values=plan.get("macro_param_values") or {},
-        allowed_imports=allowed,
+        allowed_imports=list(tcfg.allowed_imports),
     )
-    return prompt_builder.build_translation_system(context_block), db_aliases, allowed
+    return TranslationSetup(
+        system=prompt_builder.build_translation_system(context_block),
+        db_aliases=db_aliases,
+        allowed=list(tcfg.allowed_imports),
+        verify_mode=tcfg.verify,
+    )
 
 
 def _translate_node(
@@ -607,34 +620,132 @@ def _translate_checked(
     raise AssertionError("inalcanzable")  # pragma: no cover
 
 
+def _should_verify(mode: str, nt: NodeTranslation) -> bool:
+    if mode == "off":
+        return False
+    if mode == "low":
+        return nt.confidence == Confidence.LOW
+    return True
+
+
+def _verify_once(caller, target: dict, code: str, nt: NodeTranslation):
+    from sas_migrator.llm.contracts import TranslationVerdict
+
+    return caller.call(
+        task="verify",
+        system_blocks=prompt_builder.build_verify_system(),
+        user_content=prompt_builder.build_verify_user(
+            target, code, nt.model_dump_json(indent=2)
+        ),
+        output_model=TranslationVerdict,
+    )
+
+
+def _verify_and_revise(
+    caller, *, setup: TranslationSetup, target: dict, code: str,
+    nt: NodeTranslation, review_note: str | None,
+    dependencies_context: dict | None,
+) -> tuple[NodeTranslation, dict]:
+    """Verifica la traducción; con veredicto ``revise``, UNA re-traducción con
+    los issues como nota y re-verificación. Devuelve (nt_final, registro).
+
+    El verificador es una red extra, no un gate: si él mismo falla, la
+    traducción que pasó los chequeos estáticos sigue valiendo — queda
+    ``unverified`` en el sidecar (la auditoría lo muestra) sin bloquear nada.
+    Los 525 warnings + confidence que antes se descartaban tienen acá su
+    consumidor.
+    """
+    nid = str(target.get("node_id"))
+
+    def _record(verdict: str, issues, confidence, revised: bool) -> dict:
+        return {
+            "node_id": nid,
+            "verdict": verdict,
+            "issues": [{"kind": i.kind, "detail": i.detail} for i in issues],
+            "confidence": str(getattr(confidence, "value", confidence)),
+            "revised": revised,
+        }
+
+    try:
+        v = _verify_once(caller, target, code, nt)
+    except NeedsHuman as exc:
+        rec = _record("unverified", [], nt.confidence, False)
+        rec["issues"] = [{"kind": "other", "detail": f"verificador falló: {exc.reason}"}]
+        return nt, rec
+    if v.verdict == "approve":
+        return nt, _record("approve", v.issues, v.confidence, False)
+
+    nota = (
+        "Un verificador independiente comparó tu traducción anterior con el "
+        "SAS original y encontró estos problemas de semántica:\n"
+        + "\n".join(f"- [{i.kind}] {i.detail}" for i in v.issues)
+        + "\nRe-traducí el nodo completo corrigiéndolos."
+    )
+    try:
+        revised = _translate_checked(
+            caller, system=setup.system, target=target, code=code,
+            db_aliases=setup.db_aliases, iteration_note=nota,
+            review_note=review_note, dependencies_context=dependencies_context,
+            allowed_imports=setup.allowed,
+        )
+    except NeedsHuman:
+        # La revisión no mejoró: se conserva la traducción original con el
+        # veredicto revise a la vista (audit medium) — no un notebook sin nodo.
+        return nt, _record("revise", v.issues, v.confidence, False)
+    try:
+        v2 = _verify_once(caller, target, code, revised)
+        return revised, _record(v2.verdict, v2.issues, v2.confidence, True)
+    except NeedsHuman:
+        return revised, _record("unverified", v.issues, v.confidence, True)
+
+
+def _load_review_sidecar(state_dir: Path) -> dict[str, dict]:
+    doc = fsio.load_json(state_dir / "translation_review.json") or {}
+    return {
+        str(r.get("node_id")): r
+        for r in doc.get("reviews", [])
+        if isinstance(r, dict) and r.get("node_id")
+    }
+
+
+def _write_review_sidecar(state_dir: Path, reviews: dict[str, dict]) -> None:
+    _dump_json(
+        state_dir / "translation_review.json",
+        {"reviews": [reviews[k] for k in sorted(reviews)]},
+    )
+
+
 def run_translation(state_dir: Path, output_dir: Path, workspace: Path) -> dict:
     from sas_migrator.core.assembly.notebook import assemble_notebooks
 
     state_dir = Path(state_dir)
     plan = _load_json(state_dir / "translation_plan.json")
     caller = runtime.get_caller(workspace)
-    system, db_aliases, allowed = _translation_context(state_dir, plan)
+    setup = _translation_context(state_dir, plan)
     review_notes = _review_notes(state_dir)
     targets_by_id = {str(t.get("node_id")): t for t in plan.get("targets", [])}
+    reviews = _load_review_sidecar(state_dir)
 
     # Persistir cada traducción apenas se obtiene (no al final del loop): si el
     # proceso muere a mitad de camino, retomar la corrida salta los nodos que
     # ya tengan .json en disco en vez de perder todo el trabajo en memoria.
     trans_dir = state_dir / "translations"
     trans_dir.mkdir(exist_ok=True)
-    translations = _load_valid_translations(trans_dir, allowed)
+    translations = _load_valid_translations(trans_dir, setup.allowed)
 
     for target in plan.get("targets", []):
         nid = str(target.get("node_id"))
         if nid in translations:
             continue
+        code = _node_code(state_dir, nid)
+        deps_ctx = _deps_context(target, targets_by_id)
         try:
             nt = _translate_checked(
-                caller, system=system, target=target,
-                code=_node_code(state_dir, nid), db_aliases=db_aliases,
+                caller, system=setup.system, target=target,
+                code=code, db_aliases=setup.db_aliases,
                 review_note=review_notes.get(nid),
-                dependencies_context=_deps_context(target, targets_by_id),
-                allowed_imports=allowed,
+                dependencies_context=deps_ctx,
+                allowed_imports=setup.allowed,
             )
         except NeedsHuman as exc:
             record_needs_human(
@@ -642,6 +753,12 @@ def run_translation(state_dir: Path, output_dir: Path, workspace: Path) -> dict:
                 reason=exc.reason, detail=exc.detail, attempts=exc.attempts,
             )
             continue
+        if _should_verify(setup.verify_mode, nt):
+            nt, reviews[nid] = _verify_and_revise(
+                caller, setup=setup, target=target, code=code, nt=nt,
+                review_note=review_notes.get(nid), dependencies_context=deps_ctx,
+            )
+            _write_review_sidecar(state_dir, reviews)
         # Identidad defensiva: el mapping se construye con los ids del PLAN.
         nt = nt.model_copy(
             update={"node_id": nid, "node_label": target.get("node_label") or nid}
@@ -650,8 +767,8 @@ def run_translation(state_dir: Path, output_dir: Path, workspace: Path) -> dict:
         _dump_json(trans_dir / f"{nid}.json", json.loads(nt.model_dump_json()))
 
     mapping, failures = assemble_notebooks(
-        plan, translations, Path(output_dir), db_bootstrap=bool(db_aliases),
-        allowed_imports=allowed,
+        plan, translations, Path(output_dir), db_bootstrap=bool(setup.db_aliases),
+        allowed_imports=setup.allowed,
     )
     for failure in failures:
         record_needs_human(
@@ -688,23 +805,26 @@ def retranslate_nodes(
     trans_dir = state_dir / "translations"
 
     caller = runtime.get_caller(workspace)
-    system, db_aliases, allowed = _translation_context(state_dir, plan)
-    translations = _load_valid_translations(trans_dir, allowed)
+    setup = _translation_context(state_dir, plan)
+    translations = _load_valid_translations(trans_dir, setup.allowed)
     review_notes = _review_notes(state_dir)
+    reviews = _load_review_sidecar(state_dir)
 
     retranslated = 0
     for nid in node_ids:
         target = targets_by_id.get(nid)
         if target is None:
             continue
+        code = _node_code(state_dir, nid)
+        deps_ctx = _deps_context(target, targets_by_id)
         try:
             nt = _translate_checked(
-                caller, system=system, target=target,
-                code=_node_code(state_dir, nid), db_aliases=db_aliases,
+                caller, system=setup.system, target=target,
+                code=code, db_aliases=setup.db_aliases,
                 iteration_note=iteration_note,
                 review_note=review_notes.get(nid),
-                dependencies_context=_deps_context(target, targets_by_id),
-                allowed_imports=allowed,
+                dependencies_context=deps_ctx,
+                allowed_imports=setup.allowed,
             )
         except NeedsHuman as exc:
             record_needs_human(
@@ -712,6 +832,12 @@ def retranslate_nodes(
                 reason=exc.reason, detail=exc.detail, attempts=exc.attempts,
             )
             continue
+        if _should_verify(setup.verify_mode, nt):
+            nt, reviews[nid] = _verify_and_revise(
+                caller, setup=setup, target=target, code=code, nt=nt,
+                review_note=review_notes.get(nid), dependencies_context=deps_ctx,
+            )
+            _write_review_sidecar(state_dir, reviews)
         nt = nt.model_copy(
             update={"node_id": nid, "node_label": target.get("node_label") or nid}
         )
@@ -721,8 +847,8 @@ def retranslate_nodes(
         retranslated += 1
 
     mapping, failures = assemble_notebooks(
-        plan, translations, Path(output_dir), db_bootstrap=bool(db_aliases),
-        allowed_imports=allowed,
+        plan, translations, Path(output_dir), db_bootstrap=bool(setup.db_aliases),
+        allowed_imports=setup.allowed,
     )
     for failure in failures:
         record_needs_human(

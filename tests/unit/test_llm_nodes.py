@@ -1,4 +1,4 @@
-"""Runners LLM de fases 2/3/6 con FakeCaller: producen artefactos que pasan
+﻿"""Runners LLM de fases 2/3/6 con FakeCaller: producen artefactos que pasan
 los gates REALES; NeedsHuman queda registrado y el gate bloquea (nunca
 silencio)."""
 
@@ -26,6 +26,7 @@ from sas_migrator.testing.fake_llm import _header
 from sas_migrator.testing.fake_llm import fake_improvements as _improvements_fake
 from sas_migrator.testing.fake_llm import fake_reviews as _reviews_fake
 from sas_migrator.testing.fake_llm import fake_translation as _translation_fake
+from sas_migrator.testing.fake_llm import fake_verify as _verify_fake
 
 
 @pytest.fixture(autouse=True)
@@ -56,11 +57,11 @@ def ws(stub_ws: Path, tmp_path: Path) -> Path:
 
 
 
-# ── Fase 2 ──────────────────────────────────────────────────────────────────
+# â”€â”€ Fase 2 â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def test_run_analysis_passes_real_gate2(ws: Path) -> None:
     state = ws / "state"
-    # partir de cero: sin reviews previas, descripciones vacías, ledger pending
+    # partir de cero: sin reviews previas, descripciones vacÃ­as, ledger pending
     shutil.rmtree(state / "analysis_reviews")
     (state / "analysis_progress.json").unlink()
     summary = json.loads((state / "flow_summary.json").read_text(encoding="utf-8"))
@@ -110,7 +111,7 @@ def test_run_analysis_needs_human_blocks_gate2(ws: Path) -> None:
     assert any("needs_human" in e for e in errors)
 
 
-# ── Fase 3 ──────────────────────────────────────────────────────────────────
+# â”€â”€ Fase 3 â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def _with_profile(state: Path) -> None:
     (state / "profile_report.json").write_text(
@@ -155,12 +156,12 @@ def test_run_matching_needs_human_fallback(ws: Path) -> None:
 
 def test_run_matching_without_profiles_skips_llm(ws: Path) -> None:
     state = ws / "state"
-    runtime.set_caller(FakeCaller({}))  # cualquier llamada explotaría con KeyError
+    runtime.set_caller(FakeCaller({}))  # cualquier llamada explotarÃ­a con KeyError
     counts = phases.run_matching(state, ws)
     assert counts == {"mappings": 0, "llm": False}
 
 
-# ── Fase 6 ──────────────────────────────────────────────────────────────────
+# â”€â”€ Fase 6 â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def test_run_translation_passes_real_gate6(ws: Path) -> None:
     state = ws / "state"
@@ -168,7 +169,7 @@ def test_run_translation_passes_real_gate6(ws: Path) -> None:
     # retoma desde lo que ya exista en disco, no debe confundirlas con
     # traducciones reales).
     shutil.rmtree(state / "translations", ignore_errors=True)
-    runtime.set_caller(FakeCaller({"translation": _translation_fake}))
+    runtime.set_caller(FakeCaller({"translation": _translation_fake, "verify": _verify_fake}))
     counts = phases.run_translation(state, ws / "output", ws)
 
     assert counts["assembly_failures"] == 0
@@ -193,25 +194,25 @@ def test_run_translation_failed_node_is_needs_human_and_gate_blocks(ws: Path) ->
                              attempts=3)
         return _translation_fake(user)
 
-    runtime.set_caller(FakeCaller({"translation": flaky}))
+    runtime.set_caller(FakeCaller({"translation": flaky, "verify": _verify_fake}))
     counts = phases.run_translation(state, ws / "output", ws)
     assert counts["translated"] == counts["targets"] - 1
 
     items = unresolved(state, phase=6)
     assert [i.node_id for i in items] == ["CodeTask-1"]
-    # El gate 6 solo LEE la auditoría; la produce la fase (graph/nodes.py).
-    # Acá se invoca run_translation directo, así que el audit se corre aparte.
+    # El gate 6 solo LEE la auditorÃ­a; la produce la fase (graph/nodes.py).
+    # AcÃ¡ se invoca run_translation directo, asÃ­ que el audit se corre aparte.
     run_audit(state, ws / "output")
     passed, errors = check_gate(6, state)
     assert not passed
     assert any("needs_human" in e for e in errors)
     assert any("without SAS->Python mapping" in e for e in errors), (
-        "la auditoría también reporta el nodo sin mapping (doble señal)"
+        "la auditorÃ­a tambiÃ©n reporta el nodo sin mapping (doble seÃ±al)"
     )
 
 
 def test_run_translation_static_failure_is_recorded(ws: Path) -> None:
-    """Un nodo que nunca pasa el chequeo agota los reintentos y va a la cola —
+    """Un nodo que nunca pasa el chequeo agota los reintentos y va a la cola â€”
     y NO queda persistido en state/translations/ como si estuviera hecho."""
     state = ws / "state"
     shutil.rmtree(state / "translations", ignore_errors=True)
@@ -222,13 +223,13 @@ def test_run_translation_static_failure_is_recorded(ws: Path) -> None:
             return nt.model_copy(update={"cells": ["df.to_parquet('x')\n"]})
         return nt
 
-    caller = FakeCaller({"translation": bad_code})
+    caller = FakeCaller({"translation": bad_code, "verify": _verify_fake})
     runtime.set_caller(caller)
     counts = phases.run_translation(state, ws / "output", ws)
 
     assert counts["translated"] == counts["targets"] - 1
     assert counts["assembly_failures"] == 0, (
-        "el fallo estático se ataja al traducir, no al ensamblar"
+        "el fallo estÃ¡tico se ataja al traducir, no al ensamblar"
     )
     items = unresolved(state, phase=6)
     assert [i.node_id for i in items] == ["CodeTask-2"]
@@ -237,8 +238,8 @@ def test_run_translation_static_failure_is_recorded(ws: Path) -> None:
     assert items[0].attempts == phases.MAX_TRANSLATION_RETRIES + 1
 
     assert not (state / "translations" / "CodeTask-2.json").exists(), (
-        "una traducción rechazada no se persiste: si se persistiera, el "
-        "retomar-desde-disco la daría por hecha y no se reintentaría nunca"
+        "una traducciÃ³n rechazada no se persiste: si se persistiera, el "
+        "retomar-desde-disco la darÃ­a por hecha y no se reintentarÃ­a nunca"
     )
     malas = [
         c for c in caller.calls
@@ -246,7 +247,7 @@ def test_run_translation_static_failure_is_recorded(ws: Path) -> None:
     ]
     assert len(malas) == phases.MAX_TRANSLATION_RETRIES + 1
     assert "to_parquet" in malas[-1]["user_content"], (
-        "el reintento le dice al modelo por qué se lo rechazó"
+        "el reintento le dice al modelo por quÃ© se lo rechazÃ³"
     )
 
 
@@ -265,7 +266,7 @@ def test_run_translation_retries_until_the_node_is_clean(ws: Path) -> None:
             return nt.model_copy(update={"cells": ["x = x\n"]})  # self_assignment
         return nt
 
-    runtime.set_caller(FakeCaller({"translation": flaky_once}))
+    runtime.set_caller(FakeCaller({"translation": flaky_once, "verify": _verify_fake}))
     counts = phases.run_translation(state, ws / "output", ws)
 
     assert counts["translated"] == counts["targets"]
@@ -275,30 +276,102 @@ def test_run_translation_retries_until_the_node_is_clean(ws: Path) -> None:
 
 
 def test_stale_bad_translation_on_disk_is_retranslated(ws: Path) -> None:
-    """Una traducción inválida de una corrida vieja no se hereda como hecha."""
+    """Una traducciÃ³n invÃ¡lida de una corrida vieja no se hereda como hecha."""
     state = ws / "state"
     trans_dir = state / "translations"
     shutil.rmtree(trans_dir, ignore_errors=True)
     trans_dir.mkdir(parents=True)
-    # JSON crudo a propósito: con el contrato fuerte (cells min_length=1) ya no
-    # se puede CONSTRUIR un NodeTranslation vacío — pero un artefacto viejo en
+    # JSON crudo a propÃ³sito: con el contrato fuerte (cells min_length=1) ya no
+    # se puede CONSTRUIR un NodeTranslation vacÃ­o â€” pero un artefacto viejo en
     # disco puede traerlo, y model_validate lo rechaza al cargarlo.
     (trans_dir / "CodeTask-2.json").write_text(
         json.dumps({"node_id": "CodeTask-2", "node_label": "viejo", "cells": []}),
         encoding="utf-8",
     )
 
-    runtime.set_caller(FakeCaller({"translation": _translation_fake}))
+    runtime.set_caller(FakeCaller({"translation": _translation_fake, "verify": _verify_fake}))
     counts = phases.run_translation(state, ws / "output", ws)
 
     assert counts["translated"] == counts["targets"]
     assert unresolved(state, phase=6) == []
     regenerada = json.loads((trans_dir / "CodeTask-2.json").read_text(encoding="utf-8"))
-    assert regenerada["cells"], "el .json vacío se reemplazó por una traducción real"
+    assert regenerada["cells"], "el .json vacÃ­o se reemplazÃ³ por una traducciÃ³n real"
+
+
+def test_verificador_revise_dispara_una_retraduccion_y_queda_en_el_sidecar(ws: Path) -> None:
+    """El segundo par de ojos: revise → UNA re-traducción con los issues como
+    nota → re-verificación. Todo queda en state/translation_review.json."""
+    from sas_migrator.llm.contracts import TranslationVerdict, VerifyIssue
+
+    state = ws / "state"
+    shutil.rmtree(state / "translations", ignore_errors=True)
+    (state / "translation_review.json").unlink(missing_ok=True)
+    veredictos: dict[str, int] = {}
+
+    def picky_verify(user: str) -> TranslationVerdict:
+        head = _header(user)
+        nid = head["node_id"]
+        veredictos[nid] = veredictos.get(nid, 0) + 1
+        if nid == "CodeTask-2" and veredictos[nid] == 1:
+            return TranslationVerdict(
+                node_id=nid, verdict="revise",
+                issues=[VerifyIssue(kind="missing_logic",
+                                    detail="falta el filtro WHERE periodo del SAS")],
+                confidence="low",
+            )
+        return TranslationVerdict(node_id=nid, verdict="approve", confidence="high")
+
+    caller = FakeCaller({"translation": _translation_fake, "verify": picky_verify})
+    runtime.set_caller(caller)
+    counts = phases.run_translation(state, ws / "output", ws)
+
+    assert counts["translated"] == counts["targets"]
+    assert veredictos["CodeTask-2"] == 2, "re-verificó tras la re-traducción"
+    # la re-traducción recibió los issues como nota
+    retraducciones = [
+        c for c in caller.calls
+        if c["task"] == "translation" and '"node_id": "CodeTask-2"' in c["user_content"]
+    ]
+    assert len(retraducciones) == 2
+    assert "falta el filtro WHERE" in retraducciones[-1]["user_content"]
+    # sidecar con el veredicto final
+    doc = json.loads((state / "translation_review.json").read_text(encoding="utf-8"))
+    by_id = {r["node_id"]: r for r in doc["reviews"]}
+    assert by_id["CodeTask-2"]["verdict"] == "approve"
+    assert by_id["CodeTask-2"]["revised"] is True
+
+
+def test_verificador_off_no_llama_y_revise_llega_al_audit(ws: Path) -> None:
+    from sas_migrator.core.audit import run_audit as _run_audit
+
+    state = ws / "state"
+    shutil.rmtree(state / "translations", ignore_errors=True)
+    (ws / "project_config.yaml").write_text(
+        "translation:\n  verify: off\n", encoding="utf-8"
+    )
+    # sin task verify registrado: si se llamara, KeyError
+    runtime.set_caller(FakeCaller({"translation": _translation_fake}))
+    counts = phases.run_translation(state, ws / "output", ws)
+    assert counts["translated"] == counts["targets"]
+
+    # un revise no resuelto aparece en la auditoría como medium (no bloquea)
+    (state / "translation_review.json").write_text(
+        json.dumps({"reviews": [{
+            "node_id": "CodeTask-2", "verdict": "revise",
+            "issues": [{"kind": "wrong_semantics", "detail": "join equivocado"}],
+            "confidence": "low", "revised": False,
+        }]}),
+        encoding="utf-8",
+    )
+    _run_audit(state, ws / "output")
+    audit = json.loads((state / "node_translation_audit.json").read_text(encoding="utf-8"))
+    ver = [i for i in audit.get("issues", []) if i.get("category") == "verification"]
+    assert ver and ver[0]["severity"] == "medium"
+    assert "join equivocado" in ver[0]["detail"]
 
 
 def test_corrupt_translation_json_is_retranslated(ws: Path, capsys) -> None:
-    """Un .json ilegible en translations/ (kill a mitad de escritura, edición a
+    """Un .json ilegible en translations/ (kill a mitad de escritura, ediciÃ³n a
     mano) no crashea la fase: se saltea con aviso y el nodo se re-traduce."""
     state = ws / "state"
     trans_dir = state / "translations"
@@ -308,20 +381,20 @@ def test_corrupt_translation_json_is_retranslated(ws: Path, capsys) -> None:
         '{"node_id": "CodeTask-2", "cells": [', encoding="utf-8"
     )
 
-    runtime.set_caller(FakeCaller({"translation": _translation_fake}))
+    runtime.set_caller(FakeCaller({"translation": _translation_fake, "verify": _verify_fake}))
     counts = phases.run_translation(state, ws / "output", ws)
 
     assert counts["translated"] == counts["targets"]
     assert unresolved(state, phase=6) == []
     regenerada = json.loads((trans_dir / "CodeTask-2.json").read_text(encoding="utf-8"))
-    assert regenerada["cells"], "el .json corrupto se reemplazó por una traducción real"
+    assert regenerada["cells"], "el .json corrupto se reemplazÃ³ por una traducciÃ³n real"
     assert "se re-traduce" in capsys.readouterr().err
 
 
-# ── Pipeline completo con LLM fake + entrevistas ────────────────────────────
+# â”€â”€ Pipeline completo con LLM fake + entrevistas â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def test_full_pipeline_llm_fake_and_interviews(tmp_path: Path) -> None:
-    """DoD Etapa 4: sobre el .egp sintético, con caller fake y entrevistas
+    """DoD Etapa 4: sobre el .egp sintÃ©tico, con caller fake y entrevistas
     reales, el pipeline completa las 9 fases y los notebooks pasan gate 6."""
     from langgraph.checkpoint.memory import InMemorySaver
     from langgraph.types import Command
@@ -349,7 +422,7 @@ def test_full_pipeline_llm_fake_and_interviews(tmp_path: Path) -> None:
             elif q["options"]:
                 value = q.get("recommended_default") or q["options"][0]
             else:
-                value = q.get("recommended_default") or "respuesta sintética"
+                value = q.get("recommended_default") or "respuesta sintÃ©tica"
             answers.append({"question_id": q["id"], "value": value})
         result = graph.invoke(
             Command(resume={"card_id": payload["card_id"], "answers": answers,
@@ -366,11 +439,11 @@ def test_full_pipeline_llm_fake_and_interviews(tmp_path: Path) -> None:
         (ws / "state" / "sas_python_mapping.json").read_text(encoding="utf-8")
     )
     assert {m["confidence"] for m in mapping["mappings"]} == {"medium"}, (
-        "la traducción vino del caller fake, no del stub"
+        "la traducciÃ³n vino del caller fake, no del stub"
     )
 
 
-# ── semillas M-xxx (fichas que el LLM no puede derivar de la evidencia) ──────
+# â”€â”€ semillas M-xxx (fichas que el LLM no puede derivar de la evidencia) â”€â”€â”€â”€â”€â”€
 
 def test_seeded_improvements_absent_file_is_inert(tmp_path):
     from sas_migrator.llm.phases import _seeded_improvements
@@ -415,7 +488,7 @@ def test_seeded_improvement_with_bad_category_raises(tmp_path):
         _seeded_improvements(tmp_path)
 
 
-# ── Nodos grandes: truncar en silencio es peor que fallar ───────────────────
+# â”€â”€ Nodos grandes: truncar en silencio es peor que fallar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def _state_con_nodo(tmp_path: Path, code: str) -> Path:
     state = tmp_path / "state"
@@ -435,13 +508,13 @@ def test_node_code_no_trunca_nunca(tmp_path: Path) -> None:
 
 
 def test_extracto_de_analisis_declara_lo_que_omite(tmp_path: Path) -> None:
-    """Un modelo que no sabe que ve un extracto cree que el nodo termina ahí."""
+    """Un modelo que no sabe que ve un extracto cree que el nodo termina ahÃ­."""
     from sas_migrator.llm import phases
 
     state = _state_con_nodo(tmp_path, "y" * 1000)
     extracto = phases._node_excerpt(state, "N-1", 400)
     assert "EXTRACTO" in extracto and "600" in extracto and "1000" in extracto
-    # Bajo el límite no se anuncia nada.
+    # Bajo el lÃ­mite no se anuncia nada.
     assert "EXTRACTO" not in phases._node_excerpt(state, "N-1", 5000)
 
 
@@ -455,13 +528,13 @@ def test_split_corta_entre_bloques_nunca_dentro_de_uno() -> None:
     )
     trozos = split_sas_blocks(code, 60)
     assert len(trozos) > 1
-    assert "".join(trozos) == code, "no se pierde ni se duplica una línea"
+    assert "".join(trozos) == code, "no se pierde ni se duplica una lÃ­nea"
     for t in trozos:
         assert t.lstrip().upper().startswith(("PROC", "DATA")), t
 
 
 def test_bloque_indivisible_mas_grande_que_el_techo_no_se_parte() -> None:
-    """Sin corte honesto, el nodo va a needs_human — no se traduce a medias."""
+    """Sin corte honesto, el nodo va a needs_human â€” no se traduce a medias."""
     from sas_migrator.llm.phases import split_sas_blocks
 
     gigante = "PROC SQL;\n" + "  SELECT 1;\n" * 5000 + "QUIT;\n"
@@ -490,9 +563,9 @@ def test_merge_conserva_orden_dedupea_imports_y_baja_la_confianza() -> None:
                          cells=["b = a + 1\n"], confidence=Confidence.LOW)
     merged = merge_translations([p1, p2])
 
-    assert merged.cells == ["a = 1\n", "b = a + 1\n"], "orden de ejecución del SAS"
+    assert merged.cells == ["a = 1\n", "b = a + 1\n"], "orden de ejecuciÃ³n del SAS"
     assert merged.imports == ["import pandas as pd", "import numpy as np"]
-    assert merged.confidence == Confidence.LOW, "no más confiable que su peor tramo"
+    assert merged.confidence == Confidence.LOW, "no mÃ¡s confiable que su peor tramo"
     assert any("NODO PARTIDO" in w for w in merged.warnings)
     assert any("[parte 1/2] ojo con a" == w for w in merged.warnings)
 
@@ -512,7 +585,7 @@ def test_merge_conserva_la_traceability_de_todas_las_partes() -> None:
 
 def test_split_ignora_proc_en_comentarios_y_strings() -> None:
     """Un PROC comentado o dentro de un string no es una frontera de bloque:
-    cortar ahí partía una sentencia al medio."""
+    cortar ahÃ­ partÃ­a una sentencia al medio."""
     from sas_migrator.llm.phases import split_sas_blocks
 
     bloque1 = (
@@ -527,4 +600,4 @@ def test_split_ignora_proc_en_comentarios_y_strings() -> None:
     code = bloque1 + bloque2
     trozos = split_sas_blocks(code, len(code) - 1)  # obliga a partir
     assert "".join(trozos) == code
-    assert trozos == [bloque1, bloque2], "el único corte válido es el PROC real"
+    assert trozos == [bloque1, bloque2], "el Ãºnico corte vÃ¡lido es el PROC real"

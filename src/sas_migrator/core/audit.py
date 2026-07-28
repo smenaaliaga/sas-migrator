@@ -397,6 +397,34 @@ def run_audit(state_dir: Path, output_dir: Path) -> int:
             )
         )
 
+    # Veredictos del verificador LLM (fase 6). `revise` que quedó sin resolver
+    # es señal para el revisor humano — medium a propósito: el verificador es
+    # una red extra, no un gate; un falso positivo suyo no puede frenar todo.
+    review_path = state_dir / "translation_review.json"
+    if review_path.exists():
+        try:
+            review_doc = load_json(review_path)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            review_doc = {}
+        for r in review_doc.get("reviews", []):
+            if not isinstance(r, dict) or r.get("verdict") != "revise":
+                continue
+            rid = str(r.get("node_id", ""))
+            m = map_by_id.get(rid, {})
+            detalle = "; ".join(
+                str(i.get("detail", "")) for i in r.get("issues", [])[:3]
+            )
+            issues.append(
+                Issue(
+                    severity="medium",
+                    category="verification",
+                    node_id=rid,
+                    node_label=m.get("node_label", ""),
+                    notebook_path=m.get("notebook_path", ""),
+                    detail=f"verificador LLM pidió revisión: {detalle or 'sin detalle'}",
+                )
+            )
+
     # Cache: un mismo notebook contiene decenas de mappings — parsearlo una vez.
     nb_cache: dict[str, dict[str, Any]] = {}
 

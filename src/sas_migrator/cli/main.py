@@ -575,6 +575,38 @@ def _trace_summary(state_dir: Path) -> dict:
         return {"calls": 0, "by_task": {}}
 
 
+def _confidence_summary(state_dir: Path) -> dict:
+    """Distribución de confianza de las traducciones + veredictos del
+    verificador — antes se descartaban y "qué tan confiable quedó esto" no
+    tenía respuesta sin abrir 75 archivos."""
+    out: dict = {}
+    try:
+        mapping = json.loads(
+            (state_dir / "sas_python_mapping.json").read_text(encoding="utf-8")
+        )
+        dist: dict[str, int] = {}
+        for m in mapping.get("mappings", []):
+            c = str(m.get("confidence", "?"))
+            dist[c] = dist.get(c, 0) + 1
+        if dist:
+            out["confidence"] = dist
+    except Exception:
+        pass
+    try:
+        reviews = json.loads(
+            (state_dir / "translation_review.json").read_text(encoding="utf-8")
+        ).get("reviews", [])
+        verdicts: dict[str, int] = {}
+        for r in reviews:
+            v = str(r.get("verdict", "?"))
+            verdicts[v] = verdicts.get(v, 0) + 1
+        if verdicts:
+            out["verify"] = verdicts
+    except Exception:
+        pass
+    return out
+
+
 @app.command(rich_help_panel=PANEL_INSPECT)
 def status(
     workspace: Path = _ws_option(),
@@ -603,6 +635,7 @@ def status(
     started = result.status != SessionStatus.NOT_STARTED
     items = _needs_human_items(state_dir) if started else []
     trace = _trace_summary(state_dir) if started else {"calls": 0, "by_task": {}}
+    conf = _confidence_summary(state_dir) if started else {}
 
     if as_json:
         typer.echo(
@@ -622,6 +655,7 @@ def status(
                     ),
                     "needs_human": [i.model_dump(mode="json") for i in items],
                     "llm": trace,
+                    "translation": conf,
                 },
                 indent=2,
                 ensure_ascii=False,
@@ -683,6 +717,18 @@ def status(
             f"{agg['needs_human']} needs_human · {agg['errors']} error(es) · "
             f"{int(seconds // 60)}m {int(seconds % 60):02d}s"
         )
+
+    if conf.get("confidence"):
+        orden = {"high": 0, "medium": 1, "low": 2}
+        dist = " · ".join(
+            f"{k} {v}"
+            for k, v in sorted(conf["confidence"].items(), key=lambda kv: orden.get(kv[0], 9))
+        )
+        linea = f"Confianza traducción: {dist}"
+        if conf.get("verify"):
+            veredictos = " · ".join(f"{k} {v}" for k, v in sorted(conf["verify"].items()))
+            linea += f"  |  verificador: {veredictos}"
+        typer.echo(linea)
 
     if result.pending_card is not None:
         card = result.pending_card

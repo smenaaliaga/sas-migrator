@@ -20,6 +20,7 @@ from sas_migrator.llm.contracts import (
     ImprovementsOut,
     NodeReviewNote,
     PfdAnalysisOut,
+    TranslationVerdict,
 )
 from sas_migrator.llm.fake import FakeCaller
 
@@ -83,6 +84,13 @@ def fake_translation(user: str) -> NodeTranslation:
     )
 
 
+def fake_verify(user: str) -> TranslationVerdict:
+    head = _header(user)
+    return TranslationVerdict(
+        node_id=head["node_id"], verdict="approve", issues=[], confidence="high"
+    )
+
+
 def fake_diagnoses(user: str) -> DiagnosesOut:
     head = _header(user)
     return DiagnosesOut(
@@ -119,6 +127,7 @@ def default_fake_caller() -> FakeCaller:
             "improvements": fake_improvements,
             "matching": FileMappingBatch(mappings=[]),
             "translation": fake_translation,
+            "verify": fake_verify,
             "mismatch_diagnosis": fake_diagnoses,
             "docs": fake_docs,
         }
