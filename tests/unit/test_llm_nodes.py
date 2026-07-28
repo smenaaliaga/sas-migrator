@@ -12,6 +12,7 @@ import pytest
 import yaml
 
 from sas_migrator.core.analysis import ledger
+from sas_migrator.core.audit import run_audit
 from sas_migrator.core.models.translation import NodeTranslation
 from sas_migrator.core.utils.needs_human import unresolved
 from sas_migrator.core.utils.schema_validation import check_gate
@@ -198,6 +199,9 @@ def test_run_translation_failed_node_is_needs_human_and_gate_blocks(ws: Path) ->
 
     items = unresolved(state, phase=6)
     assert [i.node_id for i in items] == ["CodeTask-1"]
+    # El gate 6 solo LEE la auditoría; la produce la fase (graph/nodes.py).
+    # Acá se invoca run_translation directo, así que el audit se corre aparte.
+    run_audit(state, ws / "output")
     passed, errors = check_gate(6, state)
     assert not passed
     assert any("needs_human" in e for e in errors)

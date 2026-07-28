@@ -526,39 +526,33 @@ def _phase6_generation_errors(state_path: Path) -> list[str]:
     return errors
 
 
-def _run_node_translation_audit(state_path: Path) -> tuple[dict[str, Any] | None, list[str]]:
-    """Run the semantic audit in-process and validate its output artifact.
+def _load_audit_report(state_path: Path) -> tuple[dict[str, Any] | None, list[str]]:
+    """Lee y valida node_translation_audit.json — SOLO lectura, nunca ejecuta.
 
-    v1 lanzaba el script por subprocess desde una ruta fija bajo .github/;
-    en v2 la auditoría es un módulo del paquete y se invoca directo.
+    Antes el gate 6 CORRÍA run_audit() acá adentro: un gate que produce
+    artefactos no es idempotente ni re-evaluable (re-intentarlo tras resolver
+    needs_human debe ser barato y puro). La auditoría corre en la fase 6
+    (graph/nodes.py) y en la iteración; los gates 6 y 7 solo evalúan el
+    resultado.
     """
-    repo_root = state_path.parent
-    try:
-        from sas_migrator.core.audit import run_audit
-
-        run_audit(state_path, repo_root / "output")
-    except Exception as exc:
-        return None, [f"Semantic audit execution failed: {exc}"]
-
     audit_path = state_path / "node_translation_audit.json"
     if not audit_path.exists():
-        return None, ["Semantic audit did not produce state/node_translation_audit.json"]
+        return None, [
+            "Missing artifact: node_translation_audit.json — la fase 6 corre "
+            "la auditoría; si el estado viene de una versión anterior, "
+            "`rewind --phase 6`"
+        ]
 
     schema_errors = validate_artifact_file(audit_path, "node_translation_audit")
     if schema_errors:
         return None, [f"node_translation_audit.json: {e}" for e in schema_errors]
 
-    try:
-        report = json.loads(audit_path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
-        return None, [f"node_translation_audit.json is not valid JSON: {exc}"]
-
-    return report, []
+    return json.loads(audit_path.read_text(encoding="utf-8")), []
 
 
 def _phase6_semantic_audit_errors(state_path: Path) -> list[str]:
     """Block phase 6 on high-severity semantic audit findings."""
-    report, errors = _run_node_translation_audit(state_path)
+    report, errors = _load_audit_report(state_path)
     if errors:
         return errors
     if report is None:  # defensive
@@ -603,15 +597,12 @@ def _phase6_semantic_audit_errors(state_path: Path) -> list[str]:
 
 def _phase7_semantic_regression_errors(state_path: Path) -> list[str]:
     """Keep phase 7 blocked while high-severity semantic issues remain."""
-    audit_path = state_path / "node_translation_audit.json"
-    if not audit_path.exists():
-        return ["Missing artifact: node_translation_audit.json"]
+    report, errors = _load_audit_report(state_path)
+    if errors:
+        return errors
+    if report is None:  # defensive
+        return ["Semantic audit returned no report"]
 
-    schema_errors = validate_artifact_file(audit_path, "node_translation_audit")
-    if schema_errors:
-        return [f"node_translation_audit.json: {e}" for e in schema_errors]
-
-    report = json.loads(audit_path.read_text(encoding="utf-8"))
     high_count = int(report.get("summary", {}).get("issues_by_severity", {}).get("high", 0))
     issues = report.get("issues", [])
     markdown_mapping = sum(

@@ -186,6 +186,13 @@ def phase6_generation(state: MigrationGraphState) -> dict:
             f"{counts['assembly_failures']} fallos estáticos"
         )
     write_run_all(out)
+
+    # La auditoría semántica es trabajo de la FASE, no del gate: el gate 6
+    # solo lee node_translation_audit.json. Un gate que produce artefactos no
+    # es idempotente ni re-evaluable (retry tras resolver needs_human).
+    from sas_migrator.core.audit import run_audit
+
+    run_audit(st, out)
     return {"current_phase": 6, "notes": [note]}
 
 

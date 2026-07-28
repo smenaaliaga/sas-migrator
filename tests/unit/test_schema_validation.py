@@ -119,6 +119,12 @@ def test_phase7_semantic_check_is_enforced(tmp_path, monkeypatch) -> None:
     assert "Semantic audit still has 1 high-severity issue(s)" in errors
 
 
+def _write_audit_report(state_dir, report) -> None:
+    (state_dir / "node_translation_audit.json").write_text(
+        json.dumps(report), encoding="utf-8"
+    )
+
+
 def test_phase6_semantic_gate_blocks_markdown_mapping(monkeypatch, tmp_path) -> None:
     report = {
         "summary": {
@@ -132,14 +138,36 @@ def test_phase6_semantic_gate_blocks_markdown_mapping(monkeypatch, tmp_path) -> 
             }
         ],
     }
-
-    monkeypatch.setattr(schema_validation, "_run_node_translation_audit", lambda _: (report, []))
+    monkeypatch.setattr(schema_validation, "validate_artifact_file", lambda *_: [])
+    _write_audit_report(tmp_path, report)
 
     errors = schema_validation._phase6_semantic_audit_errors(tmp_path)
 
     assert errors == [
         "Semantic audit found 1 mapping(s) pointing to markdown instead of code cells"
     ]
+
+
+def test_gate6_solo_lee_el_audit_no_lo_ejecuta(monkeypatch, tmp_path) -> None:
+    """El gate es un predicado puro: evaluar el gate 6 no modifica (ni crea)
+    node_translation_audit.json — la auditoría corre en la fase 6. Un gate que
+    produce artefactos no es idempotente ni re-evaluable."""
+    report = {
+        "summary": {"issues_by_severity": {"high": 0}, "missing_mapping_count": 0},
+        "issues": [],
+    }
+    monkeypatch.setattr(schema_validation, "validate_artifact_file", lambda *_: [])
+    _write_audit_report(tmp_path, report)
+    antes = (tmp_path / "node_translation_audit.json").read_bytes()
+
+    assert schema_validation._phase6_semantic_audit_errors(tmp_path) == []
+    assert (tmp_path / "node_translation_audit.json").read_bytes() == antes
+
+    # Y si la fase no lo produjo, el gate lo dice — no lo fabrica.
+    (tmp_path / "node_translation_audit.json").unlink()
+    errors = schema_validation._phase6_semantic_audit_errors(tmp_path)
+    assert errors and "Missing artifact" in errors[0]
+    assert not (tmp_path / "node_translation_audit.json").exists()
 
 
 def test_validate_artifact_checks_items_beyond_the_fifth(tmp_path, monkeypatch) -> None:

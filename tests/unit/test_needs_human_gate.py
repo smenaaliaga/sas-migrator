@@ -29,6 +29,10 @@ def _minimal_phase6_state(tmp_path: Path) -> Path:
     }
     (output / "NB-01_x.ipynb").write_text(json.dumps(nb), encoding="utf-8")
     (output / "run_all.py").write_text("NOTEBOOKS = ['NB-01_x.ipynb']\n", encoding="utf-8")
+    # El audit lo produce la FASE 6; el gate solo lo lee (gates puros).
+    from sas_migrator.core.audit import run_audit
+
+    run_audit(state, output)
     return state
 
 
