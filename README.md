@@ -95,7 +95,7 @@ corre, solo cómo se contestan las entrevistas.
 
 ### CLI
 
-Seis comandos, y no hay más. `--workspace` es una opción, no un posicional;
+Siete comandos, y no hay más. `--workspace` es una opción, no un posicional;
 sin ella se usa el directorio actual.
 
 | Comando | Para qué |
@@ -103,6 +103,7 @@ sin ella se usa el directorio actual.
 | `run` | Corrida completa desde la fase 0 |
 | `resume` | Retomar donde quedó, incluida una entrevista a medio contestar |
 | `rewind` | Rehacer una fase desde cero |
+| `reset` | Borrar lo derivado y empezar de cero (pide confirmación) |
 | `status` | Fase actual, gates y entrevista pendiente |
 | `iterate` | Iteración post-migración (fase 9) |
 | `serve` | Servidor MCP por stdio sobre el workspace |
@@ -137,6 +138,27 @@ en `state/`. `resume` retoma donde iba; `rewind --phase N` descarta el tramo y
 vuelve a preguntar desde el inicio de la fase N (las fases anteriores no se
 recalculan: sus artefactos en `state/` quedan). `rewind` respalda el checkpoint
 en `.bak` salvo `--no-backup`.
+
+No hay comando para saltar a una fase sin rehacerla: los gates son topología
+del grafo, no disciplina. No existe arista hacia la fase N+1 que no pase por el
+gate N.
+
+### Empezar de cero
+
+```bash
+sas-migrator reset --workspace mi_migracion               # pide confirmación
+sas-migrator reset --workspace mi_migracion --keep-output # conserva los notebooks
+sas-migrator reset --workspace mi_migracion --yes         # sin preguntar (CI)
+```
+
+Borra `state/` (artefactos y checkpoint) y `output/`; **nunca** toca `input/`
+ni `project_config.yaml`. Antes de preguntar muestra el inventario y, aparte,
+los artefactos de decisiones humanas que se pierden —las entrevistas, los
+nodos excluidos, las mejoras aprobadas— porque el conteo de archivos no mide lo
+que cuesta un reset: volver a contestar, no volver a calcular.
+
+Se niega a correr si el directorio no tiene `input/egp/`: es la única defensa
+contra ejecutarlo parado en la carpeta equivocada.
 
 Cualquier corrida no interactiva (CI, replay de una migración) acepta un guion
 YAML de respuestas — con `default: recommended`, las tarjetas no listadas toman

@@ -194,6 +194,60 @@ def rewind(
 
 
 @app.command()
+def reset(
+    workspace: Path = typer.Option(Path.cwd(), help="Raíz del workspace"),
+    keep_output: bool = typer.Option(
+        False, help="Conservar output/ (borra solo state/ y el checkpoint)"
+    ),
+    yes: bool = typer.Option(False, "--yes", "-y", help="No preguntar (scripts, CI)"),
+) -> None:
+    """Borra los artefactos derivados y deja el workspace listo para empezar de cero.
+
+    `rewind` rehace UNA fase; esto tira todo: `state/` (artefactos y
+    checkpoint) y `output/`. `input/` y `project_config.yaml` no se tocan.
+    """
+    from sas_migrator.core.utils.workspace_reset import (
+        PRESERVED,
+        apply_reset,
+        human_size,
+        plan_reset,
+    )
+
+    try:
+        plan = plan_reset(workspace, keep_output=keep_output)
+    except ValueError as exc:
+        typer.echo(f"Error: {exc}")
+        raise typer.Exit(code=2) from exc
+
+    if plan.is_empty:
+        typer.echo(f"Nada que borrar en {plan.workspace} — el workspace ya está limpio.")
+        raise typer.Exit(code=0)
+
+    typer.echo(f"Workspace: {plan.workspace}")
+    if plan.phase is not None:
+        typer.echo(f"Fase alcanzada: {plan.phase}")
+    typer.echo("Se van a BORRAR:")
+    for target in plan.targets:
+        typer.echo(f"  {target.name + '/':10} {target.files:4} archivos, {human_size(target.size)}")
+    typer.echo(f"Se conservan: {', '.join(PRESERVED)}")
+    # El conteo de archivos no mide lo que duele: lo caro de un reset es volver
+    # a contestar, no volver a calcular.
+    if plan.decisions:
+        typer.echo(
+            f"⚠ Incluye {len(plan.decisions)} artefacto(s) de decisiones tuyas que "
+            "habrá que volver a contestar:"
+        )
+        for name in plan.decisions:
+            typer.echo(f"    · {name}")
+
+    if not yes:
+        typer.confirm("¿Borrar y empezar de cero?", default=False, abort=True)
+
+    done = apply_reset(plan)
+    typer.echo(f"🗑 Borrado: {', '.join(f'{n}/' for n in done)} — listo para `run`.")
+
+
+@app.command()
 def status(
     workspace: Path = typer.Option(Path.cwd(), help="Raíz del workspace"),
 ) -> None:
