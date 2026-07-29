@@ -15,6 +15,7 @@ internos viven en los commits y las decisiones en `docs/adr/`.
 - Cada notebook dice de qué Process Flow del .egp salió, con su nombre y su id. El nombre del archivo es posicional (`NB-NN_<slug>`): si cambia el alcance, la numeración corre y saber qué flujo era un notebook obligaba a cruzar artefactos a mano.
 - Una traducción que cubre una fracción del nodo se rechaza en vez de aceptarse: se compara qué tablas crea el SAS contra cuáles nombra el Python, y si faltan demasiadas el nodo se reintenta con la lista de faltantes y, si no se recupera, va a needs_human como `incomplete_translation`. Antes un nodo de 152 KB de SAS traducido al 3% pasaba todos los chequeos y llegaba al notebook: parsea, no tiene patrones prohibidos, los imports resuelven.
 - Aunque el nodo pase, las tablas de salida que no aparecen en la traducción quedan anotadas en sus `warnings` y en la auditoría: 65 de 66 ya no pasa en silencio.
+- `llm.thinking` y `llm.effort` en `project_config.yaml`, con su variante por tarea (`thinking_by_task` / `effort_by_task`) como el resto de las opciones del LLM. Ausentes no se mandan y rige el default del modelo — que no es el mismo entre familias: hasta ahora cambiar `model` de Haiku a Sonnet activaba el razonamiento sin que nada lo dijera. Un valor inválido falla al cargar la config, no en la primera llamada.
 
 ### Changed
 - `run` anuncia «corrida de migración» en vez de «modo REAL»: el modo por defecto no necesita jerga.

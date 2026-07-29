@@ -49,6 +49,55 @@ def test_config_cell_logging_default_off_y_configurable(tmp_path: Path) -> None:
     assert load_project_config(tmp_path).translation.cell_logging is True
 
 
+# ── thinking / effort ────────────────────────────────────────────────────────
+
+def test_thinking_y_effort_no_opinan_por_default() -> None:
+    """Ausentes, no se manda el parámetro y rige el default del modelo."""
+    cfg = ProjectConfig()
+    assert cfg.llm.thinking is None and cfg.llm.effort is None
+    assert cfg.llm.thinking_by_task == {} and cfg.llm.effort_by_task == {}
+
+
+def test_thinking_y_effort_se_leen_del_workspace(tmp_path: Path) -> None:
+    (tmp_path / "project_config.yaml").write_text(
+        "llm:\n"
+        "  thinking: adaptive\n"
+        "  effort: high\n"
+        "  thinking_by_task:\n    matching: disabled\n"
+        "  effort_by_task:\n    translation: xhigh\n",
+        encoding="utf-8",
+    )
+    cfg = load_project_config(tmp_path)
+    assert cfg.llm.thinking == "adaptive"
+    assert cfg.llm.effort == "high"
+    assert cfg.llm.thinking_by_task == {"matching": "disabled"}
+    assert cfg.llm.effort_by_task == {"translation": "xhigh"}
+
+
+def test_thinking_off_de_yaml_no_es_un_error(tmp_path: Path) -> None:
+    """YAML 1.1 parsea `off` como False; escribirlo así es lo natural."""
+    (tmp_path / "project_config.yaml").write_text(
+        "llm:\n  thinking: off\n", encoding="utf-8"
+    )
+    assert load_project_config(tmp_path).llm.thinking == "disabled"
+
+
+def test_un_effort_invalido_falla_al_cargar_no_al_gastar_tokens(tmp_path: Path) -> None:
+    (tmp_path / "project_config.yaml").write_text(
+        "llm:\n  effort_by_task:\n    translation: altisimo\n", encoding="utf-8"
+    )
+    with pytest.raises(Exception, match="altisimo"):
+        load_project_config(tmp_path)
+
+
+def test_un_thinking_invalido_por_tarea_tambien_falla_al_cargar(tmp_path: Path) -> None:
+    (tmp_path / "project_config.yaml").write_text(
+        "llm:\n  thinking_by_task:\n    verify: mucho\n", encoding="utf-8"
+    )
+    with pytest.raises(Exception, match="mucho"):
+        load_project_config(tmp_path)
+
+
 # ── engine / resolución de servidor ──────────────────────────────────────────
 
 def test_resolve_server_prefers_connection_value() -> None:

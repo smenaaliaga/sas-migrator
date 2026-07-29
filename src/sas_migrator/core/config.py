@@ -86,6 +86,26 @@ class LlmConfig(_StrictSection):
     # verificador ameritan el modelo fuerte; matching o docs pueden ir en un
     # tier menor. Ausente la clave, rige `model`.
     models_by_task: dict[str, str] = Field(default_factory=dict)
+    # Razonamiento del modelo antes de responder: "adaptive" (el modelo decide
+    # cuánto pensar) o "disabled". None NO significa "sin pensar": significa que
+    # el parámetro no se manda y rige el default del modelo — y ese default NO
+    # es el mismo entre familias. Haiku 4.5 no piensa si no se lo piden;
+    # Sonnet 5 / Opus 4.7+ piensan por default. Dos modelos, el mismo código, y
+    # el comportamiento cambia solo por el ID: dejarlo implícito era el hueco.
+    # Los tokens de pensamiento se facturan como salida y cuentan contra
+    # max_tokens, así que subir esto pide revisar aquel.
+    # OJO: "adaptive" es de la generación 4.6+. Los modelos viejos (Haiku 4.5,
+    # Sonnet 4.5) usan otra forma y lo rechazan — por eso hay _by_task.
+    thinking: Literal["adaptive", "disabled"] | None = None
+    thinking_by_task: dict[str, str] = Field(default_factory=dict)
+    # Profundidad de razonamiento y gasto de tokens: low|medium|high|xhigh|max.
+    # None = no se manda y rige el default del modelo (high). Para traducción y
+    # código, "xhigh" es el recomendado por Anthropic; "low"/"medium" bajan
+    # costo y latencia a cambio de menos elaboración.
+    # OJO: no todos los modelos lo aceptan — Haiku 4.5 devuelve error si se lo
+    # mandás. Con modelos mezclados, usar effort_by_task y no el global.
+    effort: Literal["low", "medium", "high", "xhigh", "max"] | None = None
+    effort_by_task: dict[str, str] = Field(default_factory=dict)
     # Traducciones en paralelo (fase 6/9). Default 1 = secuencial (determinismo
     # exacto de siempre); opt-in consciente. Con N>1 el primer nodo va solo
     # (calienta el prompt cache: N requests simultáneos no leen lo que otro
@@ -123,6 +143,37 @@ class LlmConfig(_StrictSection):
     # Override de la tabla de precios por prefijo de modelo (USD por MTok):
     #   prices: {"claude-opus": {input: 5, output: 25, cache_read: 0.5, cache_write: 6.25}}
     prices: dict[str, dict[str, float]] = Field(default_factory=dict)
+
+    @field_validator("thinking", mode="before")
+    @classmethod
+    def _yaml_bool_is_thinking_mode(cls, v):
+        # YAML 1.1 parsea `off`/`no`/`false` como False: `thinking: off` es lo
+        # natural de escribir y no puede ser un error de validación.
+        if v is False:
+            return "disabled"
+        if v is True:
+            return "adaptive"
+        return v
+
+    @field_validator("thinking_by_task", "effort_by_task", mode="after")
+    @classmethod
+    def _valores_por_tarea_validos(cls, v, info):
+        # Un typo acá se descubría gastando tokens: el valor viajaba al API y
+        # volvía 400 recién en la primera llamada de la fase.
+        validos = (
+            {"adaptive", "disabled"}
+            if info.field_name == "thinking_by_task"
+            else {"low", "medium", "high", "xhigh", "max"}
+        )
+        for tarea, valor in v.items():
+            texto = "disabled" if valor is False else "adaptive" if valor is True else str(valor)
+            if texto not in validos:
+                raise ValueError(
+                    f"llm.{info.field_name}.{tarea}: '{valor}' no es válido "
+                    f"(opciones: {', '.join(sorted(validos))})"
+                )
+            v[tarea] = texto
+        return v
 
 
 class TranslationConfig(_StrictSection):

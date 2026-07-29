@@ -34,6 +34,25 @@ llm:
   # docs, mismatch_diagnosis). Ausente la clave, rige max_tokens.
   max_tokens_by_task: {}
   #  translation: 32000
+  # Modelo por tarea; ausente la clave, rige `model`. La traducción y el
+  # verificador ameritan el modelo fuerte; matching o docs pueden ir más abajo.
+  models_by_task: {}
+  #  translation: "claude-sonnet-5"
+  # Razonamiento antes de responder: adaptive | disabled. Ausente NO significa
+  # "sin pensar": no se manda el parámetro y rige el default del modelo, que no
+  # es el mismo entre familias (Haiku 4.5 no piensa; Sonnet 5 / Opus 4.7+ sí).
+  # Los tokens de pensamiento se facturan como salida y cuentan contra
+  # max_tokens. "adaptive" es de la generación 4.6+: los modelos viejos lo
+  # rechazan — con modelos mezclados, usar thinking_by_task.
+  # thinking: adaptive
+  thinking_by_task: {}
+  #  translation: adaptive
+  # Esfuerzo: low | medium | high | xhigh | max. Ausente rige el default del
+  # modelo (high). Para traducción y código, "xhigh" es el recomendado.
+  # OJO: Haiku 4.5 devuelve error si se lo mandás — usar effort_by_task.
+  # effort: high
+  effort_by_task: {}
+  #  translation: xhigh
   max_validation_retries: 3
   # Solo con provider=foundry: el <resource> de
   # https://<resource>.services.ai.azure.com — infraestructura, no secreto.

@@ -9,8 +9,13 @@ SDK ya reintenta 429/5xx con backoff por su cuenta.
 `anthropic` se importa LAZY dentro de `AnthropicCaller.__init__`: importar
 este módulo (o correr CI, que no instala el extra `llm`) nunca requiere el
 SDK. El modelo va pineado por config (`project_config.yaml` → `llm.model`,
-default claude-opus-5); sin parámetros de sampling (removidos del API) y sin
-configurar thinking (adaptive por default en los modelos actuales).
+default claude-opus-5); sin parámetros de sampling (removidos del API).
+
+`thinking` y `effort` también salen de la config y se resuelven POR TAREA, como
+`model` y `max_tokens`. Ausentes, no se mandan y rige el default del modelo —
+que no es el mismo entre familias: Haiku 4.5 no piensa si no se lo piden,
+Sonnet 5 y Opus 4.7+ piensan por default. Dejar eso implícito hacía que cambiar
+el ID del modelo cambiara el comportamiento en silencio.
 
 El backend se elige con `llm.provider` (`anthropic` | `foundry`); las
 credenciales salen del entorno o de un `.env` (ver `llm/env.py`), nunca del
@@ -193,6 +198,8 @@ class AnthropicCaller:
         output_model: type[T],
         max_tokens: int,
         model: str | None = None,
+        thinking: str | None = None,
+        effort: str | None = None,
     ) -> Any:
         """Una llamada al backend en el modo vigente, con degradación única.
 
@@ -207,6 +214,15 @@ class AnthropicCaller:
         }
         if system is not None:
             kwargs["system"] = system
+        # Solo se mandan si la config los pidió: sin esto el default del modelo
+        # es el que manda, que es el comportamiento histórico.
+        if thinking:
+            kwargs["thinking"] = {"type": thinking}
+        if effort:
+            # `effort` va DENTRO de output_config, no al tope. En el camino
+            # nativo el SDK mergea este dict con el `format` que arma desde
+            # `output_format`, así que conviven sin pisarse.
+            kwargs["output_config"] = {"effort": effort}
 
         if self._mode == "tool":
             tool_kwargs = dict(
@@ -243,6 +259,7 @@ class AnthropicCaller:
             return self._invoke(
                 messages=messages, system=system, output_model=output_model,
                 max_tokens=max_tokens, model=model,
+                thinking=thinking, effort=effort,
             )
 
     @staticmethod
@@ -319,12 +336,19 @@ class AnthropicCaller:
         # costo) registren el modelo REAL de cada llamada, no el default.
         resolved_model = self.config.models_by_task.get(task) or self.config.model
         self.last_model = resolved_model
+        # Razonamiento y esfuerzo, con la misma resolución por tarea: con
+        # modelos mezclados, mandarle `effort` al que no lo soporta es un 400.
+        resolved_thinking = (
+            self.config.thinking_by_task.get(task) or self.config.thinking
+        )
+        resolved_effort = self.config.effort_by_task.get(task) or self.config.effort
 
         for attempts in range(1, retries + 1):
             try:
                 response = self._invoke(
                     messages=messages, system=system, output_model=output_model,
                     max_tokens=resolved_max_tokens, model=resolved_model,
+                    thinking=resolved_thinking, effort=resolved_effort,
                 )
             except self._anthropic.APIError:
                 raise  # transporte/API: visible, reanudable — jamás NeedsHuman

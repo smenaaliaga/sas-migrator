@@ -771,3 +771,90 @@ def test_el_workspace_le_gana_al_env_de_maquina(tmp_path, monkeypatch) -> None:
 
     env_mod.load_env(ws)
     assert os.environ["ANTHROPIC_FOUNDRY_API_KEY"] == "k-del-workspace"
+
+
+# ── thinking / effort por config y por tarea ────────────────────────────────
+#
+# Sin estas palancas en el config, cambiar `model` cambiaba el comportamiento
+# en silencio: Haiku 4.5 no piensa si no se lo piden y Sonnet 5 piensa por
+# default, con el mismo código y el mismo YAML.
+
+def test_sin_config_no_se_manda_thinking_ni_effort(monkeypatch) -> None:
+    """El default es no opinar: rige el default del modelo, como siempre."""
+    _, calls = _install_fake_sdk(monkeypatch, [_ok(1)])
+    AnthropicCaller(LlmConfig()).call(
+        task="translation", system_blocks=["s"], user_content="c", output_model=Demo
+    )
+    assert "thinking" not in calls[0]
+    assert "output_config" not in calls[0]
+
+
+def test_thinking_y_effort_globales_viajan_en_el_request(monkeypatch) -> None:
+    _, calls = _install_fake_sdk(monkeypatch, [_ok(1)])
+    cfg = LlmConfig(thinking="adaptive", effort="xhigh")
+    AnthropicCaller(cfg).call(
+        task="translation", system_blocks=["s"], user_content="c", output_model=Demo
+    )
+    assert calls[0]["thinking"] == {"type": "adaptive"}
+    # effort va DENTRO de output_config, no al tope del request
+    assert calls[0]["output_config"] == {"effort": "xhigh"}
+    assert "effort" not in calls[0]
+
+
+def test_por_tarea_le_gana_al_global(monkeypatch) -> None:
+    """Con modelos mezclados, mandarle effort al que no lo soporta es un 400."""
+    _, calls = _install_fake_sdk(monkeypatch, [_ok(1), _ok(2)])
+    cfg = LlmConfig(
+        thinking="disabled",
+        effort="low",
+        thinking_by_task={"translation": "adaptive"},
+        effort_by_task={"translation": "xhigh"},
+    )
+    caller = AnthropicCaller(cfg)
+    caller.call(task="translation", system_blocks=["s"], user_content="c",
+                output_model=Demo)
+    caller.call(task="matching", system_blocks=["s"], user_content="c",
+                output_model=Demo)
+    assert calls[0]["thinking"] == {"type": "adaptive"}
+    assert calls[0]["output_config"] == {"effort": "xhigh"}
+    assert calls[1]["thinking"] == {"type": "disabled"}
+    assert calls[1]["output_config"] == {"effort": "low"}
+
+
+def test_sobreviven_a_la_degradacion_a_tool_use(monkeypatch) -> None:
+    """Foundry sin structured outputs conmuta a tool use: las opciones siguen."""
+    mod, calls = _install_fake_sdk(monkeypatch, [])
+
+    class _Messages:
+        def parse(self, **kwargs):
+            calls.append(kwargs)
+            raise mod.APIError("structured_outputs not supported in your workspace")
+
+        def create(self, **kwargs):
+            calls.append(kwargs)
+            return SimpleNamespace(
+                stop_reason="end_turn",
+                content=[SimpleNamespace(type="tool_use", input={"x": 3})],
+            )
+
+    mod.Anthropic = lambda **_kw: SimpleNamespace(messages=_Messages())
+    cfg = LlmConfig(thinking="adaptive", effort="high", structured_mode="auto")
+    result = AnthropicCaller(cfg).call(
+        task="translation", system_blocks=["s"], user_content="c", output_model=Demo
+    )
+    assert result == Demo(x=3)
+    assert calls[-1]["thinking"] == {"type": "adaptive"}
+    assert calls[-1]["output_config"] == {"effort": "high"}
+    assert calls[-1]["tool_choice"]["type"] == "tool"
+
+
+def test_viajan_tambien_por_el_camino_de_streaming(monkeypatch) -> None:
+    """max_tokens > 16000 conmuta a stream: las opciones no se pueden perder ahí."""
+    streams: list[dict] = []
+    _install_fake_sdk(monkeypatch, [_ok(5)], stream_calls=streams)
+    cfg = LlmConfig(max_tokens=64000, thinking="adaptive", effort="max")
+    AnthropicCaller(cfg).call(
+        task="translation", system_blocks=["s"], user_content="c", output_model=Demo
+    )
+    assert streams[0]["thinking"] == {"type": "adaptive"}
+    assert streams[0]["output_config"] == {"effort": "max"}
