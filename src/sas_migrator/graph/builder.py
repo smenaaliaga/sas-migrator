@@ -51,6 +51,37 @@ for _name, _fn, _ph in PHASES:
         PHASE_ENTRY_NODE[_ph] = _pending_entry
         _pending_entry = None
 
+# Nodo de entrada → fase, para anunciar el arranque una sola vez por fase (los
+# tres sub-nodos de la fase 7 no anuncian tres arranques).
+_ENTRY_TO_PHASE: dict[str, int] = {n: p for p, n in PHASE_ENTRY_NODE.items()}
+
+
+def _anunciando_fase(name: str, fn):
+    """Envuelve el nodo de entrada de una fase para que anuncie su arranque.
+
+    ``invoke()`` corre varias fases de un saque, así que el cliente no puede
+    marcarlas desde afuera: solo ve el resultado. El cierre ("✅ Fase N
+    completada") sí sale del contrato —lo deriva el cliente de gate_history—;
+    esto es la otra mitad, la que dice qué está corriendo AHORA. Va a stderr,
+    igual que el progreso por nodo de la traducción: el canal de señal de vida,
+    separado del JSON de resumen que va a stdout.
+    """
+    phase = _ENTRY_TO_PHASE.get(name)
+    if phase is None:
+        return fn
+
+    from sas_migrator.core.models.state import PHASE_LABELS, Phase
+
+    etiqueta = PHASE_LABELS.get(Phase(phase), "")
+
+    def con_anuncio(state: MigrationGraphState):
+        import sys
+
+        print(f"\n▶ Fase {phase} · {etiqueta}", file=sys.stderr, flush=True)
+        return fn(state)
+
+    return con_anuncio
+
 
 def _project_migration_state(state: MigrationGraphState, phase: int, passed: bool) -> None:
     """Proyecta migration_state.json a disco — lo escribe el RUNTIME, nunca un LLM.
@@ -88,6 +119,15 @@ def _make_gate_node(phase: int):
     def gate_node(state: MigrationGraphState) -> dict:
         passed, errors = check_gate(phase, Path(state["workspace"]) / "state")
         _project_migration_state(state, phase, passed)
+        if passed:
+            # Acá y no en el cliente: `invoke()` puede encadenar varias fases
+            # antes de devolver, y el cliente terminaba imprimiendo el cierre de
+            # la fase N DESPUÉS del arranque de la N+1. El mensaje sigue viajando
+            # en SessionResult.messages para los consumidores que no ven stderr
+            # (API, MCP); el CLI lo saltea porque ya salió acá, en su momento.
+            import sys
+
+            print(f"✅ Fase {phase} completada", file=sys.stderr, flush=True)
         record: GateRecord = {"phase": phase, "passed": passed, "errors": errors}
         return {"last_gate": record, "gate_history": [record]}
 
@@ -113,7 +153,7 @@ def build_graph(checkpointer=None):
     g = StateGraph(MigrationGraphState)
 
     for name, fn, phase in PHASES:
-        g.add_node(name, fn)
+        g.add_node(name, _anunciando_fase(name, fn))
         if phase is not None:
             g.add_node(f"gate{phase}", _make_gate_node(phase))
     g.add_node("gate_blocked", gate_blocked)

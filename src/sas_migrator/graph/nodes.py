@@ -60,7 +60,7 @@ def phase2_analysis(state: MigrationGraphState) -> dict:
     from sas_migrator.core.parser.enrich import enrich_state
 
     enrich_state(st)
-    core_ledger.cmd_init(st)
+    core_ledger.cmd_init(st, quiet=True)
 
     # Criterio del code-analyst: reviews, descripciones, fichas M-xxx.
     if state.get("stub_mode", True):
@@ -74,7 +74,7 @@ def phase2_analysis(state: MigrationGraphState) -> dict:
             "fase 2: extracción + análisis + reviews (LLM) — "
             f"{counts['pfds_ok']}/{counts['pfds_total']} PFDs"
         )
-    core_ledger.cmd_sync(st)
+    core_ledger.cmd_sync(st, quiet=True)
 
     return {"current_phase": 2, "notes": [note]}
 
@@ -174,7 +174,7 @@ def phase6_generation(state: MigrationGraphState) -> dict:
     # es idempotente ni re-evaluable (retry tras resolver needs_human).
     from sas_migrator.core.audit import run_audit
 
-    run_audit(st, out)
+    run_audit(st, out, quiet=True)
     return {"current_phase": 6, "notes": [note]}
 
 

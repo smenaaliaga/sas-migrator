@@ -482,15 +482,12 @@ def main(state_dir: Path | None = None):
     nodes_dir = state / "nodes"
     # project_config.yaml vive en el workspace (padre de state/).
     db_engines = resolve_db_engines(state.resolve().parent)
-    print("Cargando flow_graph.json ...")
     flow_graph = json.loads((state / "flow_graph.json").read_text(encoding="utf-8"))
 
-    print("Cargando nodos ...")
     nodes = load_nodes(nodes_dir)
     sinks = sink_node_ids(nodes, flow_graph)
 
     # ── 1. Classify all nodes and update metadata ──────────────
-    print(f"Clasificando {len(nodes)} nodos ...")
     for nid, node in nodes.items():
         if "metadata" not in node:
             node["metadata"] = {}
@@ -500,10 +497,8 @@ def main(state_dir: Path | None = None):
             meta.update(classify_node(node, sinks))
 
         dump_node(nodes_dir / f"{nid}.json", node)
-    print("  ✓ Nodos clasificados")
 
     # ── 2. Code smells ─────────────────────────────────────────
-    print("Detectando code smells ...")
     magic_numbers = find_repeated_magic_numbers(nodes)
     all_smells = []
     for nid, node in nodes.items():
@@ -520,25 +515,12 @@ def main(state_dir: Path | None = None):
         "smells": all_smells,
     }
     dump_json(state / "code_smells.json", code_smells)
-    print(f"  ✓ {len(all_smells)} smells detectados "
-          f"(E:{code_smells['summary']['error']} "
-          f"W:{code_smells['summary']['warning']} "
-          f"I:{code_smells['summary']['info']})")
 
     # ── 3. Evidencia para fichas M-xxx ─────────────────────────
-    print("Construyendo evidencia de análisis ...")
     evidence = build_evidence(nodes, all_smells, magic_numbers, db_engines)
     dump_json(state / "analysis_evidence.json", evidence)
-    print(f"  ✓ analysis_evidence.json: "
-          f"{len(evidence['duplicated_code_blocks'])} bloques duplicados, "
-          f"{len(evidence['repeated_expressions'])} expresiones repetidas, "
-          f"{len(evidence['macro_variables'])} macro vars, "
-          f"{sum(1 for d in evidence['db_dependencies'] if d['verified_db'])} librefs de BD "
-          f"confirmados por LIBNAME "
-          f"(+{sum(1 for d in evidence['db_dependencies'] if not d['verified_db'])} prefijos sin confirmar)")
 
     # ── 4. Lineage ─────────────────────────────────────────────
-    print("Construyendo linaje ...")
     entries = build_lineage(nodes, flow_graph)
     # `entry_count` cuenta entradas de linaje, NO Process Flows. El nombre
     # anterior (`flow_count`) hacía que un consumidor leyera 28 donde el
@@ -552,21 +534,27 @@ def main(state_dir: Path | None = None):
         "lineage": entries,
     }
     dump_json(state / "lineage.json", lineage)
-    print(f"  ✓ {len(lineage['lineage'])} entradas de linaje "
-          f"({lineage['covered_nodes']}/{len(nodes)} nodos cubiertos)")
 
-    # ── Summary ────────────────────────────────────────────────
+    # ── Resumen ────────────────────────────────────────────────
+    # Dos líneas, no un banner: los pasos intermedios ("Cargando…",
+    # "Clasificando…") medían el trabajo del parser, que tarda segundos y no
+    # tiene decisiones que mostrar. Lo que el usuario necesita ver es el
+    # RESULTADO — y el detalle completo ya está en los .json que se nombran.
+    import sys
+
     critical = [n for n, nd in nodes.items()
                 if nd.get("metadata", {}).get("migration_priority") == "critical"]
-    print("\n" + "=" * 60)
-    print("ANÁLISIS COMPLETADO")
-    print(f"  Nodos clasificados: {len(nodes)}")
-    print(f"  Smells detectados:  {len(all_smells)}")
-    print(f"  Nodos críticos:     {len(critical)}")
-    print(f"  Entradas de linaje: {len(entries)}")
-    print("  Evidencia M-xxx:    state/analysis_evidence.json")
-    print("  → El code-analyst redacta improvements_proposed.yaml desde la evidencia.")
-    print("=" * 60)
+    s = code_smells["summary"]
+    print(
+        f"    {len(nodes)} nodos ({len(critical)} críticos) · "
+        f"{len(all_smells)} smells ({s['error']}E/{s['warning']}W/{s['info']}I)",
+        file=sys.stderr, flush=True,
+    )
+    print(
+        f"    {len(entries)} linajes ({lineage['covered_nodes']}/{len(nodes)} nodos) · "
+        "evidencia en analysis_evidence.json",
+        file=sys.stderr, flush=True,
+    )
 
 
 if __name__ == "__main__":

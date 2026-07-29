@@ -51,7 +51,7 @@ def save_ledger(state_dir: Path, ledger: dict) -> None:
     dump_json(state_dir / LEDGER_FILE, ledger, indent=None, separators=(",", ":"))
 
 
-def cmd_init(state_dir: Path) -> int:
+def cmd_init(state_dir: Path, *, quiet: bool = False) -> int:
     index_path = state_dir / "nodes_index.json"
     if not index_path.exists():
         print("ERROR: nodes_index.json no existe — correr primero build_indexes.py", file=sys.stderr)
@@ -82,7 +82,10 @@ def cmd_init(state_dir: Path) -> int:
 
     ledger = {"generated_at": _now(), "nodes": nodes}
     save_ledger(state_dir, ledger)
-    print(json.dumps({"total_nodes": ledger["total_nodes"], "reviewed": ledger["reviewed"], "pending": ledger["pending"]}))
+    # El JSON es la interfaz de MÁQUINA de este script; dentro del grafo
+    # ensuciaba la consola del usuario con algo que no es para leer.
+    if not quiet:
+        print(json.dumps({"total_nodes": ledger["total_nodes"], "reviewed": ledger["reviewed"], "pending": ledger["pending"]}))
     return 0
 
 
@@ -107,7 +110,7 @@ def cmd_mark(state_dir: Path, node_ids: list[str], note: str) -> int:
     return 0
 
 
-def cmd_sync(state_dir: Path) -> int:
+def cmd_sync(state_dir: Path, *, quiet: bool = False) -> int:
     ledger = load_ledger(state_dir)
     by_id = {n["node_id"]: n for n in ledger.get("nodes", [])}
 
@@ -138,7 +141,8 @@ def cmd_sync(state_dir: Path) -> int:
                     entry["note"] = note
 
     save_ledger(state_dir, ledger)
-    print(json.dumps({"synced": len(synced), "unknown": unknown, "pending": ledger["pending"]}, ensure_ascii=False))
+    if not quiet:
+        print(json.dumps({"synced": len(synced), "unknown": unknown, "pending": ledger["pending"]}, ensure_ascii=False))
     return 1 if unknown else 0
 
 

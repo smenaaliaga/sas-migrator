@@ -17,6 +17,7 @@ Dos reglas de este archivo:
 from __future__ import annotations
 
 import json
+import re
 import sys
 from enum import Enum
 from pathlib import Path
@@ -179,9 +180,17 @@ def _session(workspace: Path):
     return MigrationSession(workspace)
 
 
+# El cierre de fase ya lo imprime el gate a stderr, en el instante en que pasa.
+# Reimprimirlo acá lo duplicaría y encima fuera de orden: `invoke()` encadena
+# varias fases antes de devolver. Sigue en SessionResult.messages para los
+# consumidores que no ven stderr (API, MCP).
+_CIERRE_DE_FASE = re.compile(r"^✅ Fase \d+ completada$")
+
+
 def _echo_messages(result) -> None:
     for msg in result.messages:
-        typer.echo(msg)
+        if not _CIERRE_DE_FASE.match(msg):
+            typer.echo(msg)
 
 
 def _prompt_card(card: dict) -> dict:

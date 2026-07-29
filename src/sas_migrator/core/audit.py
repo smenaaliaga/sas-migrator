@@ -327,7 +327,7 @@ def _placement_issues(
     return []
 
 
-def run_audit(state_dir: Path, output_dir: Path) -> int:
+def run_audit(state_dir: Path, output_dir: Path, *, quiet: bool = False) -> int:
     """Corre la auditoría in-process (invocable desde check_gate sin subprocess)."""
     state_dir = Path(state_dir).resolve()
     _output_dir = Path(output_dir).resolve()
@@ -813,7 +813,10 @@ def run_audit(state_dir: Path, output_dir: Path) -> int:
 
     atomic_write_text(out_md, "\n".join(lines) + "\n")
 
-    print(json.dumps(report["summary"], ensure_ascii=False))
+    # Interfaz de MÁQUINA del script; dentro del grafo el resumen legible
+    # ya está en node_translation_audit.md.
+    if not quiet:
+        print(json.dumps(report["summary"], ensure_ascii=False))
     return 0
 
 

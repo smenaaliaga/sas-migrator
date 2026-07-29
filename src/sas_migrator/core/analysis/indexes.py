@@ -265,12 +265,17 @@ def build(state_dir: Path | str) -> None:
     http_evidence = build_http_evidence(nodes, generated_at=now)
     dump_json(state / "http_evidence.json", http_evidence, indent=1)
 
-    kb = lambda p: (state / p).stat().st_size / 1024
-    print(f"✓ nodes_index.json: {len(nodes)} nodos ({kb('nodes_index.json'):.1f} KB)")
-    print(f"✓ db_evidence.json: {len(librefs_out)} librefs, "
-          f"{len(unverified)} prefijos por confirmar ({kb('db_evidence.json'):.1f} KB)")
-    print(f"✓ http_evidence.json: {len(http_evidence['hosts'])} hosts HTTP, "
-          f"{len(http_evidence['nodes_with_dynamic_url'])} nodos con URL dinámica")
+    # Una línea, a stderr: el tamaño en KB de cada índice medía el trabajo del
+    # parser, no una decisión que el usuario pueda tomar. Lo accionable es
+    # cuántos librefs quedan SIN confirmar (los que la fase 4 va a preguntar).
+    import sys
+
+    print(
+        f"    {len(librefs_out)} librefs ({len(unverified)} por confirmar) · "
+        f"{len(http_evidence['hosts'])} hosts HTTP "
+        f"({len(http_evidence['nodes_with_dynamic_url'])} con URL dinámica)",
+        file=sys.stderr, flush=True,
+    )
 
 
 def main() -> None:
