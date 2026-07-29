@@ -309,6 +309,15 @@ class AnthropicCaller:
         '["..."]' — un string que ES la lista serializada. Sin esto, la
         validación falla las N veces del retry con el mismo error y el nodo cae
         a needs_human por un problema puramente mecánico.
+
+        Segunda variante, vista en Sonnet 5 con thinking: el valor arranca como
+        JSON bien formado y a mitad de camino el modelo se pasa a la sintaxis
+        XML de tool call, tragándose los campos que seguían —
+        '{"sas_construct": …}</parameter><parameter name="confidence">low'. Por
+        eso el fallback a ``raw_decode``: lee el primer valor JSON completo e
+        ignora la cola. Los campos que quedaron sepultados en esa cola NO se
+        rescatan; toman su default, que en este contrato es el valor
+        conservador (``confidence`` cae a low).
         """
         import json as _json
 
@@ -326,7 +335,10 @@ class AnthropicCaller:
                     try:
                         parsed = _json.loads(value)
                     except _json.JSONDecodeError:
-                        continue
+                        try:
+                            parsed, _ = _json.JSONDecoder().raw_decode(value.lstrip())
+                        except _json.JSONDecodeError:
+                            continue
                     if isinstance(parsed, (list, dict)):
                         repaired[key] = parsed
                         cambio = True

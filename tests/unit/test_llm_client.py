@@ -366,6 +366,23 @@ def test_tool_mode_repara_lista_entregada_como_string_json(monkeypatch) -> None:
     assert len(create_calls) == 1, "reparado en el acto, sin gastar reintentos"
 
 
+def test_tool_mode_repara_json_con_cola_xml_pegada(monkeypatch) -> None:
+    """Sonnet 5 arranca el valor como JSON y se pasa a la sintaxis XML de tool
+    call a mitad de camino, tragándose los campos que seguían (NH-001 de
+    Síntesis_M_CR18: traceability se comió a confidence). json.loads se atraganta
+    con la cola; raw_decode lee el objeto y la descarta."""
+    mod, _ = _install_fake_sdk(monkeypatch, [])
+    create_calls: list = []
+    sucio = '["a", "b"]\n</parameter>\n<parameter name="confidence">low'
+    _add_create(mod, [_tool_response(xs=sucio)], create_calls)
+
+    caller = AnthropicCaller(LlmConfig(structured_mode="tool"))
+    result = caller.call(task="t", system_blocks=[], user_content="c",
+                         output_model=DemoLista)
+    assert result.xs == ["a", "b"]
+    assert len(create_calls) == 1, "reparado en el acto, sin gastar reintentos"
+
+
 def test_tool_mode_string_irreparable_sigue_agotando_reintentos(monkeypatch) -> None:
     mod, _ = _install_fake_sdk(monkeypatch, [])
     _add_create(mod, [_tool_response(xs="[roto"), _tool_response(xs="[roto")], [])
