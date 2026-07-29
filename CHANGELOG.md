@@ -13,9 +13,12 @@ internos viven en los commits y las decisiones en `docs/adr/`.
 ### Added
 - La traducción muestra progreso por nodo: anuncia el arranque (`→ [3/27] CodeTask-x …`) y el cierre con su duración y el acumulado (`✔ [3/27] CodeTask-x: ok · 94s · 3/27 listos`). Un nodo grande son varios minutos: avisar solo al terminar dejaba la consola muda todo ese rato.
 - Cada notebook dice de qué Process Flow del .egp salió, con su nombre y su id. El nombre del archivo es posicional (`NB-NN_<slug>`): si cambia el alcance, la numeración corre y saber qué flujo era un notebook obligaba a cruzar artefactos a mano.
+- Una traducción que cubre una fracción del nodo se rechaza en vez de aceptarse: se compara qué tablas crea el SAS contra cuáles nombra el Python, y si faltan demasiadas el nodo se reintenta con la lista de faltantes y, si no se recupera, va a needs_human como `incomplete_translation`. Antes un nodo de 152 KB de SAS traducido al 3% pasaba todos los chequeos y llegaba al notebook: parsea, no tiene patrones prohibidos, los imports resuelven.
+- Aunque el nodo pase, las tablas de salida que no aparecen en la traducción quedan anotadas en sus `warnings` y en la auditoría: 65 de 66 ya no pasa en silencio.
 
 ### Changed
 - `run` anuncia «corrida de migración» en vez de «modo REAL»: el modo por defecto no necesita jerga.
+- Los nodos grandes se parten en tramos de 40 KB de SAS en vez de 120 KB. El techo no lo fijaba la ventana de contexto sino la resistencia del modelo: entraba entero en el prompt y devolvía una traducción abreviada, que ningún `stop_reason` reporta. Un tramo más chico es una tarea que el modelo sí termina.
 
 ### Fixed
 - Conexión externa con SDK ya se puede responder: «2 bcchapi» en una línea vale, y responder solo el paquete tras el aviso completa la elección en vez de degradarla en silencio a replicar con requests.

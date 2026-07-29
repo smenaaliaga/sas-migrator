@@ -31,13 +31,23 @@ from sas_migrator.llm.contracts import (
 )
 from sas_migrator.llm.errors import NeedsHuman
 
-# Techo de código SAS por llamada de traducción. Los modelos actuales tienen
-# ventana de 200k tokens: 120k chars ≈ 30k tokens dejan lugar de sobra para el
-# system, el plan y la respuesta. Un nodo más grande NO se corta — se parte por
-# frontera de PROC/DATA (ver `split_sas_blocks`) y, si ni así entra, va a
-# needs_human. Truncar en silencio produce traducciones que parecen completas
-# y cubren una fracción del nodo.
-MAX_CODE_CHARS = 120_000
+# Techo de código SAS por llamada de traducción. Un nodo más grande NO se corta
+# — se parte por frontera de PROC/DATA (ver `split_sas_blocks`) y, si ni así
+# entra, va a needs_human. Truncar en silencio produce traducciones que parecen
+# completas y cubren una fracción del nodo.
+#
+# El techo NO lo fija la ventana de contexto (los modelos actuales entran de
+# sobra) sino la RESISTENCIA de salida: medido en producción, un nodo de 144k
+# chars entra entero en el prompt y el modelo devuelve 2.826 tokens — traduce
+# los primeros pasos con fidelidad y cierra con algo plausible. No trunca:
+# abrevia, y eso ningún stop_reason lo reporta. Con 120k solo se partía 1 nodo
+# de 84; con 40k se parten los 9 que colapsaban, y cada tramo es una tarea que
+# el modelo sí termina. El costo es más llamadas (el system va cacheado).
+#
+# Piso práctico: `split_sas_blocks` devuelve [] si UN bloque PROC/DATA supera
+# el techo, y el nodo cae a needs_human(node_code_too_large). Antes de bajarlo
+# más, medir el bloque individual más grande del proyecto.
+MAX_CODE_CHARS = 40_000
 
 # Reintentos de traducción por fallo de chequeo estático. El modelo recibe el
 # motivo exacto del rechazo, así que un segundo intento tiene información nueva
@@ -598,9 +608,15 @@ def _translate_checked(
         check_node_translation_all,
         strip_self_assignments,
     )
+    from sas_migrator.core.validation.coverage import (
+        coverage_shortfall,
+        coverage_warning,
+    )
 
     nota = iteration_note
     plan_strategy = str(target.get("strategy") or "")
+    outputs = [str(d) for d in (target.get("output_datasets") or [])]
+    incompleto = False
     for intento in range(1, MAX_TRANSLATION_RETRIES + 2):
         nt = _translate_node(
             caller, system=system, target=target, code=code,
@@ -616,17 +632,32 @@ def _translate_checked(
                 f"strategy_mismatch: devolviste strategy '{nt.strategy}' y el plan "
                 f"aprobado para este nodo dice '{plan_strategy}'"
             )
+        # Completitud ANTES de los chequeos estáticos: un nodo que cubre el 3%
+        # del SAS pasa todos los demás gates —parsea, no tiene patrones
+        # prohibidos, los imports resuelven— y ese era exactamente el agujero.
+        faltante = coverage_shortfall(outputs, list(nt.cells))
+        incompleto = faltante is not None
+        if faltante is not None:
+            motivos.append(f"incomplete_translation: {faltante}")
         motivos.extend(
             f"{f.reason}: {f.detail}"
             for f in check_node_translation_all(nt, allowed_imports)
         )
         if not motivos:
+            # Pasó el gate, pero si igual falta alguna tabla el revisor tiene
+            # que verla: el gate ataja el colapso, el warning ataja el resto.
+            aviso = coverage_warning(outputs, list(nt.cells))
+            if aviso and aviso not in nt.warnings:
+                nt = nt.model_copy(update={"warnings": [*nt.warnings, aviso]})
             return nt
         motivo = "\n".join(f"    {i}. {m}" for i, m in enumerate(motivos, start=1))
 
         if intento > MAX_TRANSLATION_RETRIES:
             raise NeedsHuman(
-                task="translation", reason="static_check_failed",
+                task="translation",
+                # La causa más informativa manda: "static_check_failed" sobre un
+                # nodo traducido al 3% mandaba a buscar un error de sintaxis.
+                reason="incomplete_translation" if incompleto else "static_check_failed",
                 attempts=intento, detail="; ".join(motivos),
             )
         aviso = (
