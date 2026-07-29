@@ -29,7 +29,7 @@ from sas_migrator.cli.render import (
     FREE_TEXT_HINT,
     PHASE_NAMES,
     answers_from_script,
-    parse_answer,
+    parse_answer_and_note,
     render_card_header,
     render_phases,
     render_question,
@@ -202,9 +202,11 @@ def _prompt_card(card: dict) -> dict:
         typer.echo("")
         typer.echo(render_question(q, i, len(questions)))
         raw = typer.prompt(f"  {q['id']} >", default="", show_default=False)
-        value = parse_answer(q, raw)
+        value, note = parse_answer_and_note(q, raw)
         if value is not None:
             answers.append({"question_id": q["id"], "value": value})
+            if note:
+                free_parts.append(note)
         elif raw.strip():
             free_parts.append(raw.strip())
     return {"card_id": card["card_id"], "answers": answers, "free_text": "\n".join(free_parts)}

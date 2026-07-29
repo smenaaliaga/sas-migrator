@@ -167,6 +167,58 @@ def test_apply_sdk_without_package_raises(tmp_path) -> None:
         )
 
 
+def test_ask_api_block_package_only_retry_keeps_sdk_choice(tmp_path, monkeypatch) -> None:
+    """Tras el aviso «indica el paquete», responder solo «bcchapi» completa la
+    elección SDK en vez de degradarla silenciosamente a mode=http."""
+    from sas_migrator.graph import interviews
+
+    state = _state_with_evidence(tmp_path, [_HOST_BDE])
+    sdk = "Usar una librería/SDK oficial (indico el paquete en texto libre)"
+    presented: list = []
+    replies = iter([
+        lambda card: CardAnswers(
+            card_id=card.card_id,
+            answers=[Answer(question_id=card.questions[0].id, value=sdk)],
+        ),
+        lambda card: CardAnswers(card_id=card.card_id, free_text="bcchapi"),
+    ])
+
+    def fake_ask(card):
+        presented.append(card)
+        return next(replies)(card)
+
+    monkeypatch.setattr(interviews, "ask", fake_ask)
+    collected: interviews.Collected = []
+    interviews._ask_api_block(state, collected)
+
+    assert presented[1].validation_error, "la 2ª presentación lleva el aviso"
+    ((card, ans),) = collected
+    assert interviews._value_of(ans, card.questions[0].id) == sdk
+    assert ans.free_text == "bcchapi"
+    apply._write_api_connections(state, collected)
+    assert sdk_by_host(state) == {"si3.bcentral.cl": "bcchapi"}
+
+
+def test_ask_api_block_free_text_first_answer_stays_http(tmp_path, monkeypatch) -> None:
+    """Sin aviso previo, texto libre puro sigue siendo contrapropuesta:
+    no se infiere la elección SDK que el usuario nunca hizo."""
+    from sas_migrator.graph import interviews
+
+    state = _state_with_evidence(tmp_path, [_HOST_BDE])
+    monkeypatch.setattr(
+        interviews,
+        "ask",
+        lambda card: CardAnswers(card_id=card.card_id, free_text="bcchapi"),
+    )
+    collected: interviews.Collected = []
+    interviews._ask_api_block(state, collected)
+    ((card, ans),) = collected
+    assert interviews._value_of(ans, card.questions[0].id) == ""
+    apply._write_api_connections(state, collected)
+    conns = load_api_connections(state)
+    assert conns[0]["mode"] == "http"
+
+
 def test_apply_without_cards_writes_nothing(tmp_path) -> None:
     state = tmp_path / "state"
     state.mkdir()

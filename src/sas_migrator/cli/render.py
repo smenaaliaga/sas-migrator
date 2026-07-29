@@ -158,6 +158,23 @@ def parse_answer(question: CardDict, raw: str) -> str | None:
     return text
 
 
+def parse_answer_and_note(question: CardDict, raw: str) -> tuple[str | None, str]:
+    """Como ``parse_answer``, pero admite opción y texto libre en una línea:
+    "2 bcchapi" = opción 2 con nota "bcchapi". Sin esto, una tarjeta de una
+    sola pregunta no tiene cómo llevar ambas cosas (el prompt es uno solo).
+
+    Solo aplica a opción única con número: en multi_choice el resto de la
+    línea es parte de la selección, y un label con espacios no es una nota.
+    """
+    text = raw.strip()
+    options = question.get("options", [])
+    if options and question.get("question_type") != "multi_choice":
+        head, _, rest = text.partition(" ")
+        if rest.strip() and head.isdigit() and 1 <= int(head) <= len(options):
+            return options[int(head) - 1], rest.strip()
+    return parse_answer(question, raw), ""
+
+
 def default_card_answers(card: CardDict) -> CardDict:
     """Respuestas por el camino recomendado (guion 'default: recommended')."""
     answers = []

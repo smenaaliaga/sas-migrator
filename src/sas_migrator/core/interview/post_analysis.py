@@ -700,8 +700,8 @@ def build_api_connection_cards(state_dir: Path) -> list[InterviewCard]:
                             f"El SAS consulta {host} por HTTP. ¿Cómo migramos esa "
                             "conexión: replicar la llamada con requests (mismo host y "
                             "método), o usar una librería/SDK oficial? Si eliges SDK, "
-                            "indica el nombre de import del paquete en texto libre "
-                            "(ej: bcchapi para la API BDE del Banco Central)."
+                            "indica el nombre de import del paquete en la misma línea "
+                            "(ej: «2 bcchapi» para la API BDE del Banco Central)."
                         ),
                         question_type=QuestionType.SINGLE_CHOICE,
                         options=list(API_MODE_OPTIONS),

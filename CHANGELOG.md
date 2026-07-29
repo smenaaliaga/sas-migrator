@@ -13,6 +13,9 @@ internos viven en los commits y las decisiones en `docs/adr/`.
 ### Changed
 - `run` anuncia «corrida de migración» en vez de «modo REAL»: el modo por defecto no necesita jerga.
 
+### Fixed
+- Conexión externa con SDK ya se puede responder: «2 bcchapi» en una línea vale, y responder solo el paquete tras el aviso completa la elección en vez de degradarla en silencio a replicar con requests.
+
 ## [2.0.0a1] - 2026-07-28
 
 ### Added

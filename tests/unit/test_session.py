@@ -12,7 +12,12 @@ import pytest
 from typer.testing import CliRunner
 
 from sas_migrator.cli.main import app
-from sas_migrator.cli.render import default_card_answers, parse_answer, render_card
+from sas_migrator.cli.render import (
+    default_card_answers,
+    parse_answer,
+    parse_answer_and_note,
+    render_card,
+)
 from sas_migrator.service import MigrationSession, SessionStatus
 from sas_migrator.testing.egp_builder import build_egp
 from sas_migrator.testing.fake_llm import default_fake_caller
@@ -143,6 +148,18 @@ def test_parse_answer_accepts_number_text_and_default() -> None:
     assert parse_answer(q, "B") == "b"
     assert parse_answer(q, "") == "b"  # Enter = camino recomendado
     assert parse_answer(q, "otra cosa") is None  # → texto libre (contrapropuesta)
+
+
+def test_parse_answer_and_note_splits_option_from_note() -> None:
+    q = {"id": "Q", "question_type": "single_choice", "options": ["a", "b"],
+         "recommended_default": "b"}
+    assert parse_answer_and_note(q, "2 bcchapi") == ("b", "bcchapi")
+    assert parse_answer_and_note(q, "2") == ("b", "")
+    assert parse_answer_and_note(q, "") == ("b", "")
+    assert parse_answer_and_note(q, "bcchapi") == (None, "")  # texto libre puro
+    # multi_choice no se parte: el resto de la línea es parte de la selección
+    mc = {"id": "Q", "question_type": "multi_choice", "options": ["a", "b"]}
+    assert parse_answer_and_note(mc, "1 nota") == ("1 nota", "")  # la valida el grafo
 
 
 # ── CLI end-to-end (DoD) ────────────────────────────────────────────────────

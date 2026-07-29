@@ -20,7 +20,7 @@ from pydantic import ValidationError
 
 from sas_migrator.core.interview import apply, initial, plan_approval, post_analysis
 from sas_migrator.core.interview.validate import MULTI_ALL, AnswerError, validate_answers
-from sas_migrator.core.models.interview import CardAnswers, InterviewCard
+from sas_migrator.core.models.interview import Answer, CardAnswers, InterviewCard
 
 Collected = list[tuple[InterviewCard, CardAnswers]]
 
@@ -147,20 +147,28 @@ def _ask_db_block(state_dir: Path, collected: Collected) -> None:
 def _ask_api_block(state_dir: Path, collected: Collected) -> None:
     """B4c: una tarjeta por host HTTP. Elegir SDK sin nombrar el paquete
     re-presenta la MISMA tarjeta con validation_error (converge en replay)."""
+    sdk_option = "Usar una librería/SDK oficial (indico el paquete en texto libre)"
     for card in post_analysis.build_api_connection_cards(state_dir):
         current = card
+        pending_sdk = False
         while True:
             ans = ask(current)
-            choice = _value_of(ans, card.questions[0].id)
-            if (
-                choice == "Usar una librería/SDK oficial (indico el paquete en texto libre)"
-                and not apply.parse_sdk_package(ans.free_text)
-            ):
+            qid = card.questions[0].id
+            choice = _value_of(ans, qid)
+            if pending_sdk and not choice and apply.parse_sdk_package(ans.free_text):
+                # El aviso pidió el paquete; responder solo el paquete no debe
+                # degradar a mode=http la elección SDK que ya estaba hecha.
+                ans = ans.model_copy(
+                    update={"answers": [Answer(question_id=qid, value=sdk_option)]}
+                )
+                choice = sdk_option
+            if choice == sdk_option and not apply.parse_sdk_package(ans.free_text):
+                pending_sdk = True
                 current = card.model_copy(
                     update={
                         "validation_error": (
                             "elegiste SDK: indica el nombre de import del paquete "
-                            "en texto libre (ej: bcchapi)"
+                            "(ej: «2 bcchapi» en una línea, o solo «bcchapi»)"
                         )
                     }
                 )
