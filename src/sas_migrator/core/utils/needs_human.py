@@ -84,6 +84,43 @@ def record(
         return item
 
 
+def resolve_fixed(
+    state_dir: Path,
+    *,
+    phase: int,
+    task: str,
+    fixed: set[str],
+    resolution: str,
+) -> list[NeedsHumanItem]:
+    """Cierra los items de ``(phase, task)`` cuyos nodos se comprobaron sanos.
+
+    ``record`` es un upsert: actualiza lo que sigue fallando, pero nada saca de
+    la cola lo que dejó de fallar. Con eso, una corrida que ARREGLA 55 nodos los
+    deja igual bloqueando el gate, y el único camino era editar el YAML a mano —
+    que es exactamente el trabajo manual que la cola existe para evitar.
+
+    ``fixed`` es una lista POSITIVA: los nodos que esta corrida verificó que
+    andan. Deducirlo por ausencia (todo lo que no falló) cerraría los que ni
+    siquiera se volvieron a mirar — en una iteración de fase 9 eso daba por
+    resuelto el nodo cuya re-traducción acababa de fallar, porque su traducción
+    vieja seguía en disco.
+    """
+    with _LOCK:
+        queue = load_queue(state_dir)
+        cerrados: list[NeedsHumanItem] = []
+        for item in queue.items:
+            if item.resolved or (item.phase, item.task) != (phase, task):
+                continue
+            if item.node_id is None or item.node_id not in fixed:
+                continue
+            item.resolved = True
+            item.resolution = resolution
+            cerrados.append(item)
+        if cerrados:
+            _save(state_dir, queue)
+        return cerrados
+
+
 def unresolved(state_dir: Path, phase: int | None = None) -> list[NeedsHumanItem]:
     items = [i for i in load_queue(state_dir).items if not i.resolved]
     if phase is not None:

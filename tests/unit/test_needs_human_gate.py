@@ -135,3 +135,66 @@ def test_ids_no_colisionan_tras_borrado_manual(tmp_path: Path) -> None:
 
     c = needs_human.record(state, phase=4, task="c", reason="refusal")
     assert c.id == "NH-003", "no re-usa NH-002 (existe) ni pisa ids"
+
+
+def test_lo_que_dejo_de_fallar_sale_de_la_cola(tmp_path: Path) -> None:
+    """`record` es upsert: nada sacaba de la cola lo que se arregló.
+
+    Al recuperar una corrida real, 55 items de un ensamblado viejo sobrevivieron
+    a la corrida que los solucionó y siguieron bloqueando el gate — el único
+    camino era editar el YAML a mano, que es justo el trabajo que la cola existe
+    para evitar.
+    """
+    state = tmp_path / "state"
+    state.mkdir()
+    for nid in ("CodeTask-1", "CodeTask-2", "CodeTask-3"):
+        needs_human.record(
+            state, phase=6, task="assembly", node_id=nid,
+            reason="static_check_failed", detail="undefined_name: engine",
+        )
+
+    cerrados = needs_human.resolve_fixed(
+        state, phase=6, task="assembly",
+        fixed={"CodeTask-1", "CodeTask-2"},
+        resolution="el ensamblado de esta corrida ya no reporta el fallo",
+    )
+
+    assert sorted(i.node_id for i in cerrados) == ["CodeTask-1", "CodeTask-2"]
+    items = {i.node_id: i for i in needs_human.load_queue(state).items}
+    assert len(items) == 3, "no se borra nada: la historia queda"
+    assert items["CodeTask-1"].resolved and items["CodeTask-1"].resolution
+    assert not items["CodeTask-3"].resolved
+    assert [i.node_id for i in needs_human.unresolved(state)] == ["CodeTask-3"]
+
+
+def test_resolve_fixed_no_toca_otra_fase_ni_otro_task(tmp_path: Path) -> None:
+    """La lista completa que justifica cerrar vale para UNA (fase, task).
+
+    El ensamblado sabe qué nodos fallaron al ensamblar; no sabe nada de lo que
+    la fase 2 dejó pendiente ni de un item de traducción.
+    """
+    state = tmp_path / "state"
+    state.mkdir()
+    needs_human.record(state, phase=6, task="translation", node_id="CodeTask-1",
+                       reason="validation_retries_exhausted")
+    needs_human.record(state, phase=2, task="assembly", node_id="CodeTask-1",
+                       reason="static_check_failed")
+    needs_human.record(state, phase=6, task="assembly", node_id="CodeTask-1",
+                       reason="static_check_failed")
+
+    cerrados = needs_human.resolve_fixed(
+        state, phase=6, task="assembly", fixed={"CodeTask-1"}, resolution="ok",
+    )
+    assert len(cerrados) == 1
+    assert len(needs_human.unresolved(state)) == 2
+
+
+def test_resolve_fixed_ignora_items_sin_nodo(tmp_path: Path) -> None:
+    """Un item de fase (sin node_id) no lo cubre ninguna lista de nodos."""
+    state = tmp_path / "state"
+    state.mkdir()
+    needs_human.record(state, phase=6, task="assembly", reason="refusal")
+    assert needs_human.resolve_fixed(
+        state, phase=6, task="assembly", fixed={"CodeTask-1"}, resolution="ok",
+    ) == []
+    assert len(needs_human.unresolved(state)) == 1

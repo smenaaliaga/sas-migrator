@@ -20,6 +20,7 @@ from sas_migrator.core.models.translation import Confidence, NodeTranslation
 from sas_migrator.core.utils import fsio
 from sas_migrator.core.utils.fsio import dump_json as _dump_json
 from sas_migrator.core.utils.needs_human import record as record_needs_human
+from sas_migrator.core.utils.needs_human import resolve_fixed as resolve_needs_human
 from sas_migrator.core.utils.node_io import load_node
 from sas_migrator.llm import prompt_builder, runtime
 from sas_migrator.llm.contracts import (
@@ -981,6 +982,7 @@ def _translate_pending(
         return nt
 
     translated_now = 0
+    traducidos_ok: set[str] = set()
     pending = [nid for nid in pending_ids if nid in targets_by_id]
 
     for nid, nt in _correr_con_progreso(
@@ -988,6 +990,7 @@ def _translate_pending(
     ):
         if nt is not None:
             translations[nid] = nt
+            traducidos_ok.add(nid)
             translated_now += 1
 
     mapping, failures = assemble_notebooks(
@@ -1008,6 +1011,24 @@ def _translate_pending(
             reason="static_check_failed",
             detail=f"{failure.reason}: {failure.detail}{nota}",
         )
+    # Lo que dejó de fallar sale de la cola. `record` solo hace upsert, así que
+    # sin esto una corrida que ARREGLA nodos los deja bloqueando el gate igual:
+    # pasó al recuperar Síntesis_M_CR18, donde 55 items de un ensamblado viejo
+    # sobrevivieron a la corrida que los solucionó.
+    fallaron = {f.node_id for f in failures}
+    resolve_needs_human(
+        state_dir, phase=phase, task="assembly",
+        # Ensamblado en esta corrida y sin fallo: comprobado, no supuesto.
+        fixed={e.node_id for e in mapping.mappings} - fallaron,
+        resolution="el ensamblado de esta corrida ya no reporta el fallo",
+    )
+    resolve_needs_human(
+        state_dir, phase=phase, task="translation",
+        # Solo los que se re-tradujeron y salieron bien. Un nodo que ni se
+        # intentó conserva su .json viejo en disco y no prueba nada.
+        fixed=traducidos_ok,
+        resolution="el nodo se re-tradujo y pasa los chequeos estáticos",
+    )
     _dump_json(
         state_dir / "sas_python_mapping.json", json.loads(mapping.model_dump_json())
     )
