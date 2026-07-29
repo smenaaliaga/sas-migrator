@@ -162,6 +162,86 @@ def split_sas_blocks(code: str, limit: int) -> list[str]:
     return trozos
 
 
+# ── Pool con progreso, compartido por las fases que llaman al LLM en lote ───
+
+def _correr_con_progreso(
+    items: list,
+    trabajo,
+    *,
+    etiqueta,
+    max_workers: int,
+) -> list[tuple]:
+    """Aplica ``trabajo`` a cada item, en paralelo, anunciando progreso.
+
+    Una fase de N llamadas al LLM sin señal de vida es una caja negra de
+    minutos: el usuario no distingue "trabajando" de "colgado". Se anuncia el
+    ARRANQUE además del cierre porque un item grande son varios minutos, y
+    avisar solo al terminar deja la consola muda todo ese rato. El número es la
+    posición FIJA del item, así que las dos líneas de un mismo item se aparean
+    aunque en paralelo salgan intercaladas con las de otros.
+
+    Va a stderr para no ensuciar el JSON de resumen que va a stdout.
+
+    Con ``max_workers > 1`` el PRIMER item va solo: escribe el prompt cache que
+    el resto lee, y N requests simultáneos no pueden leer lo que otro todavía
+    está escribiendo.
+
+    Devuelve ``[(item, resultado), …]`` en orden de completado. Un resultado
+    ``None`` se reporta como fallo — se asume que ``trabajo`` ya registró el
+    needs_human correspondiente.
+
+    Vive acá y no en cada fase para que el formato no pueda divergir: dos
+    implementaciones del mismo progreso terminan imprimiendo distinto.
+    """
+    import sys
+    import threading
+    import time
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    total = len(items)
+    done = 0
+    log_lock = threading.Lock()
+    resultados: list[tuple] = []
+
+    def _uno(indice: int, item):
+        nonlocal done
+        with log_lock:
+            print(f"  → [{indice}/{total}] {etiqueta(item)} …", file=sys.stderr, flush=True)
+        inicio = time.monotonic()
+        resultado = trabajo(item)
+        segundos = time.monotonic() - inicio
+        with log_lock:
+            done += 1
+            marca = "ok" if resultado is not None else "FALLÓ (needs_human)"
+            print(
+                f"  ✔ [{indice}/{total}] {etiqueta(item)}: {marca}"
+                f" · {segundos:.0f}s · {done}/{total} listos",
+                file=sys.stderr, flush=True,
+            )
+        return item, resultado
+
+    if max_workers <= 1 or total <= 1:
+        return [_uno(i, item) for i, item in enumerate(items, start=1)]
+
+    # El primero calienta el cache; el resto va por pool.
+    resultados.append(_uno(1, items[0]))
+    executor = ThreadPoolExecutor(max_workers=max_workers)
+    try:
+        futures = [
+            executor.submit(_uno, i, item)
+            for i, item in enumerate(items[1:], start=2)
+        ]
+        for future in as_completed(futures):
+            resultados.append(future.result())
+    except BaseException:
+        # Ctrl-C (o un crash): cancelar lo no arrancado y salir. Lo que cada
+        # trabajo ya persistió queda — retomar no lo repite.
+        executor.shutdown(wait=False, cancel_futures=True)
+        raise
+    executor.shutdown(wait=True)
+    return resultados
+
+
 # ── Fase 2: análisis (map por PFD + reduce de mejoras) ──────────────────────
 
 def run_analysis(state_dir: Path, workspace: Path) -> dict:
@@ -179,9 +259,22 @@ def run_analysis(state_dir: Path, workspace: Path) -> dict:
     summary_path = state_dir / "flow_summary.json"
     summary = _load_json(summary_path)
     flows_by_pfd = {f.get("pfd_id"): f for f in summary.get("flows", [])}
-    pfds_ok = 0
 
-    for pfd_id in sorted(by_pfd):
+    import threading
+
+    from sas_migrator.core.config import load_project_config
+
+    max_workers = max(1, int(load_project_config(workspace).llm.max_workers))
+    summary_lock = threading.Lock()  # flow_summary es UN dict compartido
+
+    def _etiqueta(pfd_id: str) -> str:
+        # El pfd_id (ProcessFlowContainer-2o1NZYl9FKnoVXKH) es ilegible en
+        # consola; el label del flujo con su tamaño dice de qué se trata.
+        nodos = by_pfd[pfd_id]
+        label = str(nodos[0].get("pfd_label") or pfd_id)
+        return f"{label} ({len(nodos)} nodos)"
+
+    def _do_pfd(pfd_id: str) -> bool | None:
         pfd_nodes = by_pfd[pfd_id]
         expected_ids = [str(n["id"]) for n in pfd_nodes]
         head = prompt_builder.header_line({"pfd_id": pfd_id, "node_ids": expected_ids})
@@ -204,7 +297,7 @@ def run_analysis(state_dir: Path, workspace: Path) -> dict:
                 reason=exc.reason, detail=f"PFD {pfd_id}: {exc.detail}",
                 attempts=exc.attempts,
             )
-            continue
+            return None
 
         known = set(expected_ids)
         reviews = [
@@ -212,11 +305,22 @@ def run_analysis(state_dir: Path, workspace: Path) -> dict:
             for r in out.reviews
             if r.node_id in known
         ]
+        # Un archivo por flujo: independientes, sin lock.
         _dump_json(reviews_dir / f"{pfd_id}.json", {"pfd_id": pfd_id, "reviews": reviews})
-        flow = flows_by_pfd.get(pfd_id)
-        if flow is not None and not str(flow.get("description") or "").strip():
-            flow["description"] = out.flow_description
-        pfds_ok += 1
+        with summary_lock:
+            flow = flows_by_pfd.get(pfd_id)
+            if flow is not None and not str(flow.get("description") or "").strip():
+                flow["description"] = out.flow_description
+        return True
+
+    # Un flujo por llamada (no un nodo), así que son pocas y grandes: 84 nodos
+    # de un proyecto real son 17 llamadas. El orden de completado varía con el
+    # pool, pero cada flujo escribe su propio archivo y el summary se persiste
+    # al final — el resultado en disco es el mismo con cualquier max_workers.
+    resultados = _correr_con_progreso(
+        sorted(by_pfd), _do_pfd, etiqueta=_etiqueta, max_workers=max_workers
+    )
+    pfds_ok = sum(1 for _, ok in resultados if ok)
 
     _dump_json(summary_path, summary)
 
@@ -789,7 +893,6 @@ def _translate_pending(
     Devuelve (translations, traducidos_en_esta_corrida, assembly_failures).
     """
     import threading
-    from concurrent.futures import ThreadPoolExecutor, as_completed
 
     from sas_migrator.core.assembly.notebook import assemble_notebooks
 
@@ -843,67 +946,12 @@ def _translate_pending(
     translated_now = 0
     pending = [nid for nid in pending_ids if nid in targets_by_id]
 
-    # Progreso por nodo a stderr: una corrida de 75 nodos sin señal de vida es
-    # una caja negra de minutos — el usuario no distingue "trabajando" de
-    # "colgado". stderr para no ensuciar el JSON de resumen que va a stdout.
-    #
-    # Se anuncia el ARRANQUE además del cierre: un nodo grande son varios
-    # minutos (traducción + reintentos + verificador), y avisar solo al
-    # terminar deja la consola muda todo ese rato. El número es la posición
-    # fija del nodo, así que las dos líneas del mismo nodo se aparean aunque
-    # en paralelo salgan intercaladas con las de otros.
-    import sys
-    import time
-
-    total = len(pending)
-    posicion = {nid: i for i, nid in enumerate(pending, start=1)}
-    done = 0
-    log_lock = threading.Lock()
-
-    def _run_node(nid: str) -> NodeTranslation | None:
-        nonlocal done
-        with log_lock:
-            print(f"  → [{posicion[nid]}/{total}] {nid} …", file=sys.stderr, flush=True)
-        inicio = time.monotonic()
-        nt = _do_node(nid)
-        segundos = time.monotonic() - inicio
-        with log_lock:
-            done += 1
-            marca = "ok" if nt is not None else "FALLÓ (needs_human)"
-            print(
-                f"  ✔ [{posicion[nid]}/{total}] {nid}: {marca}"
-                f" · {segundos:.0f}s · {done}/{total} listos",
-                file=sys.stderr, flush=True,
-            )
-        return nt
-
-    if setup.max_workers <= 1 or len(pending) <= 1:
-        for nid in pending:
-            nt = _run_node(nid)
-            if nt is not None:
-                translations[nid] = nt
-                translated_now += 1
-    else:
-        # El primer nodo va solo: escribe el prompt cache que el resto lee.
-        first, *rest = pending
-        nt = _run_node(first)
+    for nid, nt in _correr_con_progreso(
+        pending, _do_node, etiqueta=lambda nid: nid, max_workers=setup.max_workers
+    ):
         if nt is not None:
-            translations[first] = nt
+            translations[nid] = nt
             translated_now += 1
-        executor = ThreadPoolExecutor(max_workers=setup.max_workers)
-        try:
-            futures = {executor.submit(_run_node, nid): nid for nid in rest}
-            for future in as_completed(futures):
-                nt = future.result()
-                if nt is not None:
-                    translations[futures[future]] = nt
-                    translated_now += 1
-        except BaseException:
-            # Ctrl-C (o un crash): cancelar lo no arrancado y salir. Lo ya
-            # persistido en state/translations/ queda — retomar no lo repite.
-            executor.shutdown(wait=False, cancel_futures=True)
-            raise
-        executor.shutdown(wait=True)
 
     mapping, failures = assemble_notebooks(
         plan, translations, Path(output_dir), db_bootstrap=bool(setup.db_aliases),

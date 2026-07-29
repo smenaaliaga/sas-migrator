@@ -89,6 +89,57 @@ def test_run_analysis_passes_real_gate2(ws: Path) -> None:
     assert proposed["improvements"][0]["status"] == "proposed"
 
 
+def test_analisis_muestra_progreso_por_flujo(ws: Path, capsys) -> None:
+    """Mismo formato que la traducción: la fase 2 también son minutos de LLM
+    y hasta acá no imprimía nada."""
+    state = ws / "state"
+    shutil.rmtree(state / "analysis_reviews")
+    runtime.set_caller(FakeCaller({
+        "analysis_reviews": _reviews_fake, "improvements": _improvements_fake,
+    }))
+    counts = phases.run_analysis(state, ws)
+
+    err = capsys.readouterr().err
+    total = counts["pfds_total"]
+    for n in range(1, total + 1):
+        assert f"→ [{n}/{total}]" in err, f"el flujo {n} no anunció su arranque"
+        assert f"✔ [{n}/{total}]" in err, f"el flujo {n} no anunció su cierre"
+    assert f"{total}/{total} listos" in err
+    # La etiqueta es legible: el label del flujo y su tamaño, no el pfd_id.
+    assert "nodos)" in err
+
+
+def test_analisis_en_paralelo_da_el_mismo_resultado(ws: Path) -> None:
+    """max_workers>1 es una optimización, no un cambio de conducta."""
+    state = ws / "state"
+
+    def _correr(workers: int) -> tuple[dict, dict]:
+        shutil.rmtree(state / "analysis_reviews", ignore_errors=True)
+        (ws / "project_config.yaml").write_text(
+            f"llm:\n  max_workers: {workers}\n", encoding="utf-8"
+        )
+        summary = json.loads((state / "flow_summary.json").read_text(encoding="utf-8"))
+        for flow in summary.get("flows", []):
+            flow["description"] = ""
+        (state / "flow_summary.json").write_text(json.dumps(summary), encoding="utf-8")
+        runtime.set_caller(FakeCaller({
+            "analysis_reviews": _reviews_fake, "improvements": _improvements_fake,
+        }))
+        counts = phases.run_analysis(state, ws)
+        reviews = {
+            p.name: json.loads(p.read_text(encoding="utf-8"))
+            for p in sorted((state / "analysis_reviews").glob("*.json"))
+        }
+        return counts, reviews
+
+    secuencial, reviews_1 = _correr(1)
+    paralelo, reviews_n = _correr(4)
+
+    assert secuencial["pfds_ok"] == paralelo["pfds_ok"]
+    assert secuencial["pfds_total"] == paralelo["pfds_total"]
+    assert reviews_1 == reviews_n, "el contenido en disco no puede depender del pool"
+
+
 def test_run_analysis_needs_human_blocks_gate2(ws: Path) -> None:
     state = ws / "state"
     (state / "analysis_progress.json").unlink()
