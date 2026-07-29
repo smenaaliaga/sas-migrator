@@ -72,6 +72,10 @@ class AnthropicCaller:
         # last_usage/last_model son POR THREAD: con traducción paralela, dos
         # llamadas concurrentes no pueden pisarse el usage que el trace lee.
         self._tls = threading.local()
+        # Tareas cuya configuración ya se anunció (una vez por corrida, no por
+        # llamada). Se comparte entre threads a propósito: con max_workers>1 el
+        # anuncio de `translation` tiene que salir una sola vez, no ocho.
+        self._config_anunciada: set[str] = set()
         self._client = self._build_client(anthropic, self.config)
         # "auto" arranca nativo y degrada a tool en el primer rechazo del
         # backend; el modo resuelto se conserva para el resto de la corrida.
@@ -262,6 +266,41 @@ class AnthropicCaller:
                 thinking=thinking, effort=effort,
             )
 
+    def _anunciar_config(
+        self,
+        task: str,
+        model: str,
+        max_tokens: int,
+        thinking: str | None,
+        effort: str | None,
+    ) -> None:
+        """Dice con qué se está llamando, la primera vez que se usa cada tarea.
+
+        Sale de las MISMAS variables resueltas que viajan en el request, así que
+        no puede mentir: si alguien cambia la resolución por tarea, el anuncio
+        cambia solo. Y vive acá y no en cada fase porque así cubre las siete
+        tareas sin que ninguna tenga que acordarse de anunciarse.
+
+        Una vez por tarea, no por llamada: la fase 6 son cientos de llamadas con
+        la misma configuración.
+        """
+        if task in self._config_anunciada:
+            return
+        self._config_anunciada.add(task)
+
+        import sys
+
+        # "—" y no "default": el valor real lo decide el modelo, y cada familia
+        # decide distinto (Haiku 4.5 no piensa, Sonnet 5 sí). Escribir un valor
+        # concreto que no mandamos sería inventar.
+        partes = [
+            model,
+            f"max_tokens {max_tokens:,}",
+            f"thinking {thinking or '—'}",
+            f"effort {effort or '—'}",
+        ]
+        print(f"    LLM · {task}: " + " · ".join(partes), file=sys.stderr, flush=True)
+
     @staticmethod
     def _validate_repairing(payload: Any, output_model: type[T]) -> T:
         """Valida, y ante un campo contenedor entregado como string JSON, repara.
@@ -342,6 +381,9 @@ class AnthropicCaller:
             self.config.thinking_by_task.get(task) or self.config.thinking
         )
         resolved_effort = self.config.effort_by_task.get(task) or self.config.effort
+        self._anunciar_config(
+            task, resolved_model, resolved_max_tokens, resolved_thinking, resolved_effort
+        )
 
         for attempts in range(1, retries + 1):
             try:

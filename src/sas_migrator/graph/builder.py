@@ -56,15 +56,19 @@ for _name, _fn, _ph in PHASES:
 _ENTRY_TO_PHASE: dict[str, int] = {n: p for p, n in PHASE_ENTRY_NODE.items()}
 
 
-def _anunciando_fase(name: str, fn):
+def _anunciando_fase(name: str, fn, anunciadas: set[int]):
     """Envuelve el nodo de entrada de una fase para que anuncie su arranque.
 
     ``invoke()`` corre varias fases de un saque, así que el cliente no puede
     marcarlas desde afuera: solo ve el resultado. El cierre ("✅ Fase N
-    completada") sí sale del contrato —lo deriva el cliente de gate_history—;
-    esto es la otra mitad, la que dice qué está corriendo AHORA. Va a stderr,
-    igual que el progreso por nodo de la traducción: el canal de señal de vida,
-    separado del JSON de resumen que va a stdout.
+    completada") lo emite el gate por el mismo motivo. Va a stderr, igual que el
+    progreso por nodo: el canal de señal de vida, separado del JSON de resumen
+    que va a stdout.
+
+    ``anunciadas`` es por GRAFO, no por proceso: una fase con entrevista se
+    re-ejecuta entera cuando el interrupt se reanuda (LangGraph reentra en el
+    nodo) y anunciaría su arranque dos veces. Un grafo nuevo —otra corrida—
+    vuelve a anunciar, que es lo correcto.
     """
     phase = _ENTRY_TO_PHASE.get(name)
     if phase is None:
@@ -77,17 +81,24 @@ def _anunciando_fase(name: str, fn):
     def con_anuncio(state: MigrationGraphState):
         import sys
 
-        print(f"\n▶ Fase {phase} · {etiqueta}", file=sys.stderr, flush=True)
+        if phase not in anunciadas:
+            anunciadas.add(phase)
+            print(f"\n▶ Fase {phase} · {etiqueta}", file=sys.stderr, flush=True)
         return fn(state)
 
     return con_anuncio
 
 
-def _project_migration_state(state: MigrationGraphState, phase: int, passed: bool) -> None:
+def _project_migration_state(
+    state: MigrationGraphState, phase: int, passed: bool
+) -> dict:
     """Proyecta migration_state.json a disco — lo escribe el RUNTIME, nunca un LLM.
 
     Es la inversión clave respecto de v1, donde el orquestador LLM redactaba
     este JSON a mano y era el único artefacto central sin validar.
+
+    Devuelve el acumulado del trace, que el gate reusa para el cierre de fase:
+    releerlo una segunda vez sería recorrer el mismo archivo dos veces.
     """
     from sas_migrator.core.models.state import MigrationState, Phase
 
@@ -98,27 +109,52 @@ def _project_migration_state(state: MigrationGraphState, phase: int, passed: boo
     try:
         from sas_migrator.llm.costs import run_totals
 
-        tokens_by_task = run_totals(ws / "state")["tokens_by_task"]
+        totals = run_totals(ws / "state")
     except Exception:
-        tokens_by_task = {}
+        totals = {}
     ms = MigrationState(
         project_name=Path(state.get("egp_file", "")).stem,
         egp_file=state.get("egp_file"),
         current_phase=current,
         output_strategy="notebook-flow",
-        tokens_consumed=tokens_by_task,
+        tokens_consumed=totals.get("tokens_by_task", {}),
     )
     atomic_write_text(
         ws / "state" / "migration_state.json", ms.model_dump_json(indent=2)
     )
+    return totals
 
 
-def _make_gate_node(phase: int):
+def _gasto_acumulado(totals: dict, visto: dict) -> str:
+    """Sufijo con el gasto de la corrida, o vacío si no cambió desde el gate anterior.
+
+    Es ACUMULADO, no de la fase, y por eso lo dice: el número sale del trace
+    entero, que sobrevive reinicios y no sabe de fases. Las fases que no llaman
+    al LLM (0, 3, 5) no repiten el número de la anterior — sería ruido.
+    """
+    llamadas = (totals.get("priced_calls") or 0) + (totals.get("unpriced_calls") or 0)
+    if not llamadas or visto.get("llamadas") == llamadas:
+        return ""
+    visto["llamadas"] = llamadas
+    entrada = (
+        (totals.get("input_tokens") or 0)
+        + (totals.get("cache_read_tokens") or 0)
+        + (totals.get("cache_write_tokens") or 0)
+    )
+    salida = totals.get("output_tokens") or 0
+    costo = totals.get("cost_usd") or 0.0
+    return (
+        f" · acumulado: {llamadas} llamada{'s' if llamadas != 1 else ''} · "
+        f"{entrada / 1000:,.0f}k in / {salida / 1000:,.0f}k out · ~${costo:,.2f}"
+    )
+
+
+def _make_gate_node(phase: int, gasto_visto: dict):
     """Nodo que evalúa el gate y registra el resultado en el estado del grafo."""
 
     def gate_node(state: MigrationGraphState) -> dict:
         passed, errors = check_gate(phase, Path(state["workspace"]) / "state")
-        _project_migration_state(state, phase, passed)
+        totals = _project_migration_state(state, phase, passed)
         if passed:
             # Acá y no en el cliente: `invoke()` puede encadenar varias fases
             # antes de devolver, y el cliente terminaba imprimiendo el cierre de
@@ -127,7 +163,10 @@ def _make_gate_node(phase: int):
             # (API, MCP); el CLI lo saltea porque ya salió acá, en su momento.
             import sys
 
-            print(f"✅ Fase {phase} completada", file=sys.stderr, flush=True)
+            print(
+                f"✅ Fase {phase} completada{_gasto_acumulado(totals, gasto_visto)}",
+                file=sys.stderr, flush=True,
+            )
         record: GateRecord = {"phase": phase, "passed": passed, "errors": errors}
         return {"last_gate": record, "gate_history": [record]}
 
@@ -152,10 +191,16 @@ def build_graph(checkpointer=None):
     """Construye y compila el grafo de migración."""
     g = StateGraph(MigrationGraphState)
 
+    # Estado del REPORTE, por grafo: qué fases ya se anunciaron y cuánto gasto
+    # se informó. Por grafo y no por módulo para que dos corridas en el mismo
+    # proceso (los tests, o una API que sirve varias) no se pisen el log.
+    anunciadas: set[int] = set()
+    gasto_visto: dict = {}
+
     for name, fn, phase in PHASES:
-        g.add_node(name, _anunciando_fase(name, fn))
+        g.add_node(name, _anunciando_fase(name, fn, anunciadas))
         if phase is not None:
-            g.add_node(f"gate{phase}", _make_gate_node(phase))
+            g.add_node(f"gate{phase}", _make_gate_node(phase, gasto_visto))
     g.add_node("gate_blocked", gate_blocked)
     g.add_node("finish", nodes.finish)
 

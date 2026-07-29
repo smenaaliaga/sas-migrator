@@ -858,3 +858,42 @@ def test_viajan_tambien_por_el_camino_de_streaming(monkeypatch) -> None:
     )
     assert streams[0]["thinking"] == {"type": "adaptive"}
     assert streams[0]["output_config"] == {"effort": "max"}
+
+
+def test_anuncia_la_config_una_vez_por_tarea(monkeypatch, capsys) -> None:
+    """Con qué modelo, tope y esfuerzo se está llamando: una vez por tarea, no
+    por llamada (la fase 6 son cientos con la misma configuración)."""
+    _install_fake_sdk(monkeypatch, [_ok(1), _ok(2), _ok(3)])
+    cfg = LlmConfig(
+        model="claude-haiku-4-5",
+        models_by_task={"translation": "claude-sonnet-5"},
+        max_tokens_by_task={"translation": 128000},
+        thinking_by_task={"translation": "adaptive"},
+        effort_by_task={"translation": "xhigh"},
+    )
+    caller = AnthropicCaller(cfg)
+    caller.call(task="translation", system_blocks=["s"], user_content="c", output_model=Demo)
+    caller.call(task="translation", system_blocks=["s"], user_content="c", output_model=Demo)
+    caller.call(task="matching", system_blocks=["s"], user_content="c", output_model=Demo)
+
+    err = capsys.readouterr().err
+    assert err.count("LLM · translation:") == 1, "una sola vez, no por llamada"
+    assert "claude-sonnet-5" in err and "128,000" in err
+    assert "thinking adaptive" in err and "effort xhigh" in err
+    # La tarea que quedó en el modelo chico declara que no manda esos parámetros.
+    assert "LLM · matching: claude-haiku-4-5" in err
+    assert "thinking — · effort —" in err
+
+
+def test_el_anuncio_sale_de_lo_que_realmente_se_manda(monkeypatch, capsys) -> None:
+    """Si el anuncio se calculara aparte, podría mentir sobre el request."""
+    _, calls = _install_fake_sdk(monkeypatch, [_ok(1)])
+    cfg = LlmConfig(thinking="adaptive", effort="max", max_tokens=4096)
+    AnthropicCaller(cfg).call(
+        task="verify", system_blocks=["s"], user_content="c", output_model=Demo
+    )
+    err = capsys.readouterr().err
+    assert calls[0]["thinking"] == {"type": "adaptive"}
+    assert calls[0]["output_config"] == {"effort": "max"}
+    assert calls[0]["max_tokens"] == 4096
+    assert "thinking adaptive · effort max" in err and "max_tokens 4,096" in err

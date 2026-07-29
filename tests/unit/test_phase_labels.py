@@ -59,3 +59,58 @@ def test_el_cliente_no_reimprime_el_cierre_que_ya_sali__por_stderr() -> None:
 
     assert _CIERRE_DE_FASE.match("✅ Fase 3 completada")
     assert not _CIERRE_DE_FASE.match("✅ Migración base completa (fases 0-8, gates en verde).")
+
+
+def test_una_fase_con_entrevista_anuncia_su_arranque_una_sola_vez(tmp_path, capsys) -> None:
+    """LangGraph reentra en el nodo al reanudar el interrupt: sin control, la
+    fase con entrevista anunciaba su arranque dos veces."""
+    from sas_migrator.graph.builder import build_graph, initial_state
+    from sas_migrator.testing.egp_builder import build_egp
+
+    ws = tmp_path / "ws"
+    (ws / "input" / "egp").mkdir(parents=True)
+    (ws / "input" / "data").mkdir()
+    (ws / "input" / "docs").mkdir()
+    grafo = build_graph()
+    estado = initial_state(ws, build_egp(ws / "input" / "egp" / "d.egp"))
+    grafo.invoke(estado)
+    grafo.invoke(estado)  # el MISMO grafo corriendo de nuevo (como el resume)
+
+    assert capsys.readouterr().err.count("▶ Fase 1") == 1
+
+
+def test_dos_grafos_distintos_anuncian_cada_uno(tmp_path, capsys) -> None:
+    """El estado del reporte es por grafo: dos corridas en el mismo proceso
+    (los tests, o una API que sirve varias) no pueden pisarse el log."""
+    from sas_migrator.graph.builder import build_graph, initial_state
+    from sas_migrator.testing.egp_builder import build_egp
+
+    for n in ("a", "b"):
+        ws = tmp_path / n
+        (ws / "input" / "egp").mkdir(parents=True)
+        (ws / "input" / "data").mkdir()
+        (ws / "input" / "docs").mkdir()
+        build_graph().invoke(initial_state(ws, build_egp(ws / "input" / "egp" / "d.egp")))
+
+    assert capsys.readouterr().err.count("▶ Fase 2") == 2
+
+
+def test_el_gasto_se_informa_solo_cuando_cambia() -> None:
+    """Las fases que no llaman al LLM no repiten el número de la anterior."""
+    from sas_migrator.graph.builder import _gasto_acumulado
+
+    totales = {"priced_calls": 3, "input_tokens": 1000, "output_tokens": 500,
+               "cost_usd": 1.5}
+    visto: dict = {}
+    primero = _gasto_acumulado(totales, visto)
+    assert "3 llamadas" in primero and "~$1.50" in primero
+    assert _gasto_acumulado(totales, visto) == "", "sin gasto nuevo, no repite"
+    totales["priced_calls"] = 4
+    assert "4 llamadas" in _gasto_acumulado(totales, visto)
+
+
+def test_sin_llamadas_no_se_informa_gasto() -> None:
+    from sas_migrator.graph.builder import _gasto_acumulado
+
+    assert _gasto_acumulado({}, {}) == ""
+    assert _gasto_acumulado({"priced_calls": 0, "unpriced_calls": 0}, {}) == ""
