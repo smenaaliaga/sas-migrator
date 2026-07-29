@@ -21,6 +21,12 @@ class TranslationTarget(BaseModel):
     node_id: str
     node_label: str = ""
     node_type: str = ""
+    # Process Flow de origen (PFD-… / ProcessFlowContainer-…). El nombre del
+    # notebook es posicional (NB-NN_<slug>): si cambia el alcance, la
+    # numeración corre. El pfd_id es el ancla estable, y sin este campo el
+    # vínculo flujo→notebook solo existía como join implícito por node_id.
+    pfd_id: str = ""
+    pfd_label: str = ""
     strategy: str = "pandas"
     # Placement efectivo (clasificador + overrides de la entrevista B4b).
     placement: str | None = None

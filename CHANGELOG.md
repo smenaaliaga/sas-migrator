@@ -12,6 +12,7 @@ internos viven en los commits y las decisiones en `docs/adr/`.
 
 ### Added
 - La traducción muestra progreso por nodo: anuncia el arranque (`→ [3/27] CodeTask-x …`) y el cierre con su duración y el acumulado (`✔ [3/27] CodeTask-x: ok · 94s · 3/27 listos`). Un nodo grande son varios minutos: avisar solo al terminar dejaba la consola muda todo ese rato.
+- Cada notebook dice de qué Process Flow del .egp salió, con su nombre y su id. El nombre del archivo es posicional (`NB-NN_<slug>`): si cambia el alcance, la numeración corre y saber qué flujo era un notebook obligaba a cruzar artefactos a mano.
 
 ### Changed
 - `run` anuncia «corrida de migración» en vez de «modo REAL»: el modo por defecto no necesita jerga.

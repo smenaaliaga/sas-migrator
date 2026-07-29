@@ -69,6 +69,40 @@ def test_template_anchors_config_and_cell_index(tmp_path: Path) -> None:
     assert by_id["A"].notebook_path == "output/NB-01_demo.ipynb"
 
 
+def test_titulo_identifica_el_process_flow_de_origen(tmp_path: Path) -> None:
+    """El nombre NB-NN es posicional; el pfd_id es el ancla estable."""
+    plan = _plan("A", "B")
+    for t in plan["targets"]:
+        t["pfd_id"] = "ProcessFlowContainer-2o1NZYl9FKnoVXKH"
+        t["pfd_label"] = "Análisis WTW"
+    assemble_notebooks(plan, {"A": _nt("A", ["x = 1\n"]), "B": _nt("B", ["y = 2\n"])},
+                       tmp_path / "output")
+
+    titulo = "".join(_read_nb(tmp_path / "output" / "NB-01_demo.ipynb")["cells"][0]["source"])
+    assert titulo.startswith("# NB-01_demo")
+    # el flujo compartido por los dos nodos aparece UNA vez, con label e id
+    assert titulo.count("ProcessFlowContainer-2o1NZYl9FKnoVXKH") == 1
+    assert "Análisis WTW" in titulo
+
+
+def test_titulo_lista_todos_los_flujos_en_estrategia_single(tmp_path: Path) -> None:
+    plan = _plan("A", "B", notebook="output/flow.ipynb")
+    plan["targets"][0].update(pfd_id="PFD-uno", pfd_label="Cargadores")
+    plan["targets"][1].update(pfd_id="PFD-dos", pfd_label="Salidas")
+    assemble_notebooks(plan, {"A": _nt("A", ["x = 1\n"]), "B": _nt("B", ["y = 2\n"])},
+                       tmp_path / "output")
+
+    titulo = "".join(_read_nb(tmp_path / "output" / "flow.ipynb")["cells"][0]["source"])
+    assert "PFD-uno" in titulo and "PFD-dos" in titulo
+
+
+def test_plan_sin_pfd_id_conserva_el_titulo_pelado(tmp_path: Path) -> None:
+    """Planes viejos (o el stub) no tienen el campo: no se inventa un origen."""
+    assemble_notebooks(_plan("A"), {"A": _nt("A", ["x = 1\n"])}, tmp_path / "output")
+    titulo = "".join(_read_nb(tmp_path / "output" / "NB-01_demo.ipynb")["cells"][0]["source"])
+    assert titulo == "# NB-01_demo"
+
+
 def test_bare_notebook_name_becomes_canonical_output_path(tmp_path: Path) -> None:
     plan = _plan("A", notebook="NB-02_x.ipynb")
     mapping, _ = assemble_notebooks(plan, {"A": _nt("A", ["x = 1\n"])}, tmp_path / "output")

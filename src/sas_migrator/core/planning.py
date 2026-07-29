@@ -311,6 +311,8 @@ def build(state: Path) -> dict:
                 "node_id": nid,
                 "node_label": meta.get("label", ""),
                 "node_type": node_type,
+                "pfd_id": flow.get("pfd_id", ""),
+                "pfd_label": flow.get("pfd_label", ""),
                 "strategy": choose_strategy(placement),
                 "placement": placement,
                 "notebook_path": notebook_path,

@@ -26,6 +26,16 @@
           "title": "Node Type",
           "type": "string"
         },
+        "pfd_id": {
+          "default": "",
+          "title": "Pfd Id",
+          "type": "string"
+        },
+        "pfd_label": {
+          "default": "",
+          "title": "Pfd Label",
+          "type": "string"
+        },
         "strategy": {
           "default": "pandas",
           "title": "Strategy",

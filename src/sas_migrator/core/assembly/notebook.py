@@ -604,6 +604,32 @@ def _canonical_nb_rel(notebook_path: str) -> str:
         else f"output/{name}"
 
 
+def _title_cell_source(title: str, nb_targets: list[dict]) -> str:
+    """Celda de título: nombre del notebook + Process Flow(s) de origen.
+
+    El nombre del archivo es posicional (``NB-NN_<slug>``, NN = orden entre los
+    flujos in-scope), así que excluir un flujo renumera a todos los siguientes.
+    El ``pfd_id`` del .egp es el único identificador estable, y hasta acá no
+    aparecía en ningún artefacto posterior a fase 5: para saber qué flujo era
+    un notebook había que cruzar ``flow_summary.node_ids`` contra el plan.
+
+    Con ``output_strategy: single`` un notebook junta varios flujos: se listan
+    todos. Planes viejos sin ``pfd_id`` caen al título pelado de antes.
+    """
+    origins: list[tuple[str, str]] = []
+    for target in nb_targets:
+        pfd_id = str(target.get("pfd_id") or "")
+        origin = (pfd_id, str(target.get("pfd_label") or ""))
+        if pfd_id and origin not in origins:
+            origins.append(origin)
+    if not origins:
+        return f"# {title}"
+    lines = "\n".join(
+        f"Process Flow SAS: **{label or pfd_id}** — `{pfd_id}`" for pfd_id, label in origins
+    )
+    return f"# {title}\n\n{lines}"
+
+
 def _parameters_cell(nb_targets: list[dict], values: dict | None = None):
     """Celda de parámetros del notebook, o None si el flujo no usa macro vars.
 
@@ -901,7 +927,7 @@ def assemble_notebooks(
             config_source += _CELL_LOGGING_SNIPPET.replace("__LOG_FILE__", f"{title}.log")
 
         nb = nbformat.v4.new_notebook()
-        cells = [nbformat.v4.new_markdown_cell(f"# {title}")]
+        cells = [nbformat.v4.new_markdown_cell(_title_cell_source(title, nb_targets))]
         params_cell = _parameters_cell(nb_targets, plan.get("macro_param_values"))
         if params_cell is not None:
             cells.append(params_cell)
