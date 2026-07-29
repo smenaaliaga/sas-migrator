@@ -298,6 +298,51 @@ def _swallowed_exception(tree: ast.AST) -> int | None:
     return None
 
 
+def strip_self_assignments(nt: "NodeTranslation") -> "NodeTranslation":
+    """Elimina líneas ``X = X`` de nivel módulo antes del chequeo estático.
+
+    Es el tic más frecuente del traductor (13 de 20 rechazos de una corrida
+    real): "declara" parámetros de macro SAS con una autoasignación que el
+    retry con aviso no corrige. Borrarla es semánticamente neutro — si ``X``
+    existe la línea es un no-op; si no existe, el NameError salta igual en el
+    primer uso real. Solo statements de nivel módulo y de una línea: dentro de
+    un bloque, borrar la única sentencia dejaría un cuerpo vacío.
+
+    Devuelve el mismo objeto si no había nada que sacar.
+    """
+    new_cells: list[str] = []
+    removed: list[str] = []
+    for cell in nt.cells:
+        try:
+            tree = ast.parse(cell)
+        except SyntaxError:
+            new_cells.append(cell)
+            continue
+        drop = {
+            node.lineno
+            for node in tree.body
+            if isinstance(node, ast.Assign)
+            and node.lineno == node.end_lineno
+            and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name)
+            and isinstance(node.value, ast.Name)
+            and node.targets[0].id == node.value.id
+        }
+        if not drop:
+            new_cells.append(cell)
+            continue
+        lines = cell.splitlines()
+        removed.extend(lines[n - 1].strip() for n in sorted(drop))
+        new_cells.append("\n".join(l for i, l in enumerate(lines, 1) if i not in drop))
+    if not removed:
+        return nt
+    aviso = (
+        "autofix: se eliminaron autoasignaciones sin efecto: "
+        + ", ".join(f"'{r}'" for r in removed)
+    )
+    return nt.model_copy(update={"cells": new_cells, "warnings": [*nt.warnings, aviso]})
+
+
 def _self_assignment(tree: ast.AST) -> str | None:
     """``t_sectorizacion = t_sectorizacion``.
 

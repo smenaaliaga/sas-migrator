@@ -223,12 +223,45 @@ class AnthropicCaller:
                 max_tokens=max_tokens, model=model,
             )
 
+    @staticmethod
+    def _validate_repairing(payload: Any, output_model: type[T]) -> T:
+        """Valida, y ante un campo contenedor entregado como string JSON, repara.
+
+        Bug conocido de modelos chicos: devuelven ``cells`` (u otra lista) como
+        '["..."]' — un string que ES la lista serializada. Sin esto, la
+        validación falla las N veces del retry con el mismo error y el nodo cae
+        a needs_human por un problema puramente mecánico.
+        """
+        import json as _json
+
+        from pydantic import ValidationError
+
+        try:
+            return output_model.model_validate(payload)
+        except ValidationError:
+            if not isinstance(payload, dict):
+                raise
+            repaired = dict(payload)
+            cambio = False
+            for key, value in payload.items():
+                if isinstance(value, str) and value.lstrip()[:1] in ("[", "{"):
+                    try:
+                        parsed = _json.loads(value)
+                    except _json.JSONDecodeError:
+                        continue
+                    if isinstance(parsed, (list, dict)):
+                        repaired[key] = parsed
+                        cambio = True
+            if not cambio:
+                raise
+            return output_model.model_validate(repaired)
+
     def _extract(self, response: Any, output_model: type[T]) -> T:
         """Objeto validado desde la respuesta, según el modo que la produjo."""
         if self._mode == "tool":
             for block in getattr(response, "content", []) or []:
                 if getattr(block, "type", None) == "tool_use":
-                    return output_model.model_validate(block.input)
+                    return self._validate_repairing(block.input, output_model)
             raise ValueError("la respuesta no incluyó la llamada a la herramienta")
 
         parsed = response.parsed_output

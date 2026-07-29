@@ -411,6 +411,36 @@ def test_self_assignment_fails() -> None:
     assert "t_sector" in f.detail
 
 
+def test_strip_self_assignments_cura_el_tic_de_nivel_modulo() -> None:
+    from sas_migrator.core.assembly.notebook import strip_self_assignments
+
+    nt = _nt("A", ["ANIO = ANIO\nventas = 1\n"])
+    fixed = strip_self_assignments(nt)
+    assert "ANIO = ANIO" not in fixed.cells[0]
+    assert "ventas = 1" in fixed.cells[0]
+    assert any("autofix" in w and "ANIO = ANIO" in w for w in fixed.warnings)
+    assert check_node_translation(fixed) is None
+
+
+def test_strip_self_assignments_no_toca_bloques_anidados() -> None:
+    """Dentro de un if/for, borrar la única sentencia dejaría un cuerpo vacío
+    (SyntaxError): ahí no se toca y el chequeo sigue rechazando."""
+    from sas_migrator.core.assembly.notebook import strip_self_assignments
+
+    nt = _nt("A", ["if True:\n    t_sector = t_sector\n"])
+    fixed = strip_self_assignments(nt)
+    assert fixed is nt
+    f = check_node_translation(fixed)
+    assert f is not None and f.reason == "self_assignment"
+
+
+def test_strip_self_assignments_sin_tic_devuelve_el_mismo_objeto() -> None:
+    from sas_migrator.core.assembly.notebook import strip_self_assignments
+
+    nt = _nt("A", ["ventas = 1\n"])
+    assert strip_self_assignments(nt) is nt
+
+
 def test_sql_where_1_equals_1_without_predicates_fails() -> None:
     f = check_node_translation(_nt("A", [
         'q = """SELECT * FROM bd_ctsi WHERE 1=1 ORDER BY ANIO"""\n'

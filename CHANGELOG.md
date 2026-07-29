@@ -10,11 +10,16 @@ internos viven en los commits y las decisiones en `docs/adr/`.
 
 ## [Unreleased]
 
+### Added
+- La traducción muestra progreso por nodo (`[n/total] CodeTask-x: ok`): una corrida de 75 nodos ya no es minutos de silencio.
+
 ### Changed
 - `run` anuncia «corrida de migración» en vez de «modo REAL»: el modo por defecto no necesita jerga.
 
 ### Fixed
 - Conexión externa con SDK ya se puede responder: «2 bcchapi» en una línea vale, y responder solo el paquete tras el aviso completa la elección en vez de degradarla en silencio a replicar con requests.
+- El tic `ANIO = ANIO` del traductor se cura solo (y queda declarado en warnings) en vez de quemar reintentos y caer a needs_human — era el 65% de los rechazos de una corrida real.
+- Una lista devuelta como string JSON (`cells='["..."]'`) se repara en el acto en vez de agotar los reintentos de validación con el mismo error.
 
 ## [2.0.0a1] - 2026-07-28
 

@@ -263,7 +263,11 @@ def test_run_translation_retries_until_the_node_is_clean(ws: Path) -> None:
         nid = _header(user)["node_id"]
         intentos[nid] = intentos.get(nid, 0) + 1
         if nid == "CodeTask-2" and intentos[nid] == 1:
-            return nt.model_copy(update={"cells": ["x = x\n"]})  # self_assignment
+            # bare_except: un rechazo que SÍ requiere retraducción (x = x ya no
+            # lo es — el autofix lo cura sin gastar intento).
+            return nt.model_copy(
+                update={"cells": ["try:\n    ventas = 1\nexcept:\n    pass\n"]}
+            )
         return nt
 
     runtime.set_caller(FakeCaller({"translation": flaky_once, "verify": _verify_fake}))
@@ -273,6 +277,51 @@ def test_run_translation_retries_until_the_node_is_clean(ws: Path) -> None:
     assert counts["assembly_failures"] == 0
     assert unresolved(state, phase=6) == []
     assert intentos["CodeTask-2"] == 2
+
+
+def test_autoasignacion_se_cura_sin_gastar_reintento(ws: Path) -> None:
+    """'ANIO = ANIO' era el 65% de los rechazos de una corrida real y el retry
+    no lo corregía. Ahora se elimina por AST antes del chequeo: el nodo pasa al
+    primer intento, la línea no queda en el artefacto y el warning lo declara."""
+    state = ws / "state"
+    shutil.rmtree(state / "translations", ignore_errors=True)
+    intentos: dict[str, int] = {}
+
+    def con_tic(user: str) -> NodeTranslation:
+        nt = _translation_fake(user)
+        nid = _header(user)["node_id"]
+        intentos[nid] = intentos.get(nid, 0) + 1
+        if nid == "CodeTask-2":
+            return nt.model_copy(update={"cells": ["ANIO = ANIO\n" + nt.cells[0]]})
+        return nt
+
+    runtime.set_caller(FakeCaller({"translation": con_tic, "verify": _verify_fake}))
+    counts = phases.run_translation(state, ws / "output", ws)
+
+    assert counts["translated"] == counts["targets"]
+    assert unresolved(state, phase=6) == []
+    assert intentos["CodeTask-2"] == 1, "el tic se cura sin retraducir"
+
+    doc = json.loads(
+        (state / "translations" / "CodeTask-2.json").read_text(encoding="utf-8")
+    )
+    assert "ANIO = ANIO" not in "".join(doc["cells"])
+    assert any("autofix" in w and "ANIO = ANIO" in w for w in doc["warnings"])
+
+
+def test_progreso_por_nodo_se_imprime_en_stderr(ws: Path, capsys) -> None:
+    """Una corrida de N nodos sin señal de vida es una caja negra: cada nodo
+    completado (bien o mal) imprime [n/total] a stderr."""
+    state = ws / "state"
+    shutil.rmtree(state / "translations", ignore_errors=True)
+    runtime.set_caller(FakeCaller({"translation": _translation_fake, "verify": _verify_fake}))
+    counts = phases.run_translation(state, ws / "output", ws)
+
+    err = capsys.readouterr().err
+    total = counts["targets"]
+    for n in range(1, total + 1):
+        assert f"[{n}/{total}]" in err
+    assert err.count(": ok") == total
 
 
 def test_stale_bad_translation_on_disk_is_retranslated(ws: Path) -> None:

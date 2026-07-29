@@ -314,6 +314,36 @@ def test_other_api_errors_never_degrade(monkeypatch) -> None:
     assert caller._mode == "native"
 
 
+class DemoLista(BaseModel):
+    xs: list[str]
+
+
+def test_tool_mode_repara_lista_entregada_como_string_json(monkeypatch) -> None:
+    """Modelos chicos devuelven a veces cells='["..."]' — la lista serializada
+    como string. Antes eso quemaba TODOS los reintentos con el mismo error de
+    validación y caía a needs_human; ahora se repara con json.loads."""
+    mod, _ = _install_fake_sdk(monkeypatch, [])
+    create_calls: list = []
+    _add_create(mod, [_tool_response(xs='["a", "b"]')], create_calls)
+
+    caller = AnthropicCaller(LlmConfig(structured_mode="tool"))
+    result = caller.call(task="t", system_blocks=[], user_content="c",
+                         output_model=DemoLista)
+    assert result.xs == ["a", "b"]
+    assert len(create_calls) == 1, "reparado en el acto, sin gastar reintentos"
+
+
+def test_tool_mode_string_irreparable_sigue_agotando_reintentos(monkeypatch) -> None:
+    mod, _ = _install_fake_sdk(monkeypatch, [])
+    _add_create(mod, [_tool_response(xs="[roto"), _tool_response(xs="[roto")], [])
+
+    caller = AnthropicCaller(LlmConfig(structured_mode="tool", max_validation_retries=2))
+    with pytest.raises(NeedsHuman) as exc:
+        caller.call(task="t", system_blocks=[], user_content="c",
+                    output_model=DemoLista)
+    assert exc.value.reason == "validation_retries_exhausted"
+
+
 def test_tool_mode_missing_tool_call_exhausts_to_needs_human(monkeypatch) -> None:
     mod, _ = _install_fake_sdk(monkeypatch, [])
     _add_create(mod, [_no_tool_response(), _no_tool_response()], [])

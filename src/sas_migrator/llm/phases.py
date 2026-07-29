@@ -594,7 +594,10 @@ def _translate_checked(
     problemas se corrige en una ronda, no en cuatro) vuelven al modelo como
     instrucción del reintento. Agotados los intentos, ``NeedsHuman``.
     """
-    from sas_migrator.core.assembly.notebook import check_node_translation_all
+    from sas_migrator.core.assembly.notebook import (
+        check_node_translation_all,
+        strip_self_assignments,
+    )
 
     nota = iteration_note
     plan_strategy = str(target.get("strategy") or "")
@@ -604,6 +607,9 @@ def _translate_checked(
             db_aliases=db_aliases, iteration_note=nota,
             review_note=review_note, dependencies_context=dependencies_context,
         )
+        # El tic 'X = X' se cura acá, no en el retry: reintentar por esto quema
+        # intentos (y plata) en un problema que una pasada de AST resuelve.
+        nt = strip_self_assignments(nt)
         motivos: list[str] = []
         if plan_strategy and nt.strategy and nt.strategy != plan_strategy:
             motivos.append(
@@ -805,9 +811,25 @@ def _translate_pending(
 
     translated_now = 0
     pending = [nid for nid in pending_ids if nid in targets_by_id]
+
+    # Progreso por nodo a stderr: una corrida de 75 nodos sin señal de vida es
+    # una caja negra de minutos — el usuario no distingue "trabajando" de
+    # "colgado". stderr para no ensuciar el JSON de resumen que va a stdout.
+    import sys
+
+    total = len(pending)
+    done = 0
+
+    def _report(nid: str, ok: bool) -> None:
+        nonlocal done
+        done += 1
+        marca = "ok" if ok else "FALLÓ (needs_human)"
+        print(f"  [{done}/{total}] {nid}: {marca}", file=sys.stderr, flush=True)
+
     if setup.max_workers <= 1 or len(pending) <= 1:
         for nid in pending:
             nt = _do_node(nid)
+            _report(nid, nt is not None)
             if nt is not None:
                 translations[nid] = nt
                 translated_now += 1
@@ -815,6 +837,7 @@ def _translate_pending(
         # El primer nodo va solo: escribe el prompt cache que el resto lee.
         first, *rest = pending
         nt = _do_node(first)
+        _report(first, nt is not None)
         if nt is not None:
             translations[first] = nt
             translated_now += 1
@@ -823,6 +846,7 @@ def _translate_pending(
             futures = {executor.submit(_do_node, nid): nid for nid in rest}
             for future in as_completed(futures):
                 nt = future.result()
+                _report(futures[future], nt is not None)
                 if nt is not None:
                     translations[futures[future]] = nt
                     translated_now += 1
