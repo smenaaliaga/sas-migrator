@@ -371,7 +371,7 @@ def _swallowed_exception(tree: ast.AST) -> int | None:
     return None
 
 
-def strip_self_assignments(nt: "NodeTranslation") -> "NodeTranslation":
+def strip_self_assignments(nt: NodeTranslation) -> NodeTranslation:
     """Elimina líneas ``X = X`` de nivel módulo antes del chequeo estático.
 
     Es el tic más frecuente del traductor (13 de 20 rechazos de una corrida
