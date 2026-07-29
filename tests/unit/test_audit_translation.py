@@ -292,3 +292,68 @@ def test_http_mode_still_requires_same_host(tmp_path, monkeypatch):
     _write_api_connections(tmp_path, mode="http")
     details = _semantic_details(tmp_path, monkeypatch)
     assert any("api.cliente.cl" in d and "endpoint" in d for d in details), details
+
+
+# ── Categorías tipadas y nodos degradados ───────────────────────────────────
+
+def test_toda_categoria_emitida_es_miembro_del_enum(tmp_path, monkeypatch):
+    """Blinda el drift que rompió la corrida Síntesis_M_CR18.
+
+    `Issue.category` era `str`, así que "verification" se coló sin estar en
+    `NodeTranslationIssueCategory`. El gate valida el artefacto contra el JSON
+    Schema generado DESDE ese enum: cada veredicto `revise` del verificador
+    producía un issue inválido y tumbaba la fase 6 entera.
+    """
+    import re
+
+    from sas_migrator.core.models.validation import NodeTranslationIssueCategory
+
+    fuente = Path(audit.__file__).read_text(encoding="utf-8")
+    usados = set(re.findall(r"\bCat\.([A-Z_]+)\b", fuente))
+    assert usados, "el audit dejó de usar el enum tipado"
+    assert usados <= {c.name for c in NodeTranslationIssueCategory}
+    # y ningún call site quedó con la categoría como string suelto
+    assert not re.search(r"category=\"", fuente)
+
+
+def test_nodo_degradado_bloquea_el_gate_con_su_propia_senal(tmp_path, monkeypatch):
+    """El nodo degradado tiene mapping, así que ya no hay `missing_mapping`.
+
+    Esa era la "doble señal" de ADR-0006 §2: sin reemplazarla, emitir el nodo
+    haría que el gate dejara de bloquear — silencio, justo lo contrario del
+    objetivo. La reemplaza un issue `degraded` de severidad high.
+    """
+    _write_pair(tmp_path, "proc sort data=a; by x; run;", "df = df.sort_values('x')\n")
+    mapping_path = tmp_path / "state" / "sas_python_mapping.json"
+    doc = json.loads(mapping_path.read_text(encoding="utf-8"))
+    doc["mappings"][0]["degraded"] = True
+    doc["mappings"][0]["degraded_reason"] = "undefined_name: usa 1 nombre(s)…"
+    mapping_path.write_text(json.dumps(doc), encoding="utf-8")
+
+    report = _run_audit(tmp_path, monkeypatch)
+    degradados = [i for i in report["issues"] if i["category"] == "degraded"]
+    assert len(degradados) == 1
+    assert degradados[0]["severity"] == "high"
+    assert "undefined_name" in degradados[0]["detail"]
+    assert report["summary"]["missing_mapping_count"] == 0
+    assert report["summary"]["issues_by_severity"]["high"] >= 1
+
+
+def test_las_heuristicas_semanticas_no_leen_el_markdown(tmp_path, monkeypatch):
+    """La etiqueta de confianza dice "SAS: PROC COMPARE" — es prosa, no código.
+
+    Correr las heurísticas sobre el markdown dejaba que un banner diera por
+    cubierto un chequeo que el Python no cubre.
+    """
+    _write_pair(
+        tmp_path,
+        "proc compare base=a compare=b; run;",
+        "resumen = a.shape\n",  # no compara nada
+    )
+    nb_path = tmp_path / "output" / "NB-01_w.ipynb"
+    nb = json.loads(nb_path.read_text(encoding="utf-8"))
+    nb["cells"][0]["source"] = ["## Escritura\n\n*confianza: low · SAS: PROC COMPARE*"]
+    nb_path.write_text(json.dumps(nb), encoding="utf-8")
+
+    details = _semantic_details(tmp_path, monkeypatch)
+    assert any("PROC COMPARE" in d for d in details), details

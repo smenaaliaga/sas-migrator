@@ -31,14 +31,24 @@ from pathlib import Path
 from typing import Any
 
 from sas_migrator.core.http_evidence import extract_http_hosts  # noqa: F401  (re-export histórico)
+from sas_migrator.core.models.validation import NodeTranslationIssueCategory as Cat
 from sas_migrator.core.utils.fsio import atomic_write_text, dump_json
 from sas_migrator.core.utils.node_io import load_node
 
 
 @dataclass
 class Issue:
+    """Un hallazgo del audit. ``category`` va TIPADA a propósito.
+
+    Con `category: str` el enum no ataja nada al escribir, y así se coló
+    `"verification"` sin estar en `NodeTranslationIssueCategory`: el gate valida
+    el artefacto contra el JSON Schema generado desde el enum, así que cualquier
+    corrida con un veredicto `revise` rompía el gate. `Cat` es `str, Enum`, de
+    modo que `asdict` + `json.dumps` siguen serializando el valor plano.
+    """
+
     severity: str  # high, medium, low
-    category: str
+    category: Cat
     node_id: str
     node_label: str
     notebook_path: str
@@ -293,7 +303,7 @@ def _placement_issues(
         return []
 
     def issue(severity: str, detail: str) -> Issue:
-        return Issue(severity, "placement", nid, node_label, nb_rel, detail)
+        return Issue(severity, Cat.PLACEMENT, nid, node_label, nb_rel, detail)
 
     has_read_sql = "read_sql" in low
     has_where = "where" in low
@@ -371,7 +381,7 @@ def run_audit(state_dir: Path, output_dir: Path, *, quiet: bool = False) -> int:
         issues.append(
             Issue(
                 severity="high",
-                category="coverage",
+                category=Cat.COVERAGE,
                 node_id=nid,
                 node_label=n.get("label", ""),
                 notebook_path="",
@@ -384,11 +394,33 @@ def run_audit(state_dir: Path, output_dir: Path, *, quiet: bool = False) -> int:
         issues.append(
             Issue(
                 severity="medium",
-                category="coverage",
+                category=Cat.COVERAGE,
                 node_id=nid,
                 node_label=m.get("node_label", ""),
                 notebook_path=m.get("notebook_path", ""),
                 detail="Mapping exists but node_id is not present in nodes_index",
+            )
+        )
+
+    # Nodos degradados: el ensamblador ya no descarta al que falla un chequeo
+    # estático, lo emite marcado. Al darle mapping desaparece su `high` de
+    # missing_mapping —la "doble señal" de ADR-0006 §2—, así que la señal de
+    # bloqueo se reemplaza acá, explícita. Sin esto el gate dejaría de bloquear
+    # y el cambio sería silencio: justo lo contrario del objetivo.
+    for nid, m in map_by_id.items():
+        if not m.get("degraded"):
+            continue
+        issues.append(
+            Issue(
+                severity="high",
+                category=Cat.DEGRADED,
+                node_id=nid,
+                node_label=m.get("node_label", ""),
+                notebook_path=m.get("notebook_path", ""),
+                detail=(
+                    "nodo emitido en el notebook pero marcado como degradado — "
+                    f"{m.get('degraded_reason') or 'sin motivo registrado'}"
+                ),
             )
         )
 
@@ -412,7 +444,7 @@ def run_audit(state_dir: Path, output_dir: Path, *, quiet: bool = False) -> int:
             issues.append(
                 Issue(
                     severity="medium",
-                    category="verification",
+                    category=Cat.VERIFICATION,
                     node_id=rid,
                     node_label=m.get("node_label", ""),
                     notebook_path=m.get("notebook_path", ""),
@@ -464,7 +496,7 @@ def run_audit(state_dir: Path, output_dir: Path, *, quiet: bool = False) -> int:
             issues.append(
                 Issue(
                     severity="high",
-                    category="coverage",
+                    category=Cat.COVERAGE,
                     node_id=nid,
                     node_label=node_label,
                     notebook_path=nb_rel,
@@ -476,6 +508,17 @@ def run_audit(state_dir: Path, output_dir: Path, *, quiet: bool = False) -> int:
         nb = _load_notebook(nb_path)
         all_cells = cells_text(nb)
         all_text = "\n".join(all_cells)
+        # Las heurísticas semánticas buscan PATRONES DE PYTHON: correrlas sobre
+        # el markdown es leer prosa como si fuera código. Desde que la celda de
+        # cada nodo lleva su etiqueta de confianza y el construct SAS de origen
+        # ("PROC COMPARE — …"), un banner alcanzaba para dar por cubierto un
+        # chequeo que el código no cubre. `all_text` queda solo para el ancla de
+        # trazabilidad, que justamente vive en el markdown.
+        code_text = "\n".join(
+            text
+            for text, cell in zip(all_cells, nb.get("cells", []), strict=False)
+            if cell.get("cell_type") == "code"
+        )
 
         cidx = m.get("cell_index")
         mapped_text = ""
@@ -492,7 +535,7 @@ def run_audit(state_dir: Path, output_dir: Path, *, quiet: bool = False) -> int:
                     issues.append(
                         Issue(
                             severity="low",
-                            category="traceability",
+                            category=Cat.TRACEABILITY,
                             node_id=nid,
                             node_label=node_label,
                             notebook_path=nb_rel,
@@ -506,7 +549,7 @@ def run_audit(state_dir: Path, output_dir: Path, *, quiet: bool = False) -> int:
             issues.append(
                 Issue(
                     severity="high",
-                    category="traceability",
+                    category=Cat.TRACEABILITY,
                     node_id=nid,
                     node_label=node_label,
                     notebook_path=nb_rel,
@@ -518,7 +561,7 @@ def run_audit(state_dir: Path, output_dir: Path, *, quiet: bool = False) -> int:
             issues.append(
                 Issue(
                     severity="low",
-                    category="traceability",
+                    category=Cat.TRACEABILITY,
                     node_id=nid,
                     node_label=node_label,
                     notebook_path=nb_rel,
@@ -536,7 +579,7 @@ def run_audit(state_dir: Path, output_dir: Path, *, quiet: bool = False) -> int:
             issues.append(
                 Issue(
                     severity="high",
-                    category="coverage",
+                    category=Cat.COVERAGE,
                     node_id=nid,
                     node_label=node_label,
                     notebook_path=nb_rel,
@@ -548,7 +591,7 @@ def run_audit(state_dir: Path, output_dir: Path, *, quiet: bool = False) -> int:
         sas_code = _sas_code(nid)
         sas_f = find_features_sas(sas_code, heuristics)
         py_f_cell = find_features_py(mapped_text, heuristics)
-        py_f_nb = find_features_py(all_text, heuristics)
+        py_f_nb = find_features_py(code_text, heuristics)
 
         # Decisión B4c del nodo: paquetes SDK de los hosts que este SAS consulta.
         # Sin host literal (URL por macro) valen todos los SDK declarados.
@@ -558,14 +601,14 @@ def run_audit(state_dir: Path, output_dir: Path, *, quiet: bool = False) -> int:
         )
         py_has_http = py_f_cell["requests_like"] or py_f_nb["requests_like"]
         py_has_sdk = py_uses_package(mapped_text, node_sdk_pkgs) or py_uses_package(
-            all_text, node_sdk_pkgs
+            code_text, node_sdk_pkgs
         )
 
         if sas_f["proc_http"] and not (py_has_http or py_has_sdk):
             issues.append(
                 Issue(
                     severity="high",
-                    category="semantic",
+                    category=Cat.SEMANTIC,
                     node_id=nid,
                     node_label=node_label,
                     notebook_path=nb_rel,
@@ -585,13 +628,13 @@ def run_audit(state_dir: Path, output_dir: Path, *, quiet: bool = False) -> int:
             and py_has_http
             and not (
                 py_mentions_host(mapped_text, expected_hosts)
-                or py_mentions_host(all_text, expected_hosts)
+                or py_mentions_host(code_text, expected_hosts)
             )
         ):
             issues.append(
                 Issue(
                     severity="high",
-                    category="semantic",
+                    category=Cat.SEMANTIC,
                     node_id=nid,
                     node_label=node_label,
                     notebook_path=nb_rel,
@@ -609,12 +652,12 @@ def run_audit(state_dir: Path, output_dir: Path, *, quiet: bool = False) -> int:
         for host in sas_hosts:
             pkg = sdk_map.get(host)
             if pkg and not (
-                py_uses_package(mapped_text, [pkg]) or py_uses_package(all_text, [pkg])
+                py_uses_package(mapped_text, [pkg]) or py_uses_package(code_text, [pkg])
             ):
                 issues.append(
                     Issue(
                         severity="medium",
-                        category="semantic",
+                        category=Cat.SEMANTIC,
                         node_id=nid,
                         node_label=node_label,
                         notebook_path=nb_rel,
@@ -633,13 +676,13 @@ def run_audit(state_dir: Path, output_dir: Path, *, quiet: bool = False) -> int:
             and not (py_has_http or py_has_sdk)
             and (
                 py_reads_table(mapped_text, http_dest_tables)
-                or py_reads_table(all_text, http_dest_tables)
+                or py_reads_table(code_text, http_dest_tables)
             )
         ):
             issues.append(
                 Issue(
                     severity="high",
-                    category="semantic",
+                    category=Cat.SEMANTIC,
                     node_id=nid,
                     node_label=node_label,
                     notebook_path=nb_rel,
@@ -656,7 +699,7 @@ def run_audit(state_dir: Path, output_dir: Path, *, quiet: bool = False) -> int:
             issues.append(
                 Issue(
                     severity="high",
-                    category="semantic",
+                    category=Cat.SEMANTIC,
                     node_id=nid,
                     node_label=node_label,
                     notebook_path=nb_rel,
@@ -678,7 +721,7 @@ def run_audit(state_dir: Path, output_dir: Path, *, quiet: bool = False) -> int:
             issues.append(
                 Issue(
                     severity="medium",
-                    category="semantic",
+                    category=Cat.SEMANTIC,
                     node_id=nid,
                     node_label=node_label,
                     notebook_path=nb_rel,
@@ -694,7 +737,7 @@ def run_audit(state_dir: Path, output_dir: Path, *, quiet: bool = False) -> int:
             issues.append(
                 Issue(
                     severity="medium",
-                    category="security",
+                    category=Cat.SECURITY,
                     node_id=nid,
                     node_label=node_label,
                     notebook_path=nb_rel,
@@ -709,7 +752,7 @@ def run_audit(state_dir: Path, output_dir: Path, *, quiet: bool = False) -> int:
             issues.append(
                 Issue(
                     severity="medium",
-                    category="semantic",
+                    category=Cat.SEMANTIC,
                     node_id=nid,
                     node_label=node_label,
                     notebook_path=nb_rel,
@@ -723,7 +766,7 @@ def run_audit(state_dir: Path, output_dir: Path, *, quiet: bool = False) -> int:
             issues.append(
                 Issue(
                     severity="medium",
-                    category="semantic",
+                    category=Cat.SEMANTIC,
                     node_id=nid,
                     node_label=node_label,
                     notebook_path=nb_rel,
@@ -735,7 +778,7 @@ def run_audit(state_dir: Path, output_dir: Path, *, quiet: bool = False) -> int:
             issues.append(
                 Issue(
                     severity="medium",
-                    category="semantic",
+                    category=Cat.SEMANTIC,
                     node_id=nid,
                     node_label=node_label,
                     notebook_path=nb_rel,
@@ -746,12 +789,12 @@ def run_audit(state_dir: Path, output_dir: Path, *, quiet: bool = False) -> int:
         # Runtime safety check: dataframe is mutated but never initialized.
         for df_name in heuristics["runtime_df_checks"]:
             if (df_name in mapped_text) and (f"{df_name}[" in mapped_text or f"{df_name}." in mapped_text):
-                has_define = bool(re.search(rf"\b{re.escape(df_name)}\s*=", all_text))
+                has_define = bool(re.search(rf"\b{re.escape(df_name)}\s*=", code_text))
                 if not has_define:
                     issues.append(
                         Issue(
                             severity="high",
-                            category="runtime",
+                            category=Cat.RUNTIME,
                             node_id=nid,
                             node_label=node_label,
                             notebook_path=nb_rel,

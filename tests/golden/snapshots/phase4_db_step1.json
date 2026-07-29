@@ -8,7 +8,7 @@
   "questions": [
     {
       "id": "Q-B4b-1",
-      "text": "El flujo SAS depende de bases de datos. ¿El resultado (notebooks) se conectará a la base que reemplaza a la que usaba SAS?",
+      "text": "El flujo SAS lee y escribe tablas vía librerías (LIBNAME/LIBREF). ¿Los notebooks resultantes accederán a esas tablas en una base SQL Server?",
       "question_type": "single_choice",
       "required": true,
       "options": [

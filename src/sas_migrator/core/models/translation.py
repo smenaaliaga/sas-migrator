@@ -147,6 +147,8 @@ class MappingEntry(BaseModel):
     cell_count: int = 1  # nº de celdas code del nodo
     business_rule: str = ""
     confidence: Confidence = Confidence.LOW
+    degraded: bool = False  # falló un chequeo estático y se emitió igual, marcado
+    degraded_reason: str = ""  # "<kind>: <detalle>" del chequeo que falló
 
 
 class SasPythonMapping(BaseModel):

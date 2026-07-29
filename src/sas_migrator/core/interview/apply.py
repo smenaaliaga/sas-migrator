@@ -189,7 +189,7 @@ def _cell_logging_decision(collected: Collected) -> bool:
 
 
 def _write_db_connections(
-    state_dir: Path, collected: Collected, confirmed: list[str]
+    state_dir: Path, collected: Collected, confirmed: list[str], *, assumed: bool = False
 ) -> None:
     ev = load_json(state_dir / "db_evidence.json") or {}
     role = ConnectionRole.SOURCE
@@ -216,6 +216,7 @@ def _write_db_connections(
             database=renames.get(libref, libref),
             role=role,
             tables=tables,
+            assumed=assumed,
         )
         for libref, tables in sorted(tables_by_libref.items())
     ]
@@ -401,8 +402,14 @@ def apply_post_analysis(state_dir: Path, collected: Collected) -> dict:
 
     # 4. B4b → db_connections.yaml + placement_decisions.yaml.
     connect, confirmed, noise = _db_decisions(state_dir, collected)
-    if connect:
-        _write_db_connections(state_dir, collected, confirmed)
+    # Si el usuario nombró librefs como base de datos, hay base de datos. Las
+    # tarjetas B4b:resolve:* se preguntan ANTES de cortar por Q-B4b-1, así que
+    # `connect=False` con prefijos confirmados es un estado alcanzable — y así
+    # se perdieron 55 nodos: sin db_connections.yaml el ensamblador no define
+    # `engine` y todo nodo que lo usa cae por undefined_name. Con prefijos
+    # confirmados se escribe igual, marcado como supuesto.
+    if connect or confirmed:
+        _write_db_connections(state_dir, collected, confirmed, assumed=not connect)
     resolved = _write_placement_decisions(state_dir, confirmed, noise)
 
     # 5. B4c → api_connections.yaml (solo si hubo tarjetas de conexión externa).

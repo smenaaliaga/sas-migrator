@@ -89,7 +89,9 @@
         "semantic",
         "security",
         "runtime",
-        "placement"
+        "placement",
+        "verification",
+        "degraded"
       ],
       "title": "NodeTranslationIssueCategory",
       "type": "string"

@@ -566,6 +566,42 @@ class TranslationSetup:
     verify_mode: str  # off | low | all
     max_workers: int = 1
     cell_logging: bool = False  # decisión B5b, viaja en el plan
+    db_url: str = ""  # cadena de conexión por defecto del proyecto (§2c)
+
+
+def _plan_needs_db(plan: dict) -> bool:
+    """¿El plan mandó a algún nodo a empujar SQL a la base?
+
+    Red de seguridad independiente de la entrevista: si el plan aprobado dice
+    que un nodo hace pushdown, el notebook TIENE que definir ``engine`` venga de
+    donde venga la decisión de conectar. Antes eso colgaba de un solo booleano
+    (``db_connections.yaml`` existe o no), y una respuesta ambigua en B4b dejaba
+    58 nodos ``hybrid`` sin engine.
+    """
+    return any(
+        str(t.get("strategy")) in {"sql_passthrough", "sql_pushdown", "hybrid"}
+        for t in plan.get("targets", [])
+    )
+
+
+def _default_db_url(cfg, conns: list[dict]) -> str:
+    """Cadena de conexión canónica para el notebook, o "" si no hay con qué.
+
+    El notebook la usa solo si nadie exportó ``SASMIG_DB_URL``. Sale de
+    ``core/db/engine.connection_string`` —la única construcción del sistema—,
+    que resuelve servidor conexión → ``db.default_server`` → ValueError
+    explícito, y autentica con ActiveDirectoryIntegrated (sin credenciales en el
+    código, ADR-0007). Sin servidor configurado devuelve "" y el notebook
+    conserva el error explícito de siempre.
+    """
+    from sas_migrator.core.db.engine import connection_string
+
+    if cfg.db.connection_url:
+        return str(cfg.db.connection_url)
+    try:
+        return connection_string(conns[0] if conns else {"alias": "(default)"}, cfg)
+    except ValueError:
+        return ""
 
 
 def _translation_context(state_dir: Path, plan: dict) -> TranslationSetup:
@@ -598,6 +634,7 @@ def _translation_context(state_dir: Path, plan: dict) -> TranslationSetup:
         verify_mode=tcfg.verify,
         max_workers=max(1, int(cfg.llm.max_workers)),
         cell_logging=cell_logging,
+        db_url=_default_db_url(cfg, conns),
     )
 
 
@@ -954,13 +991,22 @@ def _translate_pending(
             translated_now += 1
 
     mapping, failures = assemble_notebooks(
-        plan, translations, Path(output_dir), db_bootstrap=bool(setup.db_aliases),
+        plan, translations, Path(output_dir),
+        db_bootstrap=bool(setup.db_aliases) or _plan_needs_db(plan),
+        db_url_default=setup.db_url,
         allowed_imports=setup.allowed, cell_logging=setup.cell_logging,
+        verdicts={
+            nid: str(rec.get("verdict", "")) for nid, rec in reviews.items()
+        },
     )
     for failure in failures:
+        # El nodo YA está en el notebook, marcado como degradado: needs_human
+        # deja de significar "se perdió" y pasa a significar "hay que revisarlo".
+        nota = "" if failure.emitted else " — no emitible: la celda levanta NotImplementedError"
         record_needs_human(
             state_dir, phase=phase, task="assembly", node_id=failure.node_id,
-            reason="static_check_failed", detail=f"{failure.reason}: {failure.detail}",
+            reason="static_check_failed",
+            detail=f"{failure.reason}: {failure.detail}{nota}",
         )
     _dump_json(
         state_dir / "sas_python_mapping.json", json.loads(mapping.model_dump_json())

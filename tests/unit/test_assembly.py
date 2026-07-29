@@ -1,5 +1,5 @@
 """Ensamblador determinista: template, cell_index por construcción y
-chequeos estáticos que dejan al nodo fuera antes de escribir un notebook roto."""
+chequeos estáticos que marcan al nodo dudoso en vez de descartarlo."""
 
 from __future__ import annotations
 
@@ -53,8 +53,9 @@ def test_template_anchors_config_and_cell_index(tmp_path: Path) -> None:
     assert "# ========= Celda 1: Configuración =========" in sources[1]
     assert sources[1].count("import json") == 1
     assert "from pathlib import Path" in sources[1]
-    # anclas del audit
-    assert "## Nodo A" in sources and "## Nodo B" in sources
+    # anclas del audit (el `## label` abre la celda; debajo va la confianza)
+    assert "## Nodo A\n\n*confianza: low*" in sources
+    assert "## Nodo B\n\n*confianza: low*" in sources
     # ids fijos por posición (determinismo)
     assert [c["id"] for c in nb["cells"]] == [f"cell-{i:03d}" for i in range(len(nb["cells"]))]
 
@@ -121,15 +122,34 @@ def test_missing_translation_is_skipped_without_failure(tmp_path: Path) -> None:
 
 # ── Chequeos estáticos ──────────────────────────────────────────────────────
 
-def test_syntax_error_omits_node_and_reports_failure(tmp_path: Path) -> None:
+def test_syntax_error_deja_hueco_explicito_no_silencio(tmp_path: Path) -> None:
+    """No parsea: es uno de los dos kinds que NO se pueden emitir tal cual.
+
+    Aun así el nodo existe en el notebook — banner, código original en markdown
+    y una celda que levanta NotImplementedError. Antes desaparecía sin dejar
+    rastro, que es la falla que este comportamiento revierte.
+    """
     translations = {"A": _nt("A", ["def broken(:\n"]), "B": _nt("B", ["ok = 1\n"])}
     mapping, failures = assemble_notebooks(_plan("A", "B"), translations, tmp_path / "output")
 
     assert [f.node_id for f in failures] == ["A"]
     assert failures[0].reason == "syntax_error"
-    assert [m.node_id for m in mapping.mappings] == ["B"]
-    nb_text = (tmp_path / "output" / "NB-01_demo.ipynb").read_text(encoding="utf-8")
-    assert "Nodo A" not in nb_text, "el nodo fallido no deja rastro en el notebook"
+    assert failures[0].emitted is False
+    assert [m.node_id for m in mapping.mappings] == ["A", "B"]
+
+    by_id = {m.node_id: m for m in mapping.mappings}
+    assert by_id["A"].degraded and by_id["A"].degraded_reason.startswith("syntax_error:")
+    assert by_id["B"].degraded is False
+
+    nb = _read_nb(tmp_path / "output" / "NB-01_demo.ipynb")
+    sources = ["".join(c["source"]) for c in nb["cells"]]
+    banner = next(s for s in sources if s.startswith("## Nodo A"))
+    assert "Nodo degradado" in banner and "`syntax_error`" in banner
+    assert "def broken(:" in banner, "el código original se conserva, en markdown"
+    hueco = "".join(nb["cells"][by_id["A"].cell_index]["source"])
+    assert nb["cells"][by_id["A"].cell_index]["cell_type"] == "code"
+    assert "raise NotImplementedError(" in hueco
+    assert "def broken(:" not in hueco, "el código que no parsea no va a una celda code"
 
 
 def test_forbidden_patterns() -> None:
@@ -536,14 +556,37 @@ def test_iterrows_without_a_write_is_fine() -> None:
 
 # ── Nombres sin definir (cruza celdas y nodos) ──────────────────────────────
 
-def test_undefined_name_omits_the_node(tmp_path: Path) -> None:
-    """'asume que viene de un nodo anterior' cuando no viene de ninguno."""
-    translations = {"A": _nt("A", ["total = bd_ctsi['DATO'].sum()\n"])}
-    mapping, failures = assemble_notebooks(_plan("A"), translations, tmp_path / "output")
+def test_undefined_name_marca_el_nodo_pero_lo_emite(tmp_path: Path) -> None:
+    """'asume que viene de un nodo anterior' cuando no viene de ninguno.
 
-    assert mapping.mappings == []
+    El caso que costó 55 nodos en producción: se sigue reportando, pero el
+    trabajo queda EN el notebook, marcado y revisable, en vez de perdido.
+    """
+    translations = {"A": _nt("A", ["total = bd_ctsi['DATO'].sum()\n"],
+                             confidence="medium", warnings=["asumí que bd_ctsi ya existe"])}
+    mapping, failures = assemble_notebooks(
+        _plan("A"), translations, tmp_path / "output",
+        verdicts={"A": "revise"},
+    )
+
     assert [f.reason for f in failures] == ["undefined_name"]
+    assert failures[0].emitted is True
     assert "bd_ctsi" in failures[0].detail
+
+    entry = mapping.mappings[0]
+    assert entry.degraded is True
+    assert entry.degraded_reason.startswith("undefined_name:")
+
+    nb = _read_nb(tmp_path / "output" / "NB-01_demo.ipynb")
+    sources = ["".join(c["source"]) for c in nb["cells"]]
+    banner = next(s for s in sources if s.startswith("## Nodo A"))
+    assert "Nodo degradado" in banner
+    assert "`undefined_name`" in banner
+    assert "**Confianza del traductor:** medium · **Verificador:** revise" in banner
+    assert "asumí que bd_ctsi ya existe" in banner
+    # el código traducido sigue estando, tal cual, en su celda
+    codigo = "".join(nb["cells"][entry.cell_index]["source"])
+    assert "total = bd_ctsi['DATO'].sum()" in codigo
 
 
 def test_name_defined_by_an_earlier_node_is_visible(tmp_path: Path) -> None:
@@ -671,3 +714,77 @@ def test_except_que_solo_loguea_sigue_siendo_swallowed_exception() -> None:
         'try:\n    x = pd.read_csv("a.csv")\nexcept Exception:\n    _log("fallo")\n'
     ]))
     assert f is not None and f.reason == "swallowed_exception"
+
+
+# ── Degradación: el nodo se emite, no se pierde ─────────────────────────────
+
+def test_import_que_no_resuelve_no_tumba_el_notebook_entero(tmp_path: Path) -> None:
+    """Emitir el nodo no puede costar el notebook completo.
+
+    Su import iría a la celda 1, que corre ANTES de todo: un solo nodo malo
+    dejaría a los otros sin ejecutar. Se aísla en la celda del nodo que lo pidió.
+    """
+    translations = {
+        "A": _nt("A", ["x = fantasma_zz.load()\n"], imports=["import fantasma_zz"]),
+        "B": _nt("B", ["y = 2\n"]),
+    }
+    mapping, failures = assemble_notebooks(_plan("A", "B"), translations, tmp_path / "output")
+
+    assert [f.reason for f in failures] == ["unresolvable_import"]
+    nb = _read_nb(tmp_path / "output" / "NB-01_demo.ipynb")
+    config = "".join(nb["cells"][1]["source"])
+    assert "import fantasma_zz" not in config, "la celda de configuración queda sana"
+
+    by_id = {m.node_id: m for m in mapping.mappings}
+    codigo = "".join(nb["cells"][by_id["A"].cell_index]["source"])
+    assert "import fantasma_zz" in codigo
+    # y sigue documentado como contrato del entorno destino
+    req = (tmp_path / "output" / "requirements.txt").read_text(encoding="utf-8")
+    assert "fantasma_zz" in req
+
+
+def test_engine_cae_al_default_del_proyecto_si_nadie_exporta_la_env(tmp_path: Path) -> None:
+    """Sin ``SASMIG_DB_URL`` la celda 1 hacía ``KeyError`` y moría el notebook."""
+    plan = _plan("A")
+    translations = {"A": _nt("A", ["df = pd.read_sql('SELECT 1', engine)\n"])}
+    url = "mssql+pyodbc:///?odbc_connect=DRIVER={x};SERVER=tcp:PLATDAT,1433"
+    _, failures = assemble_notebooks(
+        plan, translations, tmp_path / "output",
+        db_bootstrap=True, db_url_default=url,
+    )
+    assert failures == []
+    config = "".join(_read_nb(tmp_path / "output" / "NB-01_demo.ipynb")["cells"][1]["source"])
+    assert 'os.environ.get("SASMIG_DB_URL"' in config
+    assert url in config
+    assert "SUPUESTO" in config, "la conexión asumida queda anotada, no silenciosa"
+
+
+def test_un_plan_con_pushdown_define_engine_aunque_no_haya_conexiones() -> None:
+    """Red de seguridad independiente de la entrevista (§2b).
+
+    Si el plan aprobado manda a un nodo a empujar SQL, el notebook TIENE que
+    definir ``engine`` venga de donde venga la decisión de conectar.
+    """
+    from sas_migrator.llm.phases import _plan_needs_db
+
+    assert _plan_needs_db({"targets": [{"strategy": "hybrid"}]})
+    assert _plan_needs_db({"targets": [{"strategy": "pandas"}, {"strategy": "sql_pushdown"}]})
+    assert not _plan_needs_db({"targets": [{"strategy": "pandas"}]})
+    assert not _plan_needs_db({"targets": []})
+
+
+def test_la_confianza_del_traductor_llega_al_notebook(tmp_path: Path) -> None:
+    """`confidence`/`traceability` se persistían y NUNCA llegaban al .ipynb."""
+    from sas_migrator.core.models.translation import Traceability
+
+    translations = {"A": _nt(
+        "A", ["x = 1\n"], confidence="high",
+        traceability=Traceability(sas_construct="PROC IML — Cholette-Dagum"),
+    )}
+    assemble_notebooks(
+        _plan("A"), translations, tmp_path / "output", verdicts={"A": "approve"},
+    )
+    sources = ["".join(c["source"])
+               for c in _read_nb(tmp_path / "output" / "NB-01_demo.ipynb")["cells"]]
+    md = next(s for s in sources if s.startswith("## Nodo A"))
+    assert md == "## Nodo A\n\n*confianza: high · verificador: approve · SAS: PROC IML — Cholette-Dagum*"

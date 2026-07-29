@@ -105,6 +105,8 @@ class NodeTranslationIssueCategory(str, Enum):
     SECURITY = "security"
     RUNTIME = "runtime"
     PLACEMENT = "placement"  # Etapa 4: la traducción respeta dónde corre el cómputo
+    VERIFICATION = "verification"  # veredicto `revise` del verificador LLM
+    DEGRADED = "degraded"  # nodo emitido pero marcado: falló un chequeo estático
 
 
 class NodeTranslationAuditIssue(BaseModel):

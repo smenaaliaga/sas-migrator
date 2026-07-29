@@ -8,7 +8,7 @@
   "questions": [
     {
       "id": "Q-B4b-2",
-      "text": "¿Qué conexión de base de datos usará el resultado?",
+      "text": "¿Qué servidor SQL Server usarán los notebooks? El proyecto no tiene un servidor por defecto configurado.",
       "question_type": "single_choice",
       "required": true,
       "options": [

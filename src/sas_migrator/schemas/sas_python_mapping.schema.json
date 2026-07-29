@@ -54,6 +54,16 @@
         "confidence": {
           "$ref": "#/$defs/Confidence",
           "default": "low"
+        },
+        "degraded": {
+          "default": false,
+          "title": "Degraded",
+          "type": "boolean"
+        },
+        "degraded_reason": {
+          "default": "",
+          "title": "Degraded Reason",
+          "type": "string"
         }
       },
       "required": [

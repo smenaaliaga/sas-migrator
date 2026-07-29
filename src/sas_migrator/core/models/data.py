@@ -112,6 +112,14 @@ class DatabaseConnection(BaseModel):
         default_factory=list,
         description="Tablas asociadas a esta conexión",
     )
+    assumed: bool = Field(
+        default=False,
+        description=(
+            "True cuando la conexión la dedujo el migrador (el usuario confirmó "
+            "librefs como base de datos pero no confirmó conectar el resultado). "
+            "El supuesto queda explícito en vez de degradar en silencio."
+        ),
+    )
 
 
 class DatabaseConnections(BaseModel):

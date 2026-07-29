@@ -14,18 +14,37 @@
    estables (las tablas de patrones), lo volátil en el mensaje user.
 2. **`NeedsHuman` nunca es silencio**: queda en `state/needs_human.yaml`
    (id NH-NNN, fase, task, nodo, razón) y el gate de la fase (2/3/6) bloquea
-   por cada item sin resolver. El nodo de traducción fallido además queda
-   fuera del mapping — la auditoría lo reporta como missing_mapping (doble
-   señal, misma causa).
+   por cada item sin resolver. El nodo de traducción que falla un chequeo
+   estático SÍ entra al mapping, marcado `degraded: true` (ver §3), así que la
+   segunda señal ya no es `missing_mapping` sino un issue `degraded` de
+   severidad high que emite la auditoría por cada entrada marcada. El gate
+   bloquea igual (`issues_by_severity.high > 0`) sin código nuevo. Un nodo sin
+   traducción —que nunca llegó a existir— sigue cayendo en `missing_mapping`.
 3. **El ensamblador (`core/assembly`) es determinista puro** y es el ÚNICO
    escritor de notebooks: el traductor (LLM o stub) emite `NodeTranslation`
    (celdas sin headers ni anclas) y el ensamblador construye el template,
    calcula `cell_index`/`cell_count` desde los índices reales y escribe
    `sas_python_mapping.json` correcto por construcción. Chequeos estáticos
    ANTES de escribir (`ast.parse`, imports resolubles, `to_parquet`/`duckdb`/
-   f-string-SQL prohibidos, strategy_mismatch): un fallo omite el nodo
-   (needs_human), jamás un notebook roto. El camino stub usa el MISMO
-   ensamblador — CI y el golden de determinismo lo cubren siempre.
+   f-string-SQL prohibidos, strategy_mismatch, undefined_name…): un fallo
+   **marca** el nodo, no lo descarta. Se emite igual, precedido de una celda
+   markdown con el chequeo fallido, la confianza del traductor, el veredicto
+   del verificador y sus supuestos, y con `degraded: true` en el mapping. Solo
+   `syntax_error` y `empty_translation` no se pueden emitir tal cual: ahí van
+   el mismo banner, el código original en markdown y una celda que levanta
+   `NotImplementedError`. El camino stub usa el MISMO ensamblador — CI y el
+   golden de determinismo lo cubren siempre.
+
+   *Enmienda (2026-07-29).* Hasta acá la regla era la inversa: *"un fallo omite
+   el nodo (needs_human), jamás un notebook roto"*. El trade-off resultó al
+   revés de lo esperado. En `Síntesis_M_CR18` una respuesta ambigua de la
+   entrevista dejó sin definir `engine`, y los 55 nodos que lo usaban cayeron
+   por `undefined_name`: 8 h 53 min y ~$64 de traducciones correctas terminaron
+   en 14 notebooks, 7 de ellos cascarones de título + imports. Nada de eso se
+   veía al abrir el `.ipynb`. Un notebook que puede romper al ejecutar es
+   preferible a uno silenciosamente incompleto, porque lo primero se ve y lo
+   segundo no. La propiedad que sí se conserva: el gate sigue bloqueando, y el
+   trabajo dudoso queda a la vista del revisor en vez de perdido.
 4. **`stub_mode` gobierna un solo eje**: LLM stub vs real (fases 2/3/6) y
    entrevistas stub vs reales (fases 1/4/5) van juntos. La corrida real es el
    default de los tres frentes y `--stub` la excepción de CI (al escribirse

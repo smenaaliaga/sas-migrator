@@ -134,6 +134,57 @@ def test_apply_post_analysis_passes_real_gate4(ws: Path) -> None:
     assert logdoc == {"cell_logging": {"enabled": True}}
 
 
+def test_librefs_confirmadas_sin_conectar_igual_dejan_conexion(ws: Path, tmp_path: Path) -> None:
+    """El estado contradictorio que costó 55 nodos en producción.
+
+    Las tarjetas ``B4b:resolve:*`` se preguntan ANTES de cortar por Q-B4b-1, así
+    que "no conectar" + "estos librefs SON base de datos" es alcanzable. Si esa
+    contradicción tira ``db_connections.yaml``, el ensamblador no define
+    ``engine`` y todo nodo que lo use cae por ``undefined_name``. Ahora se
+    escribe igual, marcado ``assumed`` para que el supuesto se vea.
+    """
+    import shutil
+
+    state = tmp_path / "state"
+    shutil.copytree(ws / "state", state)
+
+    collected: list[tuple[InterviewCard, CardAnswers]] = []
+    flows = post_analysis.build_scope_flows_card(state)
+    collected.append((flows, _answer(flows, {"Q-B2-1": "todos"})))
+    for card in post_analysis.build_native_node_cards(state):
+        collected.append(
+            (card, _answer(card, {card.questions[0].id: "Traducir a mano"},
+                           free_text="Importa el Excel de clientes a WORK."))
+        )
+    step1 = post_analysis.build_db_step1_card(state)
+    collected.append(
+        (step1, _answer(step1, {"Q-B4b-1": post_analysis.DB_CONNECT_OPTIONS[1]}))
+    )
+    for card in post_analysis.build_placement_resolution_cards(state):
+        collected.append(
+            (card, _answer(card, {card.questions[0].id: "Es una base de datos"}))
+        )
+    for card in post_analysis.build_improvement_cards(state):
+        collected.append((card, _answer(card, {card.questions[0].id: "Rechazar"})))
+    logcard = post_analysis.build_cell_logging_card(state)
+    collected.append(
+        (logcard, _answer(logcard, {"Q-B5b-1": post_analysis.CELL_LOGGING_OPTIONS[1]}))
+    )
+    counts = apply.summarize_counts(state, collected)
+    closure = post_analysis.build_closure_card(state, counts)
+    collected.append(
+        (closure, _answer(closure, {"Q-B6-1": "Sí, proceder al plan de traducción"}))
+    )
+    for card, ans in collected:
+        validate_answers(card, ans)
+
+    apply.apply_post_analysis(state, collected)
+
+    conns = yaml.safe_load((state / "db_connections.yaml").read_text(encoding="utf-8"))
+    assert [c["alias"] for c in conns["connections"]] == ["SRC"]
+    assert conns["connections"][0]["assumed"] is True
+
+
 def test_cell_logging_defaults_off_without_card(ws: Path) -> None:
     """Entrevistas legadas (sin tarjeta B5b) jamás activan el feature solas."""
     state = ws / "state"

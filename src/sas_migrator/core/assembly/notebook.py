@@ -5,9 +5,12 @@ El contrato clave de v2: el traductor (LLM o stub) produce ``NodeTranslation``
 ``cell_index`` desde los índices reales al ensamblar (nunca a mano) y escribe
 ``sas_python_mapping.json`` correcto por construcción.
 
-Chequeos estáticos por nodo ANTES de escribir (un fallo omite el nodo del
-notebook y del mapping — nunca se escribe un notebook roto; el caller registra
-el fallo como needs_human):
+Chequeos estáticos por nodo ANTES de escribir. Un fallo NO descarta el nodo:
+lo emite marcado (celda markdown con el motivo + ``degraded`` en el mapping) y
+lo devuelve como ``NodeAssemblyFailure`` para que el caller lo registre en
+needs_human. Un notebook que puede romper al ejecutar es preferible a uno
+silenciosamente incompleto: lo primero se ve, lo segundo no (ver ADR-0006 §3).
+Los chequeos:
 
 - ``ast.parse`` de cada celda (sintaxis);
 - imports resolubles vía ``importlib.util.find_spec`` (sin importar);
@@ -93,6 +96,13 @@ class NodeAssemblyFailure:
     node_id: str
     reason: str  # syntax_error | unresolvable_import | import_in_cell | forbidden_pattern | strategy_mismatch | empty_translation | secret_detected | absolute_path | placeholder_stub | bare_except | swallowed_exception | self_assignment | empty_frame_guard | sql_no_op | row_by_row_write | undefined_name
     detail: str
+    emitted: bool = True  # el nodo igual fue al notebook, marcado como degradado
+
+
+# Los dos únicos chequeos cuyo nodo NO se puede emitir tal cual: uno no parsea
+# y el otro no tiene código que emitir. Los otros 14 producen Python válido —
+# dudoso, pero válido— y el nodo va al notebook con su banner.
+NON_EMITTABLE_KINDS = frozenset({"syntax_error", "empty_translation"})
 
 
 # ── Chequeos estáticos ──────────────────────────────────────────────────────
@@ -806,34 +816,35 @@ def _names_bound_by_imports(import_lines: list[str]) -> set[str]:
     return names
 
 
-def _reject_undefined_names(
-    valid: list[NodeTranslation], known: set[str]
-) -> tuple[list[NodeTranslation], list[NodeAssemblyFailure]]:
-    """Filtra los nodos que usan nombres que el notebook nunca define.
+def _flag_undefined_names(
+    nodes: list[NodeTranslation], known: set[str]
+) -> dict[str, NodeAssemblyFailure]:
+    """Marca los nodos que usan nombres que el notebook nunca define.
 
     Recorre en orden de ejecución acumulando lo que cada nodo deja definido. Un
-    nodo rechazado igual aporta sus definiciones al set: así el nodo siguiente
+    nodo marcado igual aporta sus definiciones al set: así el nodo siguiente
     se juzga por lo suyo y no arrastra la culpa del anterior — se reporta la
     causa raíz una vez, no una cascada.
+
+    Marca, no filtra: el nodo se emite igual (con banner). Un NameError visible
+    al ejecutar es preferible a un notebook al que le falta la mitad del flujo
+    sin que se note.
     """
-    kept: list[NodeTranslation] = []
-    failures: list[NodeAssemblyFailure] = []
+    flagged: dict[str, NodeAssemblyFailure] = {}
     visible = set(known)
-    for nt in valid:
+    for nt in nodes:
         missing, defined = undefined_in_cells(list(nt.cells), visible)
         visible |= defined | _names_bound_by_imports(list(nt.imports))
-        if missing:
-            failures.append(NodeAssemblyFailure(
+        if missing and nt.node_id not in flagged:
+            flagged[nt.node_id] = NodeAssemblyFailure(
                 nt.node_id, "undefined_name",
                 f"usa {len(missing)} nombre(s) que ninguna celda anterior define: "
                 f"{', '.join(missing[:8])}"
                 + (" …" if len(missing) > 8 else "")
                 + ". Si vienen de otro nodo, ese nodo los dejó en la base (hay que "
                 "leerlos con pd.read_sql) o no existen",
-            ))
-            continue
-        kept.append(nt)
-    return kept, failures
+            )
+    return flagged
 
 
 # Helper `_log` que se define en la celda de configuración cuando el usuario
@@ -909,26 +920,128 @@ def _strip_log_calls(nt: NodeTranslation) -> NodeTranslation:
     return nt.model_copy(update={"cells": cells})
 
 
+def _import_aislado(failure: NodeAssemblyFailure | None) -> bool:
+    """¿Los imports de este nodo tienen que quedarse en su propia celda?"""
+    return failure is not None and failure.reason == "unresolvable_import"
+
+
+def _db_bootstrap_source(db_url_default: str) -> str:
+    """Celda de configuración: cómo obtiene ``engine`` el notebook.
+
+    El orquestador (ejecución autorizada) sigue mandando vía ``SASMIG_DB_URL``.
+    Lo que cambia es qué pasa si nadie la exporta: antes ``KeyError`` en la
+    celda 1 y notebook muerto; ahora cae a la cadena canónica del proyecto
+    (``core/db/engine.connection_string``), con autenticación integrada y sin
+    credenciales en el código. Si el proyecto tampoco define un servidor, el
+    caller manda cadena vacía y se conserva el error explícito de antes.
+    """
+    if not db_url_default:
+        return (
+            "\n# Conexión a BD — la define el orquestador al ejecutar\n"
+            'engine = sqlalchemy.create_engine(os.environ["SASMIG_DB_URL"])\n'
+        )
+    return (
+        "\n# Conexión a BD — la fija el orquestador con SASMIG_DB_URL; si no está,\n"
+        "# se usa la conexión por defecto del proyecto (SUPUESTO: verificar servidor\n"
+        "# y base antes de correr contra datos reales).\n"
+        "engine = sqlalchemy.create_engine(\n"
+        f"    os.environ.get(\"SASMIG_DB_URL\", {db_url_default!r})\n"
+        ")\n"
+    )
+
+
+def _hueco_msg(label: str, failure: NodeAssemblyFailure) -> str:
+    """Mensaje del ``NotImplementedError`` de un nodo que no se pudo emitir."""
+    return (
+        f"{label}: traducción no emitible ({failure.reason}). "
+        "El código original quedó en la celda markdown de arriba; "
+        "el detalle, en state/needs_human.yaml."
+    )
+
+
+def _node_markdown(
+    label: str, nt: NodeTranslation, failure: NodeAssemblyFailure | None, verdict: str
+) -> str:
+    """Celda markdown que precede a cada nodo.
+
+    ``## {label}`` va SIEMPRE en su propia línea: es el ancla de trazabilidad
+    que chequea el audit. Debajo, lo que hasta ahora se persistía y nunca
+    llegaba al notebook —confianza, veredicto del verificador, supuestos— y,
+    si el nodo falló un chequeo, por qué está marcado.
+    """
+    conf = str(getattr(nt.confidence, "value", nt.confidence))
+    construct = (nt.traceability.sas_construct or "").strip()
+
+    if failure is None:
+        partes = [f"confianza: {conf}"]
+        if verdict:
+            partes.append(f"verificador: {verdict}")
+        if construct:
+            partes.append(f"SAS: {construct}")
+        return f"## {label}\n\n*{' · '.join(partes)}*"
+
+    linea_conf = f"**Confianza del traductor:** {conf}"
+    if verdict:
+        linea_conf += f" · **Verificador:** {verdict}"
+    bloque = [
+        "> ⚠️ **Nodo degradado — revisar antes de ejecutar**",
+        f"> **Chequeo fallido:** `{failure.reason}` — {failure.detail}",
+        f"> {linea_conf}",
+    ]
+    if nt.warnings:
+        bloque.append("> **Supuestos del traductor:**")
+        bloque.append("\n".join(f"> - {w}" for w in nt.warnings))
+    if construct:
+        bloque.append(f"> **SAS de origen:** {construct}")
+    if not failure.emitted:
+        bloque.append(
+            "> **El código no se pudo emitir** (no parsea o está vacío): queda "
+            "abajo, en texto, y la celda levanta `NotImplementedError`."
+        )
+    partes = [f"## {label}", "\n>\n".join(bloque)]
+    if not failure.emitted:
+        original = "\n\n".join(c.rstrip() for c in nt.cells if c.strip())
+        if original:
+            partes.append(f"```python\n{original}\n```")
+    return "\n\n".join(partes)
+
+
 def assemble_notebooks(
     plan: dict,
     translations: dict[str, NodeTranslation],
     output_dir: Path,
     *,
     db_bootstrap: bool = False,
+    db_url_default: str = "",
     allowed_imports: Iterable[str] | None = None,
     cell_logging: bool = False,
+    verdicts: dict[str, str] | None = None,
 ) -> tuple[SasPythonMapping, list[NodeAssemblyFailure]]:
     """Construye los notebooks del plan y el mapping SAS→Python.
 
     ``translations``: NodeTranslation por node_id. Un target sin traducción se
-    omite en silencio aquí (el caller ya lo registró como needs_human); un
-    target cuya traducción falla los chequeos estáticos se omite y se devuelve
-    como ``NodeAssemblyFailure``. Además emite ``output/requirements.txt`` con
-    las librerías de terceros que los notebooks realmente importan — el
-    contrato del entorno DESTINO.
+    omite en silencio aquí (el caller ya lo registró como needs_human). Un
+    target cuya traducción falla un chequeo estático SÍ se emite, precedido de
+    un banner con el motivo y marcado ``degraded`` en el mapping, y se devuelve
+    igual como ``NodeAssemblyFailure`` (el caller lo sigue registrando en
+    needs_human, y el audit lo bloquea con un issue ``degraded`` high). Solo dos
+    kinds no se pueden emitir tal cual —ver ``NON_EMITTABLE_KINDS``—: ahí va el
+    banner, el código original en markdown y una celda que levanta
+    ``NotImplementedError``.
+
+    ``verdicts``: node_id → veredicto del verificador LLM, para la etiqueta de
+    confianza de cada nodo. Sale de ``state/translation_review.json``, que lee
+    el caller: este módulo es determinista puro y no toca ``state/``.
+
+    ``db_url_default``: cadena de conexión canónica del proyecto, para cuando
+    nadie exporta ``SASMIG_DB_URL``. La construye el caller por la misma razón.
+
+    Además emite ``output/requirements.txt`` con las librerías de terceros que
+    los notebooks realmente importan — el contrato del entorno DESTINO.
     """
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+    verdicts = verdicts or {}
     all_import_lines: list[str] = []
 
     by_notebook: dict[str, list[dict]] = {}
@@ -943,7 +1056,8 @@ def assemble_notebooks(
         name = Path(nb_rel).name
         title = Path(name).stem
 
-        valid: list[NodeTranslation] = []
+        nodes: list[NodeTranslation] = []
+        degraded: dict[str, NodeAssemblyFailure] = {}
         for target in nb_targets:
             nid = str(target.get("node_id"))
             nt = translations.get(nid)
@@ -952,18 +1066,16 @@ def assemble_notebooks(
             if not cell_logging:
                 nt = _strip_log_calls(nt)
             if nt.strategy and target.get("strategy") and nt.strategy != target["strategy"]:
-                failures.append(
-                    NodeAssemblyFailure(
-                        nid, "strategy_mismatch",
-                        f"traducción '{nt.strategy}' vs plan '{target['strategy']}'",
-                    )
+                failure = NodeAssemblyFailure(
+                    nid, "strategy_mismatch",
+                    f"traducción '{nt.strategy}' vs plan '{target['strategy']}'",
                 )
-                continue
-            failure = check_node_translation(nt, allowed_imports)
+            else:
+                failure = check_node_translation(nt, allowed_imports)
             if failure is not None:
-                failures.append(failure)
-                continue
-            valid.append(nt)
+                failure.emitted = failure.reason not in NON_EMITTABLE_KINDS
+                degraded[nid] = failure
+            nodes.append(nt)
 
         # Celda de configuración: imports agregados (dedupe, primera aparición).
         imports: list[str] = list(BASELINE_IMPORTS)
@@ -976,10 +1088,19 @@ def assemble_notebooks(
             for line in ("import datetime", "from pathlib import Path"):
                 if line not in imports:
                     imports.append(line)
-        for nt in valid:
+        aislados: list[str] = []
+        for nt in nodes:
             for line in nt.imports:
                 line = line.strip()
-                if line and line not in imports:
+                if not line:
+                    continue
+                # Un import que no resuelve iría a la celda 1 y tumbaría el
+                # notebook ENTERO antes del primer nodo. Se aísla en la celda
+                # del nodo que lo pidió: solo ese nodo revienta.
+                if _import_aislado(degraded.get(nt.node_id)):
+                    if line not in aislados:
+                        aislados.append(line)
+                elif line not in imports:
                     imports.append(line)
 
         # Nombres sin definir: necesita el notebook entero (imports agregados,
@@ -995,19 +1116,19 @@ def assemble_notebooks(
             known.add("engine")
         if cell_logging:
             known.add("_log")  # lo define la celda de configuración
-        valid, undefined_failures = _reject_undefined_names(valid, known)
-        failures.extend(undefined_failures)
+        for nid, failure in _flag_undefined_names(nodes, known).items():
+            # Un nodo reporta UN motivo: el primero que encontró. Encadenarle
+            # undefined_name a un nodo que ya falló otra cosa sería ruido.
+            degraded.setdefault(nid, failure)
+
+        failures.extend(degraded[str(t.get("node_id"))] for t in nb_targets
+                        if str(t.get("node_id")) in degraded)
 
         config_source = (
             "# ========= Celda 1: Configuración =========\n" + "\n".join(imports) + "\n"
         )
         if db_bootstrap:
-            # La URL la fija el orquestador (ejecución autorizada) vía env var;
-            # el notebook queda standalone y sin secretos.
-            config_source += (
-                "\n# Conexión a BD — la define el orquestador al ejecutar\n"
-                'engine = sqlalchemy.create_engine(os.environ["SASMIG_DB_URL"])\n'
-            )
+            config_source += _db_bootstrap_source(db_url_default)
         if cell_logging:
             # El notebook corre con cwd=output/ (nbclient y run_all.py), así
             # que Path("log") resuelve a output/log/.
@@ -1020,16 +1141,38 @@ def assemble_notebooks(
             cells.append(params_cell)
         cells.append(nbformat.v4.new_code_cell(config_source))
 
-        for nt in valid:
+        for nt in nodes:
             label = nt.node_label or nt.node_id
-            cells.append(nbformat.v4.new_markdown_cell(f"## {label}"))
+            failure = degraded.get(nt.node_id)
+            cells.append(nbformat.v4.new_markdown_cell(
+                _node_markdown(label, nt, failure, verdicts.get(nt.node_id, ""))
+            ))
             code_index = len(cells)  # índice REAL de la primera celda code
-            first, *rest = [c for c in nt.cells if c.strip()]
-            cells.append(
-                nbformat.v4.new_code_cell(f"# ========= {label} =========\n{first}")
-            )
-            for extra in rest:
-                cells.append(nbformat.v4.new_code_cell(extra))
+
+            if failure is not None and not failure.emitted:
+                cells.append(nbformat.v4.new_code_cell(
+                    f"# ========= {label} =========\n"
+                    f"raise NotImplementedError(\n"
+                    f"    {_hueco_msg(label, failure)!r}\n"
+                    f")\n"
+                ))
+                extra_cells = 0
+            else:
+                cabecera = f"# ========= {label} =========\n"
+                if _import_aislado(failure):
+                    cabecera += (
+                        "# imports propios del nodo: no resuelven en el entorno "
+                        "declarado, así que\n# quedan acá y no en la celda de "
+                        "configuración (rompe este nodo, no el notebook).\n"
+                        + "\n".join(line.strip() for line in nt.imports if line.strip())
+                        + "\n"
+                    )
+                first, *rest = [c for c in nt.cells if c.strip()]
+                cells.append(nbformat.v4.new_code_cell(f"{cabecera}{first}"))
+                for extra in rest:
+                    cells.append(nbformat.v4.new_code_cell(extra))
+                extra_cells = len(rest)
+
             entries.append(
                 MappingEntry(
                     node_id=nt.node_id,
@@ -1038,9 +1181,13 @@ def assemble_notebooks(
                     python_artifact=nb_rel,
                     notebook_path=nb_rel,
                     cell_index=code_index,
-                    cell_count=1 + len(rest),
+                    cell_count=1 + extra_cells,
                     business_rule=nt.traceability.business_rule,
                     confidence=nt.confidence,
+                    degraded=failure is not None,
+                    degraded_reason=(
+                        f"{failure.reason}: {failure.detail}" if failure else ""
+                    ),
                 )
             )
 
@@ -1049,7 +1196,9 @@ def assemble_notebooks(
             cell["id"] = f"cell-{i:03d}"
         nb["cells"] = cells
         nbformat.write(nb, str(output_dir / name))
-        all_import_lines.extend(imports)
+        # Los aislados también son contrato del entorno destino: que no resuelvan
+        # HOY es justamente lo que requirements.txt tiene que dejar dicho.
+        all_import_lines.extend(imports + aislados)
 
     _write_requirements(output_dir, all_import_lines)
     return SasPythonMapping(mappings=entries), failures

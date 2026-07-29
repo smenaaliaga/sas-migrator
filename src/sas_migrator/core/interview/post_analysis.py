@@ -473,8 +473,9 @@ def build_db_step1_card(state_dir: Path) -> InterviewCard | None:
             Question(
                 id="Q-B4b-1",
                 text=(
-                    "El flujo SAS depende de bases de datos. ¿El resultado (notebooks) se "
-                    "conectará a la base que reemplaza a la que usaba SAS?"
+                    "El flujo SAS lee y escribe tablas vía librerías (LIBNAME/LIBREF). "
+                    "¿Los notebooks resultantes accederán a esas tablas en una base "
+                    "SQL Server?"
                 ),
                 question_type=QuestionType.SINGLE_CHOICE,
                 options=list(DB_CONNECT_OPTIONS),
@@ -590,7 +591,13 @@ def build_db_connection_card(state_dir: Path) -> InterviewCard:
         questions=[
             Question(
                 id="Q-B4b-2",
-                text="¿Qué conexión de base de datos usará el resultado?",
+                text=(
+                    f"¿Qué servidor SQL Server usarán los notebooks? El proyecto "
+                    f"trae '{default_server}' como default."
+                    if default_server
+                    else "¿Qué servidor SQL Server usarán los notebooks? El proyecto "
+                    "no tiene un servidor por defecto configurado."
+                ),
                 question_type=QuestionType.SINGLE_CHOICE,
                 options=list(DB_CONNECTION_OPTIONS),
                 recommended_default=(
