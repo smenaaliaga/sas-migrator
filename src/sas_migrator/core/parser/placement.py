@@ -21,6 +21,14 @@ local. El placement se deriva de la ESTRUCTURA del código SAS:
 El default replica la localidad que SAS ya tenía; mover cómputo de lugar es una
 mejora M-xxx aprobada, no una decisión silenciosa del traductor.
 
+``sql_first=True`` (``translation.default_target: sql``) corrige dos supuestos
+que empujaban a pandas casi todo nodo real: WORK pasa a ser un schema temporal
+del server (no memoria del proceso) y solo la lógica PROCEDURAL de un DATA step
+—no cualquier statement dentro de uno— impide el pushdown. Ver
+``core.parser.segments`` para el veredicto POR BLOQUE: un nodo que ingesta un
+archivo en su primer PROC SQL no tiene por qué traducir a pandas los diez
+``UPDATE`` que le siguen.
+
 Nota de ejes: ``classification == "utility"`` (analysis/analyze.py) describe QUÉ
 es el nodo dentro del pipeline ETL; ``placement == "utility"`` describe DÓNDE
 corre su traducción (en ningún motor de datos). Un nodo puede ser
@@ -35,6 +43,15 @@ from sas_migrator.core.parser.statements import DEFAULT_DB_ENGINES, NodeParse
 
 PLACEMENTS = ("sql_passthrough", "sql_pushdown", "pandas", "hybrid", "ambiguous", "utility")
 
+# PROCs cuya semántica NO sobrevive una traducción ingenua a SQL porque su
+# resultado es un ORDEN de filas, y una tabla SQL no tiene orden: un
+# ``SELECT ... INTO #t ... ORDER BY`` no garantiza que el consumidor lea en ese
+# orden. En SAS el dataset queda marcado ``sortedby`` y el DATA step siguiente
+# procesa BY-grupos confiando en eso. Bajo ``sql_first`` estos PROCs cuentan
+# como lógica procedural: se quedan en pandas hasta que exista una traducción
+# que lleve el ORDER BY al consumidor (es una mejora M-xxx, no un default).
+_ORDER_DEPENDENT_PROCS = frozenset({"sort", "rank", "transpose", "expand", "timeseries"})
+
 
 @dataclass
 class PlacementDecision:
@@ -43,10 +60,10 @@ class PlacementDecision:
     reasons: list[str] = field(default_factory=list)
 
 
-def _origin(libref: str, db_librefs: set[str]) -> str:
+def _origin(libref: str, db_librefs: set[str], work_is_db: bool = False) -> str:
     """Origen de un dataset: db | work | lib_desconocida."""
     if libref == "WORK":
-        return "work"
+        return "db" if work_is_db else "work"
     if libref.upper() in db_librefs:
         return "db"
     return "unknown_lib"
@@ -56,6 +73,8 @@ def classify_placement(
     parse: NodeParse,
     db_librefs: set[str] | None = None,
     db_engines: frozenset[str] | set[str] | None = None,
+    *,
+    sql_first: bool = False,
 ) -> PlacementDecision:
     """Clasifica un nodo parseado.
 
@@ -65,13 +84,36 @@ def classify_placement(
 
     ``db_engines``: set de engines de BD a reconocer (default: los de SAS/ACCESS;
     los proyectos con engines custom lo resuelven vía ``resolve_db_engines``).
+
+    ``sql_first`` (``translation.default_target: sql``) cambia dos supuestos:
+
+    1. ``WORK`` es un SCHEMA TEMPORAL del server, no memoria del proceso. La
+       traducción fiel de ``WORK.X`` es una tabla temp, no un DataFrame — así
+       que mezclar tablas de BD con WORK no obliga a bajar los datos al cliente.
+    2. Solo la lógica PROCEDURAL de un DATA step fuerza pandas. Una asignación
+       o un ``if`` son ``CASE WHEN``/``WHERE``, y arrastraban el nodo entero a
+       pandas por estar dentro de un DATA step.
+
+    Sin el flag el comportamiento es idéntico al histórico (WORK ⇒ pandas,
+    cualquier statement de DATA step ⇒ no-SQL).
     """
     engines = db_engines if db_engines is not None else DEFAULT_DB_ENGINES
     db_libs = {lr.upper() for lr in (db_librefs or set())}
     db_libs |= {lr for lr, eng in parse.librefs_declared.items() if eng in engines}
+    procs_de_orden = sorted(set(parse.procs) & _ORDER_DEPENDENT_PROCS)
+    fuerza_pandas = (
+        (parse.has_procedural_logic or bool(procs_de_orden))
+        if sql_first
+        else parse.has_data_step_logic
+    )
+    # WORK es una tabla temporal DEL SERVER — pero solo si hay server. Un
+    # proyecto sin ningún libref de BD confirmado no tiene dónde poner una tabla
+    # temp, y pedirle una conexión a un flujo que solo usa WORK es inventarle
+    # infraestructura.
+    work_is_db = sql_first and bool(db_libs)
 
-    in_origins = {_origin(r.libref, db_libs) for r in parse.inputs}
-    out_origins = {_origin(r.libref, db_libs) for r in parse.outputs}
+    in_origins = {_origin(r.libref, db_libs, work_is_db) for r in parse.inputs}
+    out_origins = {_origin(r.libref, db_libs, work_is_db) for r in parse.outputs}
     evidence = {
         "inputs": [f"{r.libref}.{r.table}" for r in parse.inputs],
         "outputs": [f"{r.libref}.{r.table}" for r in parse.outputs],
@@ -82,6 +124,13 @@ def classify_placement(
         "procs": parse.procs,
         "has_passthrough": parse.has_passthrough,
         "has_data_step_logic": parse.has_data_step_logic,
+        "has_procedural_logic": parse.has_procedural_logic,
+        "has_sql_expressible_logic": parse.has_sql_expressible_logic,
+        "procedural_evidence": parse.procedural_evidence,
+        "order_dependent_procs": procs_de_orden,
+        "dataset_files": parse.dataset_files,
+        "sql_first": sql_first,
+        "work_as_temp_table": work_is_db,
     }
 
     def decision(placement: str, *reasons: str) -> PlacementDecision:
@@ -103,13 +152,22 @@ def classify_placement(
     # 3. Librefs no confirmados → ambiguo con evidencia (va a B4b).
     if unknown:
         unknown_libs = sorted(
-            {r.libref for r in [*parse.inputs, *parse.outputs] if _origin(r.libref, db_libs) == "unknown_lib"}
+            {
+                r.libref
+                for r in [*parse.inputs, *parse.outputs]
+                if _origin(r.libref, db_libs, work_is_db) == "unknown_lib"
+            }
         )
         return decision("ambiguous", f"librefs sin confirmar como BD o ruta: {unknown_libs}")
 
     # 4. Solo BD, lógica SQL pura → pushdown.
-    if touches_db and not touches_files and not touches_work and not parse.has_data_step_logic:
-        return decision("sql_pushdown", "entradas y salidas en BD, lógica PROC SQL pura")
+    if touches_db and not touches_files and not touches_work and not fuerza_pandas:
+        detalle = (
+            "entradas y salidas en BD (WORK = tabla temporal), lógica expresable en SQL"
+            if sql_first
+            else "entradas y salidas en BD, lógica PROC SQL pura"
+        )
+        return decision("sql_pushdown", detalle)
 
     # 5. BD mezclada con archivos/WORK o con lógica fila a fila → hybrid.
     if touches_db:
@@ -118,12 +176,30 @@ def classify_placement(
             reasons.append("mezcla tablas BD con archivos")
         if touches_work:
             reasons.append("mezcla tablas BD con datasets WORK")
-        if parse.has_data_step_logic:
-            reasons.append("lógica DATA step no expresable en SQL puro")
+        if fuerza_pandas:
+            if not sql_first:
+                reasons.append("lógica DATA step no expresable en SQL puro")
+            else:
+                if parse.has_procedural_logic:
+                    reasons.append(
+                        "lógica DATA step procedural (orden/estado entre filas) "
+                        "no expresable en SQL"
+                    )
+                if procs_de_orden:
+                    reasons.append(
+                        f"PROC dependiente del orden de filas: {', '.join(procs_de_orden)} "
+                        "(una tabla SQL no tiene orden)"
+                    )
         return decision("hybrid", *reasons)
 
     # 6. Sin BD: pandas en el servidor.
-    if parse.inputs or parse.outputs or touches_files or parse.has_data_step_logic:
+    if parse.inputs or parse.outputs or touches_files or fuerza_pandas:
+        if sql_first and procs_de_orden:
+            return decision(
+                "pandas",
+                f"PROC dependiente del orden de filas: {', '.join(procs_de_orden)} "
+                "(una tabla SQL no tiene orden)",
+            )
         return decision("pandas", "solo archivos y/o datasets WORK en memoria")
 
     # 7. Nodo sin referencias a datos (macros utilitarias, %let, etc.).

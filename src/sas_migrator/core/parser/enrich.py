@@ -16,7 +16,9 @@ from __future__ import annotations
 from functools import partial
 from pathlib import Path
 
+from sas_migrator.core.config import load_project_config
 from sas_migrator.core.parser.placement import classify_placement, project_db_librefs
+from sas_migrator.core.parser.segments import classify_segments, node_placement_from_segments
 from sas_migrator.core.parser.statements import (
     NodeParse,
     parse_sas_code,
@@ -38,11 +40,16 @@ def enrich_state(state_dir: Path) -> dict:
     # El workspace es el padre de state/: de ahí sale project_config.yaml
     # (mismo patrón que core.audit).
     db_engines = resolve_db_engines(state_dir.parent)
+    sql_first = (
+        load_project_config(state_dir.parent).translation.default_target == "sql"
+    )
 
     parses: dict[str, NodeParse] = {}
+    codes: dict[str, str] = {}
     for node_file in sorted(nodes_dir.glob("*.json")):
         node = load_node(node_file, required=True)
-        parses[node["id"]] = parse_sas_code(node.get("code") or "")
+        codes[node["id"]] = node.get("code") or ""
+        parses[node["id"]] = parse_sas_code(codes[node["id"]])
 
     db_libs = project_db_librefs(parses, db_engines)
     # Sumar librefs ya detectados como BD por db_evidence (LIBNAME en metadata,
@@ -57,21 +64,49 @@ def enrich_state(state_dir: Path) -> dict:
 
     placements: dict[str, int] = {}
     enriched = 0
+    bloques_total = 0
     for entry in index.get("nodes", []):
         parse = parses.get(entry["id"])
         if parse is None:
             continue
-        decision = classify_placement(parse, db_libs, db_engines)
-        entry["placement"] = decision.placement
-        entry["placement_reasons"] = decision.reasons
+        # Veredicto por bloque: el nodo lleva el resumen, pero lo que la
+        # traducción consume es `placement_segments` — un nodo que ingesta un
+        # archivo en su primer PROC SQL no tiene por qué traducir a pandas los
+        # UPDATE que le siguen.
+        segments = classify_segments(
+            codes[entry["id"]], db_libs, db_engines, sql_first=sql_first
+        )
+        if segments:
+            entry["placement"] = node_placement_from_segments(segments)
+            entry["placement_reasons"] = sorted(
+                {r for s in segments for r in s.reasons}
+            )
+            entry["placement_segments"] = [
+                {
+                    "index": s.index,
+                    "offset": s.offset,
+                    "kind": s.kind,
+                    "placement": s.placement,
+                    "reasons": s.reasons,
+                }
+                for s in segments
+            ]
+            bloques_total += len(segments)
+        else:
+            decision = classify_placement(parse, db_libs, db_engines, sql_first=sql_first)
+            entry["placement"] = decision.placement
+            entry["placement_reasons"] = decision.reasons
         entry["macro_refs"] = parse.macro_refs
-        placements[decision.placement] = placements.get(decision.placement, 0) + 1
+        entry["dataset_files"] = parse.dataset_files
+        placements[entry["placement"]] = placements.get(entry["placement"], 0) + 1
         enriched += 1
 
     _dump_json(index_path, index)
 
     return {
         "nodes_total": enriched,
+        "segments_total": bloques_total,
+        "default_target": "sql" if sql_first else "pandas",
         "placements": dict(sorted(placements.items())),
         "db_librefs": sorted(db_libs),
     }

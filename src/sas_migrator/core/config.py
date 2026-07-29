@@ -215,6 +215,17 @@ class TranslationConfig(_StrictSection):
     # flag es la RECOMENDACIÓN de la tarjeta B5b de la entrevista; la decisión
     # que manda es la del usuario (state/cell_logging.yaml).
     cell_logging: bool = False
+    # ¿Dónde corre el procesamiento por default?
+    #   sql    → en la BD. WORK es un schema temporal del server (tabla temp),
+    #            no memoria del proceso, y solo la lógica PROCEDURAL de un DATA
+    #            step (retain/lag/first.-last./do) baja los datos al cliente.
+    #   pandas → comportamiento histórico: WORK ⇒ DataFrame y cualquier
+    #            statement dentro de un DATA step ⇒ no-SQL.
+    # Los datos viven en SQL Server: bajar una tabla entera a memoria para
+    # hacerle UPDATE fila por fila no es una traducción fiel del SAS, que
+    # ejecutaba ese UPDATE en la base. Se puede volver a `pandas` por proyecto
+    # (p. ej. flujos que en realidad trabajan sobre .sas7bdat en disco).
+    default_target: Literal["sql", "pandas"] = "sql"
 
     @field_validator("verify", mode="before")
     @classmethod

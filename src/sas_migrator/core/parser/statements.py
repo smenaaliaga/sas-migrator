@@ -63,6 +63,46 @@ _DS_OPTS = re.compile(r"\(([^()]|\([^()]*\))*\)")  # opciones (keep=...) con 1 n
 _IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)?$")
 _MACRO_REF = re.compile(r"&\w+")
 
+# ── Lógica de DATA step: procedural vs. expresable en SQL ────────────────────
+# La distinción decide el placement. Un DATA step con `nuevo = monto * 2` o un
+# `if monto > 0;` es un CASE WHEN y un WHERE: se traduce a SQL sin perder nada.
+# Uno con RETAIN, LAG, FIRST./LAST. o DO depende del ORDEN de las filas y del
+# estado que sobrevive de una iteración a la otra — eso no tiene equivalente
+# declarativo y va a pandas. Tratar ambos como "lógica fila a fila" (el
+# comportamiento anterior) empujaba a pandas todo lo que tocara un DATA step.
+
+# Statements declarativos: no son lógica, son metadatos de la tabla.
+_DECLARATIVE_HEADS = frozenset({
+    "by", "where", "format", "label", "keep", "drop", "rename", "length", "attrib",
+})
+# Heads sin equivalente declarativo: control de flujo, I/O crudo, estado.
+_PROCEDURAL_HEADS = frozenset({
+    "retain", "array", "do", "end", "output", "link", "goto", "return", "abort",
+    "stop", "delete", "input", "put", "infile", "file", "modify", "remove",
+    "replace", "call",
+})
+# Los mismos constructs cuando aparecen DENTRO de otro statement
+# (`if x then output;`, `total = lag(monto);`).
+_PROCEDURAL_TOKENS = re.compile(
+    r"\b(?:lag|dif)\d*\s*\(|\b_n_\b|\b_i_\b|\bfirst\.|\blast\.|"
+    r"\b(?:end|point|nobs|curobs)\s*=|"
+    r"\b(?:output|delete|stop|abort|link|goto|return|call)\b",
+    re.IGNORECASE,
+)
+# `acumulado + monto;` — statement SUM: un RETAIN implícito sin la palabra.
+_SUM_STATEMENT = re.compile(r"^[A-Za-z_]\w*(?:\[[^\]]*\])?\s*\+")
+
+# Datasets SAS referenciados por RUTA entre comillas — `FROM '/x/base.sas7bdat'`.
+# SAS podía hacerlo porque él mismo era el motor SQL; en la migración es una
+# INGESTA (leer el archivo y subirlo), no una tabla consultable. words() blanquea
+# los strings a "<str>", así que estas referencias no llegaban a ninguna parte:
+# el nodo declaraba cero file_reads y la dependencia quedaba invisible para
+# lineage y preflight.
+_SAS_DATA_FILE = re.compile(
+    r"""(['"])([^'"]*\.(?:sas7bdat|sas7bvew|sd2|sd7|xpt))\1""", re.IGNORECASE
+)
+_FILE_AS_TARGET = re.compile(r"create\s+table\s*['\"]", re.IGNORECASE)
+
 # Palabras que siguen a FROM/JOIN pero no son datasets.
 _SQL_STOPWORDS = {"connection", "select", "where", "on", "as", "dual"}
 
@@ -91,7 +131,12 @@ class NodeParse:
     file_writes: list[str] = field(default_factory=list)
     macro_refs: list[str] = field(default_factory=list)  # refs &lib..tabla sin resolver
     procs: list[str] = field(default_factory=list)
-    has_data_step_logic: bool = False  # DATA step con lógica fila a fila
+    has_data_step_logic: bool = False  # DATA step con lógica (procedural o no)
+    # Desglose de has_data_step_logic: solo lo procedural fuerza pandas.
+    has_procedural_logic: bool = False  # retain/lag/do/first.-last./output/I-O crudo
+    has_sql_expressible_logic: bool = False  # asignaciones, if-then, subsetting if
+    procedural_evidence: list[str] = field(default_factory=list)
+    dataset_files: list[str] = field(default_factory=list)  # rutas .sas7bdat citadas
     statements_total: int = 0
 
 
@@ -177,7 +222,14 @@ def _parse_sql_statement(stmt: str, parse: NodeParse) -> None:
         else:
             parse.outputs.append(ref)
 
-    for tok, _ in _tok_after("insert into", "delete from", "update"):
+    for tok, _ in _tok_after(
+        "insert into", "delete from", "update", "alter table", "truncate table"
+    ):
+        # ALTER TABLE es DDL sobre una tabla existente: sin registrarlo, un
+        # bloque `PROC SQL; alter table tablas.T add PROC CHAR; QUIT;` no
+        # declaraba NINGUNA referencia a datos y el clasificador lo llamaba
+        # "utility" — de ahí que la traducción terminara agregando la columna al
+        # DataFrame en vez de a la tabla.
         # "update" también matchea UPDATE de DATA step merge — solo en SQL llegamos aquí
         ref = _to_ref(tok, "sql_write")
         if ref and not ref.macro_dependent:
@@ -213,6 +265,17 @@ def parse_sas_code(code: str) -> NodeParse:
             continue
         head = toks[0].lower()
 
+        # Dataset SAS referenciado por ruta citada. Va antes de cualquier
+        # `continue`: aparece tanto dentro de PROC SQL (`FROM '...sas7bdat'`)
+        # como en un DATA step (`SET '...sas7bdat'`).
+        for m in _SAS_DATA_FILE.finditer(stmt):
+            path = m.group(2)
+            if path in parse.dataset_files:
+                continue
+            parse.dataset_files.append(path)
+            escribe = head == "data" or bool(_FILE_AS_TARGET.search(stmt))
+            (parse.file_writes if escribe else parse.file_reads).append(path)
+
         # bloques PROC SQL
         if head == "proc" and len(toks) > 1:
             proc_name = toks[1].lower()
@@ -223,7 +286,7 @@ def parse_sas_code(code: str) -> NodeParse:
             # porque words() destruye los '=' (era código muerto en el primer
             # borrador; el test de PROC SORT lo protege ahora).
             clean = _DS_OPTS.sub(" ", stmt)
-            for m in re.finditer(r"\b(data|out|outdata)\s*=\s*([\w&.]+)", clean,
+            for m in re.finditer(r"\b(data|out|outdata|base)\s*=\s*([\w&.]+)", clean,
                                  flags=re.IGNORECASE):
                 kind_key = m.group(1).lower()
                 ref = _to_ref(m.group(2), f"proc_{proc_name}_{kind_key}")
@@ -264,6 +327,27 @@ def parse_sas_code(code: str) -> NodeParse:
             parse.librefs_declared[libref] = engine or "PATH"
             continue
 
+        if head == "append":
+            # `PROC DATASETS; append base=tablas.T data=WORK.X force;` — el
+            # APPEND va en un statement propio, no en el del PROC, así que el
+            # handler genérico de `data=`/`out=` no lo veía: ni la tabla destino
+            # ni la fuente llegaban a lineage. Es el patrón canónico de
+            # acumulación en SAS (1188 apariciones en Síntesis_M_CR18) y en SQL
+            # es un INSERT INTO base SELECT * FROM data.
+            clean = _DS_OPTS.sub(" ", stmt)
+            for m in re.finditer(r"\b(base|data)\s*=\s*([\w&.]+)", clean,
+                                 flags=re.IGNORECASE):
+                kind_key = m.group(1).lower()
+                ref = _to_ref(m.group(2), f"append_{kind_key}")
+                if ref is None:
+                    continue
+                target = parse.outputs if kind_key == "base" else parse.inputs
+                if ref.macro_dependent:
+                    parse.macro_refs.append(ref.table)
+                else:
+                    target.append(ref)
+            continue
+
         if head == "data":
             in_data_step = True
             for ref in _dataset_list(stmt, "data", "data"):
@@ -281,12 +365,19 @@ def parse_sas_code(code: str) -> NodeParse:
                     parse.inputs.append(ref)
             continue
 
-        if in_data_step and head not in ("by", "where", "format", "label", "keep", "drop",
-                                         "rename", "length", "attrib", "if", "else", "output"):
-            # asignaciones, ifs con cuerpo, retain, arrays → lógica fila a fila
+        if in_data_step and head not in _DECLARATIVE_HEADS:
+            # Hay lógica. Que sea procedural o no decide si puede ir a SQL.
             parse.has_data_step_logic = True
-        if in_data_step and head in ("if", "else", "output", "retain", "array", "do"):
-            parse.has_data_step_logic = True
+            if (
+                head in _PROCEDURAL_HEADS
+                or _PROCEDURAL_TOKENS.search(stmt)
+                or _SUM_STATEMENT.match(stmt)
+            ):
+                parse.has_procedural_logic = True
+                if len(parse.procedural_evidence) < 20:
+                    parse.procedural_evidence.append(re.sub(r"\s+", " ", stmt)[:100])
+            else:
+                parse.has_sql_expressible_logic = True
 
         # infile/file = archivos en DATA step
         if head == "infile":

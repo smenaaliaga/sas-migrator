@@ -112,6 +112,17 @@ translation:
   # Este flag es solo la recomendación de la tarjeta B5b de la entrevista;
   # la decisión final la toma el usuario ahí.
   cell_logging: false
+  # ¿Dónde corre el procesamiento por default?
+  #   sql    → en la BD. WORK es un schema temporal del server (tabla temp), no
+  #            memoria del proceso, y solo la lógica PROCEDURAL de un DATA step
+  #            (retain, lag, first./last., do, arrays) baja los datos al
+  #            cliente. Los PROC que dependen del orden de las filas (sort,
+  #            rank, transpose) también se quedan en pandas: una tabla SQL no
+  #            tiene orden.
+  #   pandas → comportamiento histórico: WORK ⇒ DataFrame y cualquier statement
+  #            dentro de un DATA step ⇒ no-SQL. Útil en flujos que de verdad
+  #            trabajan sobre .sas7bdat en disco y no contra un servidor.
+  default_target: sql
 
 run:
   # Valores de las variables macro que el SAS heredaba del entorno (autoexec
