@@ -39,7 +39,25 @@ def _refusal() -> SimpleNamespace:
     return SimpleNamespace(stop_reason="refusal", parsed_output=None)
 
 
-def _install_fake_sdk(monkeypatch, script: list):
+class _FakeStream:
+    """Contextmanager con get_final_message(), como el del SDK."""
+
+    def __init__(self, item):
+        self._item = item
+
+    def __enter__(self):
+        if isinstance(self._item, Exception):
+            raise self._item
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def get_final_message(self):
+        return self._item
+
+
+def _install_fake_sdk(monkeypatch, script: list, stream_calls: list | None = None):
     mod = types.ModuleType("anthropic")
 
     class APIError(Exception):
@@ -49,6 +67,7 @@ def _install_fake_sdk(monkeypatch, script: list):
         pass
 
     calls: list[dict] = []
+    native_streams = stream_calls if stream_calls is not None else []
 
     class _Messages:
         def parse(self, **kwargs):
@@ -57,6 +76,10 @@ def _install_fake_sdk(monkeypatch, script: list):
             if isinstance(item, Exception):
                 raise item
             return item
+
+        def stream(self, **kwargs):
+            native_streams.append(kwargs)
+            return _FakeStream(script.pop(0))
 
     class Anthropic:
         def __init__(self, **_kw):
@@ -218,14 +241,17 @@ def test_runtime_cachea_el_caller_por_workspace(tmp_path, monkeypatch) -> None:
 
 
 def test_max_tokens_by_task_gana_al_default(monkeypatch) -> None:
-    _, calls = _install_fake_sdk(monkeypatch, [_ok(1), _ok(2)])
+    streams: list = []
+    _, calls = _install_fake_sdk(monkeypatch, [_ok(1), _ok(2)], streams)
     caller = AnthropicCaller(
         LlmConfig(max_tokens=16000, max_tokens_by_task={"translate": 32000})
     )
+    # 32000 supera el umbral de streaming: el tope de la tarea viaja igual, por
+    # el camino que corresponde.
     caller.call(task="translate", system_blocks=[], user_content="c", output_model=Demo)
-    assert calls[0]["max_tokens"] == 32000
+    assert streams[0]["max_tokens"] == 32000
     caller.call(task="matching", system_blocks=[], user_content="c", output_model=Demo)
-    assert calls[1]["max_tokens"] == 16000
+    assert calls[0]["max_tokens"] == 16000
 
 
 # ── structured outputs: nativo y degradación a tool use ─────────────────────
@@ -244,21 +270,7 @@ def _no_tool_response() -> SimpleNamespace:
 def _add_create(mod, script: list, calls: list, stream_calls: list | None = None):
     """Agrega messages.create y messages.stream (camino tool use) al SDK fake."""
     stream_log = stream_calls if stream_calls is not None else []
-
-    class _Stream:
-        def __init__(self, item):
-            self._item = item
-
-        def __enter__(self):
-            if isinstance(self._item, Exception):
-                raise self._item
-            return self
-
-        def __exit__(self, *exc):
-            return False
-
-        def get_final_message(self):
-            return self._item
+    _Stream = _FakeStream
 
     class _Messages(mod.Anthropic().messages.__class__):
         def create(self, **kwargs):
@@ -396,9 +408,26 @@ def test_tool_mode_con_tope_chico_sigue_sin_streaming(monkeypatch) -> None:
     assert len(create_calls) == 1 and stream_calls == []
 
 
+def test_camino_nativo_con_tope_grande_usa_streaming(monkeypatch) -> None:
+    """El fix del tool use no alcanzaba: con structured outputs nativos (el
+    caso real de producción) el veto del SDK llegaba igual. get_final_message()
+    devuelve un ParsedMessage, así que _extract no nota la diferencia."""
+    stream_calls: list = []
+    _, parse_calls = _install_fake_sdk(monkeypatch, [_ok(5)], stream_calls)
+
+    caller = AnthropicCaller(LlmConfig(max_tokens_by_task={"t": 64000}))
+    result = caller.call(task="t", system_blocks=["ctx"], user_content="c",
+                         output_model=Demo)
+
+    assert result == Demo(x=5)
+    assert len(stream_calls) == 1 and stream_calls[0]["max_tokens"] == 64000
+    assert stream_calls[0]["output_format"] is Demo, "el stream nativo parsea"
+    assert parse_calls == [], "sobre el umbral no se usa parse"
+
+
 def test_veto_de_streaming_del_sdk_no_se_disfraza_de_validacion(monkeypatch) -> None:
-    """Si el veto llega igual (p. ej. camino nativo con tope grande), es un bug
-    del migrador: se corta con error accionable, no se queman N reintentos."""
+    """Red de seguridad: si el veto llegara por un camino no cubierto, se corta
+    con error accionable en vez de quemar N reintentos idénticos."""
     mod, _ = _install_fake_sdk(monkeypatch, [
         ValueError("Streaming is required for operations that may take longer "
                    "than 10 minutes"),

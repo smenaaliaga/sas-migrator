@@ -164,10 +164,16 @@ class AnthropicCaller:
         return blocks
 
     TOOL_NAME = "responder"
-    # Sobre este tope de salida, el camino tool use pasa a streaming. 16000 es
-    # el máximo probado no-streaming en producción; el guard del SDK (~10 min
-    # estimados) veta topes bastante mayores, y streaming nunca está de más.
+    # Sobre este tope de salida, AMBOS caminos (nativo y tool use) pasan a
+    # streaming. 16000 es el máximo probado no-streaming en producción; por
+    # encima, el SDK veta el request ("Streaming is required for operations
+    # that may take longer than 10 minutes") antes de llamar a la API, y el
+    # timeout HTTP por conexión ociosa deja de ser teórico.
     STREAM_THRESHOLD_TOKENS = 16000
+
+    @classmethod
+    def _needs_stream(cls, max_tokens: int) -> bool:
+        return max_tokens > cls.STREAM_THRESHOLD_TOKENS
 
     @staticmethod
     def _is_structured_unsupported(exc: Exception) -> bool:
@@ -215,18 +221,20 @@ class AnthropicCaller:
                 }],
                 tool_choice={"type": "tool", "name": self.TOOL_NAME},
             )
-            # Con topes grandes el SDK VETA el request no-streaming ("Streaming
-            # is required for operations that may take longer than 10 minutes")
-            # antes de llamar a la API — con 64k de traducción eso era un fallo
-            # instantáneo por nodo. El stream no tiene ese guard y además
-            # aguanta generaciones de minutos sin timeout HTTP por conexión
-            # ociosa; get_final_message() devuelve la misma respuesta completa.
-            if max_tokens > self.STREAM_THRESHOLD_TOKENS:
+            if self._needs_stream(max_tokens):
                 with self._client.messages.stream(**tool_kwargs) as stream:
                     return stream.get_final_message()
             return self._client.messages.create(**tool_kwargs)
 
         try:
+            if self._needs_stream(max_tokens):
+                # get_final_message() devuelve un ParsedMessage: expone el mismo
+                # `.parsed_output` que messages.parse(), así que _extract no
+                # distingue de dónde vino la respuesta.
+                with self._client.messages.stream(
+                    **kwargs, output_format=output_model
+                ) as stream:
+                    return stream.get_final_message()
             return self._client.messages.parse(**kwargs, output_format=output_model)
         except self._anthropic.APIError as exc:
             if self.config.structured_mode != "auto" or not self._is_structured_unsupported(exc):
