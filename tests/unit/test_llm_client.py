@@ -241,8 +241,25 @@ def _no_tool_response() -> SimpleNamespace:
     )
 
 
-def _add_create(mod, script: list, calls: list):
-    """Agrega messages.create (camino tool use) al SDK fake."""
+def _add_create(mod, script: list, calls: list, stream_calls: list | None = None):
+    """Agrega messages.create y messages.stream (camino tool use) al SDK fake."""
+    stream_log = stream_calls if stream_calls is not None else []
+
+    class _Stream:
+        def __init__(self, item):
+            self._item = item
+
+        def __enter__(self):
+            if isinstance(self._item, Exception):
+                raise self._item
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def get_final_message(self):
+            return self._item
+
     class _Messages(mod.Anthropic().messages.__class__):
         def create(self, **kwargs):
             calls.append(kwargs)
@@ -250,6 +267,10 @@ def _add_create(mod, script: list, calls: list):
             if isinstance(item, Exception):
                 raise item
             return item
+
+        def stream(self, **kwargs):
+            stream_log.append(kwargs)
+            return _Stream(script.pop(0))
 
     class Anthropic:
         def __init__(self, **_kw):
@@ -342,6 +363,49 @@ def test_tool_mode_string_irreparable_sigue_agotando_reintentos(monkeypatch) -> 
         caller.call(task="t", system_blocks=[], user_content="c",
                     output_model=DemoLista)
     assert exc.value.reason == "validation_retries_exhausted"
+
+
+def test_tool_mode_con_tope_grande_usa_streaming(monkeypatch) -> None:
+    """Con max_tokens > 16000 el SDK veta el request no-streaming ('Streaming
+    is required...') ANTES de llamar a la API — 27 nodos fallaron instantáneo
+    en producción. Sobre el umbral, el camino tool use pasa a stream."""
+    mod, _ = _install_fake_sdk(monkeypatch, [])
+    create_calls: list = []
+    stream_calls: list = []
+    _add_create(mod, [_tool_response(x=9)], create_calls, stream_calls)
+
+    caller = AnthropicCaller(
+        LlmConfig(structured_mode="tool", max_tokens_by_task={"t": 64000})
+    )
+    result = caller.call(task="t", system_blocks=[], user_content="c", output_model=Demo)
+
+    assert result == Demo(x=9)
+    assert len(stream_calls) == 1 and stream_calls[0]["max_tokens"] == 64000
+    assert create_calls == [], "sobre el umbral no se usa create"
+
+
+def test_tool_mode_con_tope_chico_sigue_sin_streaming(monkeypatch) -> None:
+    mod, _ = _install_fake_sdk(monkeypatch, [])
+    create_calls: list = []
+    stream_calls: list = []
+    _add_create(mod, [_tool_response(x=3)], create_calls, stream_calls)
+
+    caller = AnthropicCaller(LlmConfig(structured_mode="tool"))  # default 16000
+    assert caller.call(task="t", system_blocks=[], user_content="c",
+                       output_model=Demo) == Demo(x=3)
+    assert len(create_calls) == 1 and stream_calls == []
+
+
+def test_veto_de_streaming_del_sdk_no_se_disfraza_de_validacion(monkeypatch) -> None:
+    """Si el veto llega igual (p. ej. camino nativo con tope grande), es un bug
+    del migrador: se corta con error accionable, no se queman N reintentos."""
+    mod, _ = _install_fake_sdk(monkeypatch, [
+        ValueError("Streaming is required for operations that may take longer "
+                   "than 10 minutes"),
+    ])
+    caller = AnthropicCaller(LlmConfig(max_validation_retries=3))
+    with pytest.raises(RuntimeError, match="exige streaming"):
+        caller.call(task="t", system_blocks=[], user_content="c", output_model=Demo)
 
 
 def test_tool_mode_missing_tool_call_exhausts_to_needs_human(monkeypatch) -> None:

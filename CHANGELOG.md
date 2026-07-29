@@ -20,6 +20,7 @@ internos viven en los commits y las decisiones en `docs/adr/`.
 - Conexión externa con SDK ya se puede responder: «2 bcchapi» en una línea vale, y responder solo el paquete tras el aviso completa la elección en vez de degradarla en silencio a replicar con requests.
 - El tic `ANIO = ANIO` del traductor se cura solo (y queda declarado en warnings) en vez de quemar reintentos y caer a needs_human — era el 65% de los rechazos de una corrida real.
 - Una lista devuelta como string JSON (`cells='["..."]'`) se repara en el acto en vez de agotar los reintentos de validación con el mismo error.
+- Un `max_tokens` grande (>16000) ya no hace fallar todos los nodos al instante: el SDK veta requests no-streaming largos y ahora ese camino usa streaming; si el veto llegara igual, se reporta como bug accionable en vez de `validation_retries_exhausted`.
 
 ## [2.0.0a1] - 2026-07-28
 
