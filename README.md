@@ -164,9 +164,10 @@ sas-migrator status -w mi_migracion --json
 sas-migrator iterate "corregir el redondeo de montos" -w mi_migracion -n CodeTask-3
 ```
 
-`run` anuncia su modo en la primera línea (`▶ modo REAL` / `▶ modo STUB`) y se
+`run` anuncia en la primera línea si es una corrida de migración o un ensayo
+(`▶ corrida de migración` / `▶ modo STUB`) y se
 detiene en la primera pregunta de entrevista: una corrida arrancada por error
-no gasta más que las fases 0–1. En modo real chequea la credencial antes de
+no gasta más que las fases 0–1. Salvo con `--stub`, chequea la credencial antes de
 arrancar (`--no-check` lo saltea): faltarla es el fallo más caro de descubrir
 tarde, porque pega en la fase 2 con la entrevista inicial ya contestada.
 

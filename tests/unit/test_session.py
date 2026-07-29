@@ -191,7 +191,9 @@ def test_run_sin_flags_es_corrida_real(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(MigrationSession, "start", _fake_start)
     result = CliRunner().invoke(app, ["run", "--workspace", str(ws)])
     assert visto["stub_mode"] is False
-    assert "modo REAL" in result.output, "el modo se anuncia antes de gastar nada"
+    assert "corrida de migración" in result.output, (
+        "el modo se anuncia antes de gastar nada"
+    )
 
 
 def test_cli_status_without_migration(tmp_path: Path) -> None:

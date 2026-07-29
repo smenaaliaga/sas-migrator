@@ -349,7 +349,7 @@ def run(
     typer.echo(
         "▶ modo STUB: sin LLM ni entrevistas (determinista)"
         if stub
-        else "▶ modo REAL: entrevistas y LLM — se detiene en la primera pregunta"
+        else "▶ corrida de migración: entrevistas y LLM — se detiene en la primera pregunta"
     )
     if check and not stub:
         # Falta de credencial es el fallo más caro de descubrir tarde: pega en la
@@ -363,7 +363,7 @@ def run(
                 for hint_line in failed.hint.splitlines():
                     _err(f"   {hint_line}")
             raise _die(
-                "No se puede correr en modo real sin credencial.",
+                "No se puede correr la migración sin credencial.",
                 hint="`sas-migrator doctor` lista todo lo que falta; --no-check la saltea.",
             )
 

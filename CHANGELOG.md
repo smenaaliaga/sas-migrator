@@ -10,6 +10,9 @@ internos viven en los commits y las decisiones en `docs/adr/`.
 
 ## [Unreleased]
 
+### Changed
+- `run` anuncia «corrida de migración» en vez de «modo REAL»: el modo por defecto no necesita jerga.
+
 ## [2.0.0a1] - 2026-07-28
 
 ### Added
