@@ -11,8 +11,9 @@ el fallo como needs_human):
 
 - ``ast.parse`` de cada celda (sintaxis);
 - imports resolubles vía ``importlib.util.find_spec`` (sin importar);
-- patrones prohibidos: ``to_parquet``, ``duckdb``, y SQL dinámico por f-string
-  (JoinedStr cuyo texto constante contiene SELECT/INSERT/UPDATE/DELETE);
+- patrones prohibidos: ``to_parquet``, ``duckdb``, SQL con un VALOR interpolado
+  por f-string (el NOMBRE de tabla sí se permite: el SAS lo arma con macro
+  vars y no es parametrizable), y ``{var}`` en un string SQL sin la ``f``;
 - strategy del NodeTranslation debe coincidir con la del target del plan;
 - relleno que aparenta funcionar: placeholders, ``except:`` desnudo,
   autoasignación, DataFrame vacío bajo guardia, ``WHERE 1=1`` sin predicados;
@@ -109,15 +110,86 @@ def _import_root_names(tree: ast.AST) -> set[str]:
     return names
 
 
+# Una interpolación dentro de SQL puede estar en dos posiciones muy distintas, y
+# solo una es inyección:
+#
+#   FROM TABLAS.BD_R{ANIO}{TRIM}   ← NOMBRE de objeto. Es lo que el SAS obliga
+#                                     cuando la macro var arma el nombre de
+#                                     tabla (`TABLAS.BD_R&ANIO&TRIM`), y ningún
+#                                     driver parametriza identificadores.
+#   WHERE C_SI_SCN = '{sector}'    ← VALOR. Esto es lo que el chequeo existe
+#                                     para prohibir: va como bind param.
+#
+# Prohibir las dos volvía la regla insatisfacible para los nodos con macro var
+# en el nombre de tabla — y el modelo, acorralado, terminó escribiendo un
+# string SIN la `f` (ver `_sql_with_dead_placeholder`), que pasa el chequeo y
+# manda las llaves literales a la base.
+_IDENT_CHAR = re.compile(r"[A-Za-z0-9_.]")
+_PLACEHOLDER = "\x00"
+
+
+def _interpolates_a_value(flat: str) -> bool:
+    """¿Alguna interpolación de ``flat`` cae en posición de valor?
+
+    Decide el carácter inmediatamente anterior, SIN saltar espacios: un
+    identificador solo continúa a otro carácter de identificador, a un punto o
+    a otra interpolación. Comilla, `=`, `(`, `,` o espacio son posición de
+    valor. Sesga a rechazar — `FROM {schema}.{tabla}` queda prohibido, y está
+    bien: el esquema se escribe literal.
+    """
+    for i, ch in enumerate(flat):
+        if ch != _PLACEHOLDER:
+            continue
+        if i == 0:
+            return True
+        prev = flat[i - 1]
+        if prev != _PLACEHOLDER and not _IDENT_CHAR.match(prev):
+            return True
+        # Dentro de un literal SQL ('...{x}...') es valor aunque el carácter
+        # previo sea alfanumérico.
+        if flat.count("'", 0, i) % 2 == 1:
+            return True
+    return False
+
+
 def _fstring_sql(tree: ast.AST) -> str | None:
     for node in ast.walk(tree):
-        if isinstance(node, ast.JoinedStr):
-            text = "".join(
-                v.value for v in node.values
-                if isinstance(v, ast.Constant) and isinstance(v.value, str)
-            )
-            if _SQL_STATEMENT.search(text):
-                return " ".join(text.split())[:120]
+        if not isinstance(node, ast.JoinedStr):
+            continue
+        # Aplanado con centinela: conserva la POSICIÓN de cada interpolación,
+        # que es justo lo que la versión anterior tiraba al concatenar solo las
+        # partes constantes.
+        flat = "".join(
+            v.value
+            if isinstance(v, ast.Constant) and isinstance(v.value, str)
+            else _PLACEHOLDER
+            for v in node.values
+        )
+        if not _SQL_STATEMENT.search(flat):
+            continue
+        if _interpolates_a_value(flat):
+            return " ".join(flat.replace(_PLACEHOLDER, "{…}").split())[:120]
+    return None
+
+
+# `{var}` en un string SQL que NO es f-string: nadie lo sustituye y las llaves
+# viajan literales a la base. Es la forma que toma el chequeo anterior cuando el
+# modelo lo esquiva en vez de satisfacerlo — pasó en producción con
+# S8_wtw - Copy, y el SQL roto llegó al notebook entregado.
+_DEAD_PLACEHOLDER = re.compile(r"\{[A-Za-z_]\w*\}")
+
+
+def _sql_with_dead_placeholder(tree: ast.AST) -> str | None:
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Constant) or not isinstance(node.value, str):
+            continue
+        # Las partes constantes de un f-string llegan acá sin sus llaves (esas
+        # son FormattedValue), así que un f-string legítimo nunca cae en esto.
+        if not _SQL_STATEMENT.search(node.value):
+            continue
+        match = _DEAD_PLACEHOLDER.search(node.value)
+        if match:
+            return match.group(0)
     return None
 
 
@@ -515,7 +587,22 @@ def check_node_translation_all(
     for tree in trees:
         sql = _fstring_sql(tree)
         if sql is not None:
-            add("forbidden_pattern", f"SQL dinámico por f-string: {sql}")
+            add(
+                "forbidden_pattern",
+                f"SQL con un VALOR interpolado por f-string: {sql} — el valor va "
+                "como bind param (`text(\"... WHERE x = :x\")` + `params={'x': x}`). "
+                "Interpolar el NOMBRE de una tabla sí está permitido "
+                "(`f\"... FROM TABLAS.BD_R{ANIO}{TRIM}\"`): el SAS lo arma con la "
+                "macro var y ningún driver parametriza identificadores",
+            )
+        sql = _sql_with_dead_placeholder(tree)
+        if sql is not None:
+            add(
+                "forbidden_pattern",
+                f"'{sql}' en un string SQL que no es f-string: las llaves viajan "
+                "literales a la base. Si el nombre es dinámico, poné la `f`; si "
+                "es un valor, va como bind param",
+            )
         path = _absolute_path_literal(tree)
         if path is not None:
             add(

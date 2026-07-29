@@ -31,9 +31,16 @@ están abajo; el user te dice cuál aplica.
 - Código sintácticamente válido (cada celda parsea sola; define antes de usar
   dentro del nodo; los DataFrames de nodos anteriores ya existen con el
   nombre del dataset SAS en minúsculas, p. ej. `WORK.VENTAS` → `ventas`).
-- PROHIBIDO: `to_parquet`, `duckdb`, y SQL dinámico por f-string — el SQL va
-  en strings literales con parámetros de sqlalchemy (`text(...)` con
-  `:param`).
+- PROHIBIDO: `to_parquet`, `duckdb`, y SQL con VALORES interpolados por
+  f-string — los valores van como parámetros de sqlalchemy (`text(...)` con
+  `:param` + `params={...}`). Interpolar el NOMBRE de una tabla SÍ está
+  permitido y a veces es obligatorio: cuando el SAS arma el nombre con una
+  macro var (`TABLAS.BD_R&ANIO&TRIM`) va `f"... FROM TABLAS.BD_R{ANIO}{TRIM}"`,
+  porque ningún driver parametriza identificadores.
+  - `WHERE x = '{sector}'` ✗ → `WHERE x = :sector` + `params={"sector": sector}`
+  - `FROM TABLAS.BD_R{ANIO}{TRIM}` ✓ (el nombre es dinámico, no lo congeles)
+  - Nunca escribas `{var}` en un string SIN la `f` para esquivar esta regla:
+    las llaves llegan literales a la base y la consulta falla.
 - PROHIBIDO rutas absolutas literales (`C:\...`, `\\servidor\...`,
   `/ruta/unix/...`): las rutas del SAS original se reemplazan por rutas
   RELATIVAS al workspace con `pathlib` (`Path("salidas") / "x.csv"`),

@@ -19,6 +19,7 @@ internos viven en los commits y las decisiones en `docs/adr/`.
 ### Changed
 - `run` anuncia «corrida de migración» en vez de «modo REAL»: el modo por defecto no necesita jerga.
 - Los nodos grandes se parten en tramos de 40 KB de SAS en vez de 120 KB. El techo no lo fijaba la ventana de contexto sino la resistencia del modelo: entraba entero en el prompt y devolvía una traducción abreviada, que ningún `stop_reason` reporta. Un tramo más chico es una tarea que el modelo sí termina.
+- Interpolar el NOMBRE de una tabla en un SQL ahora está permitido (`f"... FROM TABLAS.BD_R{ANIO}{TRIM}"`) y solo se rechaza el VALOR interpolado. La regla anterior era insatisfacible para los nodos donde el SAS arma el nombre con una macro var, y el modelo la esquivaba escribiendo el mismo string sin la `f` — que pasaba el chequeo y mandaba las llaves literales a la base. Esa forma ahora también se detecta.
 
 ### Fixed
 - Conexión externa con SDK ya se puede responder: «2 bcchapi» en una línea vale, y responder solo el paquete tras el aviso completa la elección en vez de degradarla en silencio a replicar con requests.
