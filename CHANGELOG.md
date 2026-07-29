@@ -11,7 +11,7 @@ internos viven en los commits y las decisiones en `docs/adr/`.
 ## [Unreleased]
 
 ### Added
-- La traducción muestra progreso por nodo (`[n/total] CodeTask-x: ok`): una corrida de 75 nodos ya no es minutos de silencio.
+- La traducción muestra progreso por nodo: anuncia el arranque (`→ [3/27] CodeTask-x …`) y el cierre con su duración y el acumulado (`✔ [3/27] CodeTask-x: ok · 94s · 3/27 listos`). Un nodo grande son varios minutos: avisar solo al terminar dejaba la consola muda todo ese rato.
 
 ### Changed
 - `run` anuncia «corrida de migración» en vez de «modo REAL»: el modo por defecto no necesita jerga.

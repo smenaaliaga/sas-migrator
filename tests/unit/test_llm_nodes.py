@@ -310,8 +310,9 @@ def test_autoasignacion_se_cura_sin_gastar_reintento(ws: Path) -> None:
 
 
 def test_progreso_por_nodo_se_imprime_en_stderr(ws: Path, capsys) -> None:
-    """Una corrida de N nodos sin señal de vida es una caja negra: cada nodo
-    completado (bien o mal) imprime [n/total] a stderr."""
+    """Una corrida de N nodos sin señal de vida es una caja negra. Cada nodo
+    anuncia ARRANQUE y cierre: un nodo grande son varios minutos, y avisar solo
+    al terminar deja la consola muda todo ese rato."""
     state = ws / "state"
     shutil.rmtree(state / "translations", ignore_errors=True)
     runtime.set_caller(FakeCaller({"translation": _translation_fake, "verify": _verify_fake}))
@@ -320,8 +321,31 @@ def test_progreso_por_nodo_se_imprime_en_stderr(ws: Path, capsys) -> None:
     err = capsys.readouterr().err
     total = counts["targets"]
     for n in range(1, total + 1):
-        assert f"[{n}/{total}]" in err
+        assert f"→ [{n}/{total}]" in err, f"el nodo {n} no anunció su arranque"
+        assert f"✔ [{n}/{total}]" in err, f"el nodo {n} no anunció su cierre"
     assert err.count(": ok") == total
+    assert f"{total}/{total} listos" in err, "el cierre lleva el acumulado"
+
+
+def test_progreso_en_paralelo_aparea_arranque_y_cierre(ws: Path, capsys) -> None:
+    """Con workers en paralelo las líneas salen intercaladas: el número es la
+    posición fija del nodo, así que las dos líneas de un nodo siguen apareando."""
+    import re
+
+    state = ws / "state"
+    shutil.rmtree(state / "translations", ignore_errors=True)
+    (ws / "project_config.yaml").write_text("llm:\n  max_workers: 4\n", encoding="utf-8")
+    caller = FakeCaller({"translation": _translation_fake, "verify": _verify_fake})
+    runtime.set_caller(caller)
+    counts = phases.run_translation(state, ws / "output", ws)
+
+    err = capsys.readouterr().err
+    total = counts["targets"]
+    arranques = dict(re.findall(r"→ \[(\d+)/\d+\] (\S+)", err))
+    cierres = dict(re.findall(r"✔ \[(\d+)/\d+\] (\S+):", err))
+    assert len(arranques) == total and arranques == cierres, (
+        "cada nodo tiene arranque y cierre con el MISMO número"
+    )
 
 
 def test_stale_bad_translation_on_disk_is_retranslated(ws: Path) -> None:

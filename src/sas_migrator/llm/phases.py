@@ -815,38 +815,55 @@ def _translate_pending(
     # Progreso por nodo a stderr: una corrida de 75 nodos sin señal de vida es
     # una caja negra de minutos — el usuario no distingue "trabajando" de
     # "colgado". stderr para no ensuciar el JSON de resumen que va a stdout.
+    #
+    # Se anuncia el ARRANQUE además del cierre: un nodo grande son varios
+    # minutos (traducción + reintentos + verificador), y avisar solo al
+    # terminar deja la consola muda todo ese rato. El número es la posición
+    # fija del nodo, así que las dos líneas del mismo nodo se aparean aunque
+    # en paralelo salgan intercaladas con las de otros.
     import sys
+    import time
 
     total = len(pending)
+    posicion = {nid: i for i, nid in enumerate(pending, start=1)}
     done = 0
+    log_lock = threading.Lock()
 
-    def _report(nid: str, ok: bool) -> None:
+    def _run_node(nid: str) -> NodeTranslation | None:
         nonlocal done
-        done += 1
-        marca = "ok" if ok else "FALLÓ (needs_human)"
-        print(f"  [{done}/{total}] {nid}: {marca}", file=sys.stderr, flush=True)
+        with log_lock:
+            print(f"  → [{posicion[nid]}/{total}] {nid} …", file=sys.stderr, flush=True)
+        inicio = time.monotonic()
+        nt = _do_node(nid)
+        segundos = time.monotonic() - inicio
+        with log_lock:
+            done += 1
+            marca = "ok" if nt is not None else "FALLÓ (needs_human)"
+            print(
+                f"  ✔ [{posicion[nid]}/{total}] {nid}: {marca}"
+                f" · {segundos:.0f}s · {done}/{total} listos",
+                file=sys.stderr, flush=True,
+            )
+        return nt
 
     if setup.max_workers <= 1 or len(pending) <= 1:
         for nid in pending:
-            nt = _do_node(nid)
-            _report(nid, nt is not None)
+            nt = _run_node(nid)
             if nt is not None:
                 translations[nid] = nt
                 translated_now += 1
     else:
         # El primer nodo va solo: escribe el prompt cache que el resto lee.
         first, *rest = pending
-        nt = _do_node(first)
-        _report(first, nt is not None)
+        nt = _run_node(first)
         if nt is not None:
             translations[first] = nt
             translated_now += 1
         executor = ThreadPoolExecutor(max_workers=setup.max_workers)
         try:
-            futures = {executor.submit(_do_node, nid): nid for nid in rest}
+            futures = {executor.submit(_run_node, nid): nid for nid in rest}
             for future in as_completed(futures):
                 nt = future.result()
-                _report(futures[future], nt is not None)
                 if nt is not None:
                     translations[futures[future]] = nt
                     translated_now += 1
