@@ -1,6 +1,10 @@
-# Configuración de proyecto — copiar como project_config.yaml en la raíz del
-# workspace de migración y completar. Todo lo específico del cliente/entorno
-# vive aquí; el código del migrador no trae ningún default de infraestructura.
+# Configuración de proyecto — `sas-migrator init` lo escribe en la raíz del
+# workspace; queda completarlo. Todo lo específico del cliente/entorno vive
+# aquí; el código del migrador no trae ningún default de infraestructura.
+#
+# Toda sección rechaza claves desconocidas: un typo falla al cargar, con el
+# nombre exacto, en vez de ignorarse en silencio. Los valores de abajo son los
+# defaults; una clave comentada rige su default.
 
 db:
   # Servidor SQL Server usado cuando una conexión de db_connections.yaml no
@@ -11,6 +15,10 @@ db:
   default_driver: "ODBC Driver 17 for SQL Server"
   # Confiar en el certificado del servidor sin validarlo (opt-in consciente).
   trust_server_certificate: false
+  # URL SQLAlchemy completa que REEMPLAZA la construcción mssql+pyodbc de
+  # arriba (BD de prueba sqlite:///..., LocalDB, otro dialecto). Vacía = flujo
+  # normal SQL Server con AD integrated.
+  connection_url: ""
 
 audit:
   # Los endpoints que el flujo consulta y las tablas que puebla NO se declaran
@@ -53,7 +61,27 @@ llm:
   # effort: high
   effort_by_task: {}
   #  translation: xhigh
+  # Reintentos por una respuesta mal formada (no valida el esquema).
   max_validation_retries: 3
+  # Reintentos de TRANSPORTE (429, 5xx, 529 Overloaded) con backoff que hace el
+  # SDK. Una fase que traduce decenas de nodos durante horas atraviesa ventanas
+  # de sobrecarga del proveedor: el default del SDK (2) corta la corrida.
+  max_transport_retries: 8
+  # Llamadas en paralelo dentro de una fase (análisis por flujo, traducción por
+  # nodo). 1 = secuencial. Lo que queda en disco no depende de este número.
+  max_workers: 1
+  # Cómo se obtiene el objeto estructurado: auto | native | tool. Los
+  # workspaces de Foundry sin structured_outputs habilitado necesitan `tool`;
+  # `auto` lo detecta solo.
+  structured_mode: auto
+  # Tope de gasto de la corrida en USD (0 = sin tope). Se evalúa antes de cada
+  # llamada contra el acumulado del trace; al alcanzarlo la corrida corta y
+  # `resume` la retoma tras subir el tope.
+  max_run_cost_usd: 0.0
+  # Override de la tabla de precios por prefijo de modelo (USD por MTok). Solo
+  # hace falta si tu proveedor factura distinto o el modelo es nuevo.
+  prices: {}
+  #  claude-opus: {input: 5, output: 25, cache_read: 0.5, cache_write: 6.25}
   # Solo con provider=foundry: el <resource> de
   # https://<resource>.services.ai.azure.com — infraestructura, no secreto.
   foundry_resource: ""

@@ -1,0 +1,13 @@
+# Workspace de migración — qué NO se versiona.
+#
+# Sí conviene versionar: project_config.yaml (decisiones del proyecto, sin
+# secretos) y input/ (el .egp y las referencias son la entrada de la migración).
+
+# Derivado: lo reconstruye una corrida (`run`, `resume`) y lo borra `reset`.
+state/
+output/
+
+# Credenciales. El ejemplo (.env.example) sí se versiona; el .env nunca.
+.env
+.env.*
+!.env.example

@@ -675,7 +675,7 @@ def test_config_estricta_nombra_la_clave_desconocida(tmp_path) -> None:
     mensaje = str(exc.value)
     assert "llm.max_worker" in mensaje
     assert "secciones_muertas" in mensaje
-    assert "project_config.example.yaml" in mensaje
+    assert "sas-migrator init" in mensaje  # dónde está la referencia de claves
 
 
 def test_llm_config_defaults_and_yaml(tmp_path) -> None:

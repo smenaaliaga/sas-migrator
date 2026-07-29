@@ -1,4 +1,4 @@
-"""CLI de referencia — `sas-migrator doctor|run|resume|rewind|reset|status|iterate|serve`.
+"""CLI de referencia — `sas-migrator init|doctor|run|resume|rewind|reset|status|iterate|serve`.
 
 Cliente de referencia: usa `MigrationSession` in-process (la misma capa que
 envuelven las tools MCP) y renderiza los interrupts de entrevista en terminal
@@ -42,7 +42,7 @@ EXIT_BLOCKED = 1  # el pipeline corrió y algo bloquea (gate, chequeo, iteració
 EXIT_USAGE = 2  # el entorno o los argumentos no permiten ni empezar
 EXIT_INTERRUPTED = 130  # Ctrl-C
 
-# Grupos del `--help`. Ocho comandos sin agrupar se leen como una lista de
+# Grupos del `--help`. Nueve comandos sin agrupar se leen como una lista de
 # supermercado; agrupados se ve de un saque cuál es el camino normal.
 PANEL_RUN = "Corrida"
 PANEL_RECOVER = "Recuperación"
@@ -52,8 +52,8 @@ PANEL_INTEGRATION = "Integración"
 app = typer.Typer(
     help="Migrador de proyectos SAS Enterprise Guide (.egp) a Python.",
     epilog=(
-        "Camino normal: [bold]doctor[/bold] → [bold]run[/bold] → contestar las "
-        "entrevistas → [bold]status[/bold].\n\n"
+        "Camino normal: [bold]init[/bold] → [bold]doctor[/bold] → [bold]run[/bold] "
+        "→ contestar las entrevistas → [bold]status[/bold].\n\n"
         "El workspace por defecto es el directorio actual, así que lo habitual "
         "es pararse en la migración y omitir --workspace.\n\n"
         "Salida: 0 ok · 1 bloqueado · 2 error de uso o entorno · 130 interrumpido."
@@ -277,6 +277,56 @@ def _load_script(answers_file: Path | None) -> dict | None:
 
 
 # ── Corrida ──────────────────────────────────────────────────────────────────
+
+
+@app.command(rich_help_panel=PANEL_RUN)
+def init(
+    workspace: Path = _ws_option(),
+    egp: Path = typer.Option(
+        None,
+        exists=False,  # la validación la hace scaffold, con un mensaje que dice por qué
+        show_default="ninguno: copiá el .egp a mano",
+        help="Ruta al .egp a migrar; se COPIA a input/egp/.",
+    ),
+) -> None:
+    """Crea el workspace de una migración: carpetas, config y .gitignore.
+
+    Escribe project_config.yaml (comentado, para completar), .env.example y la
+    estructura input/{egp,data,docs} + state/ + output/. No pisa nada: lo que ya
+    existe se reporta y se deja igual, así que se puede correr de nuevo sobre un
+    workspace a medio armar.
+
+        sas-migrator init -w mi_migracion --egp C:/ruta/proyecto.egp
+    """
+    from sas_migrator.core.utils.scaffold import CREATED, init_workspace
+
+    ws = _resolve_ws(workspace)
+    try:
+        items = init_workspace(ws, egp)
+    except ValueError as exc:
+        raise _die(str(exc), hint="sas-migrator init -w <workspace> --egp <ruta al .egp>") from exc
+    except OSError as exc:
+        raise _die(f"No se pudo crear el workspace: {exc}") from exc
+
+    typer.echo(f"Workspace: {ws}")
+    typer.echo("")
+    for item in items:
+        if item.status == CREATED:
+            typer.secho(f"✅ {item.path:24} {item.status}", fg=typer.colors.GREEN)
+        else:
+            typer.echo(f"·  {item.path:24} {item.status}")
+    typer.echo("")
+    # Lo que falta no lo adivina este comando: `doctor` ya sabe exactamente qué
+    # necesita una corrida y por qué. Duplicar la lista acá sería dos verdades.
+    faltan = ["completar project_config.yaml (db.default_server, run.macro_params)"]
+    if egp is None:
+        faltan.insert(0, "copiar el .egp a input/egp/")
+    faltan.append("referencias SAS en input/data/ (ground truth de la validación)")
+    typer.echo("Falta, en orden:")
+    for paso in faltan:
+        typer.echo(f"  · {paso}")
+    ws_flag = "" if workspace is None else f" -w {workspace}"
+    _next_step(f"sas-migrator doctor{ws_flag}", "dice qué falta y si ya se puede correr.")
 
 
 @app.command(rich_help_panel=PANEL_RUN)

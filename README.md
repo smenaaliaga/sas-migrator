@@ -54,7 +54,9 @@ El workspace por defecto es el directorio actual, así que con el comando en el
 PATH lo habitual es pararse en la migración y omitir `--workspace`:
 
 ```powershell
+sas-migrator init -w D:\Migraciones\mi_proyecto --egp C:\ruta\proyecto.egp
 cd D:\Migraciones\mi_proyecto
+sas-migrator doctor
 sas-migrator run
 sas-migrator status
 ```
@@ -62,8 +64,9 @@ sas-migrator status
 ### Credenciales
 
 Qué backend se usa lo decide `project_config.yaml` → `llm.provider`; la
-credencial viene del entorno, nunca de la config. Copiar `.env.example` a
-`.env` y completar **solo** el bloque del proveedor que corresponda:
+credencial viene del entorno, nunca de la config. Copiar a `.env` el
+`.env.example` que `init` deja en el workspace y completar **solo** el bloque
+del proveedor que corresponda:
 
 | `llm.provider` | Variables |
 |---|---|
@@ -101,9 +104,13 @@ fase 7 para `verify_tables`) y referencias en `input/data/`.
 
 ## Estructura del workspace
 
+La escribe `sas-migrator init` (ver más abajo); armarla a mano también sirve:
+
 ```
 mi_migracion/
-├── project_config.yaml      # copiar de project_config.example.yaml
+├── project_config.yaml      # config del proyecto, comentada para completar
+├── .env.example             # → copiar a .env con la credencial
+├── .gitignore               # state/ y output/ son derivados: no se versionan
 ├── input/
 │   ├── egp/proyecto.egp     # el .egp a migrar
 │   ├── data/*.csv           # referencias SAS (ground truth de la cascada)
@@ -111,6 +118,10 @@ mi_migracion/
 ├── state/                   # artefactos por fase (los escribe el runtime)
 └── output/                  # notebooks generados
 ```
+
+El template de `project_config.yaml` vive en el paquete
+(`src/sas_migrator/templates/`), así que viaja en el wheel: `init` funciona con
+el comando instalado global, sin el repo a mano.
 
 ## Uso
 
@@ -120,12 +131,13 @@ corre, solo cómo se contestan las entrevistas.
 
 ### CLI
 
-Ocho comandos, y no hay más. `--workspace` (`-w`) es una opción, no un
+Nueve comandos, y no hay más. `--workspace` (`-w`) es una opción, no un
 posicional; sin ella se usa el directorio actual. El camino normal es
-**`doctor` → `run` → contestar → `status`**.
+**`init` → `doctor` → `run` → contestar → `status`**.
 
 | Comando | Para qué | Grupo |
 |---|---|---|
+| `init` | Crear el workspace: carpetas, `project_config.yaml`, `.env.example` | Corrida |
 | `doctor` | Verificar que el workspace pueda correr (no toca la red) | Corrida |
 | `run` | Corrida completa desde la fase 0 | Corrida |
 | `iterate` | Iteración post-migración (fase 9) | Corrida |
@@ -141,6 +153,9 @@ interrumpido con Ctrl-C. Los errores van a **stderr**, así que
 `status --json | jq` no se ensucia.
 
 ```bash
+# Crear el workspace (el .egp es opcional: sin él, queda copiarlo a mano)
+sas-migrator init -w mi_migracion --egp C:/ruta/proyecto.egp
+
 # Antes de gastar tiempo y tokens: estructura, config, credencial, extras
 sas-migrator doctor -w mi_migracion
 
@@ -173,6 +188,23 @@ tarde, porque pega en la fase 2 con la entrevista inicial ya contestada.
 
 Ctrl-C a mitad de una entrevista es una pausa, no un accidente: lo contestado
 queda en el checkpoint y `resume` retoma en la misma pregunta.
+
+### `init`
+
+```bash
+sas-migrator init                                  # el directorio actual
+sas-migrator init -w mi_migracion                  # crea la carpeta si no existe
+sas-migrator init -w mi_migracion --egp C:/ruta/proyecto.egp
+```
+
+Crea `input/{egp,data,docs}`, `state/`, `output/`, y escribe
+`project_config.yaml` (comentado, con todas las claves y sus defaults),
+`.env.example` y `.gitignore`. Con `--egp` **copia** el proyecto a `input/egp/`
+—el original no se mueve—; sin él, la carpeta queda vacía y `doctor` lo dice.
+
+No pisa nada: lo que ya existe se reporta `ya existía` y se deja igual, así que
+correrlo de nuevo sobre un workspace a medio armar es seguro y no hay `--force`.
+Tampoco escribe `.env`: el archivo con la credencial lo crea el usuario.
 
 ### `doctor`
 

@@ -70,7 +70,8 @@ def check_workspace(workspace: Path) -> list[Check]:
                 "workspace",
                 FAIL,
                 f"{ws} no existe o no es un directorio",
-                "Creá el workspace o pasá --workspace con la ruta correcta.",
+                f"`sas-migrator init -w {ws}` lo crea, o pasá --workspace con la "
+                "ruta correcta.",
             )
         ]
 
@@ -82,7 +83,8 @@ def check_workspace(workspace: Path) -> list[Check]:
                 "input/egp/",
                 FAIL,
                 "no existe",
-                f"mkdir {egp_dir} y copiá ahí el .egp a migrar.",
+                f"`sas-migrator init -w {ws}` crea la estructura; después copiá "
+                f"el .egp en {egp_dir}.",
             )
         )
         return checks
@@ -106,8 +108,11 @@ def check_workspace(workspace: Path) -> list[Check]:
         checks.append(Check("input/egp/", OK, egps[0].name))
 
     docs = ws / "input" / "docs"
-    if docs.is_dir() and any(docs.iterdir()):
-        checks.append(Check("input/docs/", OK, f"{sum(1 for _ in docs.iterdir())} archivo(s)"))
+    # El `.gitkeep` que deja `init` no es documentación de negocio: contarlo
+    # anunciaba un archivo que nadie puso.
+    doc_files = [p for p in docs.iterdir() if p.name != ".gitkeep"] if docs.is_dir() else []
+    if doc_files:
+        checks.append(Check("input/docs/", OK, f"{len(doc_files)} archivo(s)"))
     return checks
 
 
@@ -139,8 +144,8 @@ def check_config(workspace: Path) -> list[Check]:
                 CONFIG_FILENAME,
                 WARN,
                 "no existe — aplican defaults neutros",
-                "Copiá project_config.example.yaml al workspace. Sin BD "
-                "configurada la fase 7 no puede verificar tablas.",
+                "`sas-migrator init` lo escribe comentado. Sin BD configurada "
+                "la fase 7 no puede verificar tablas.",
             )
         ]
     try:
@@ -151,8 +156,8 @@ def check_config(workspace: Path) -> list[Check]:
                 CONFIG_FILENAME,
                 FAIL,
                 f"no se pudo leer: {exc}",
-                "Corregí el YAML; el modelo de referencia es "
-                "project_config.example.yaml.",
+                "Corregí el YAML; el modelo de referencia es el que escribe "
+                "`sas-migrator init` en un workspace nuevo.",
             )
         ]
 

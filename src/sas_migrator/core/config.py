@@ -290,6 +290,6 @@ def load_project_config(workspace: Path | str | None = None) -> ProjectConfig:
             raise ValueError(
                 f"{path.name} tiene clave(s) desconocida(s): {', '.join(sorted(unknown))} "
                 "— ¿typo o campo que ya no existe? La referencia de claves "
-                "válidas es project_config.example.yaml."
+                "válidas es el archivo comentado que escribe `sas-migrator init`."
             ) from exc
         raise

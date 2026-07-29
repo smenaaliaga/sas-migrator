@@ -29,7 +29,7 @@ Tres reglas fundacionales gobiernan todo el diseño:
 
 ## 2. Qué toma como entrada
 
-El workspace de una migración:
+El workspace de una migración, que `sas-migrator init` crea vacío:
 
 ```
 mi_migracion/
@@ -98,6 +98,9 @@ vivir el cómputo**, replicando la localidad que SAS tenía:
 Cada decisión lleva evidencia y razones (`nodes_index.json`).
 
 ### 2.4 `project_config.yaml` — tu entorno
+
+`sas-migrator init` lo escribe comentado, con todas las claves y sus defaults;
+queda completarlo.
 
 - `db`: servidor SQL Server (o `connection_url` para otros
   dialectos/pruebas), driver, puerto. **Único** lugar de configuración de BD.
@@ -318,6 +321,9 @@ sin re-validación.
 SASMIG_REAL_EGP=C:/ruta/proyecto.egp pytest tests/integration -q
 #   → nodos, flujos, residuo, nodos macro-dependientes → backlog JSON
 
+# Crear el workspace (carpetas + config comentada + .env.example + .gitignore):
+sas-migrator init -w D:\Migraciones\mi_proyecto --egp C:/ruta/proyecto.egp
+
 # Preflight: estructura, config, credencial y extras (sin red, sin costo):
 sas-migrator doctor -w D:\Migraciones\mi_proyecto
 
@@ -360,11 +366,13 @@ src/sas_migrator/
 │   ├── interview/         #   tarjetas B1-B6, apply, validate
 │   ├── audit.py           #   auditoría semántica (gate 6)
 │   ├── planning.py        #   plan de traducción
-│   └── utils/             #   gates (schema_validation), needs_human
+│   └── utils/             #   gates (schema_validation), needs_human,
+│                          #   scaffold (init) / workspace_reset (reset)
+├── templates/             # lo que `init` escribe en el workspace
 ├── graph/                 # LangGraph: fases, gates, interrupts, iteración
 ├── llm/                   # cliente Anthropic, contratos, prompts/, trace
 ├── service/ + mcp_server/ # sesión compartida CLI/MCP, 7 tools
-└── cli/                   # run/resume/status/serve/iterate
+└── cli/                   # init/doctor/run/resume/status/serve/iterate
 
 tests/  unit (313) · golden (determinismo/UX) · evals (12 casos) ·
         integration (harness .egp real) · adversarial

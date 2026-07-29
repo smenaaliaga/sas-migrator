@@ -45,7 +45,8 @@ vigilan y un ADR que la explica:
 
 ## 3. El workspace
 
-Cada migración vive en un directorio propio:
+Cada migración vive en un directorio propio, que `sas-migrator init` crea
+(`core/utils/scaffold.py`, con los templates en `sas_migrator/templates/`):
 
 ```
 mi_migracion/
@@ -343,8 +344,10 @@ sequenceDiagram
 
 ## 11. Referencia de configuración (`project_config.yaml`)
 
-Ver `project_config.example.yaml` (la referencia canónica de claves; el config
-es estricto). Resumen:
+La referencia canónica de claves es el template
+`src/sas_migrator/templates/project_config.yaml` —el archivo comentado que
+`sas-migrator init` escribe en el workspace— y un test exige que toda clave de
+`ProjectConfig` aparezca ahí. El config es estricto. Resumen:
 
 ```yaml
 db:            # default_server/port/driver, trust_server_certificate, connection_url
