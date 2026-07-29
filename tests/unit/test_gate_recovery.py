@@ -100,6 +100,43 @@ def test_retry_gate_no_reejecuta_la_fase(tmp_path: Path, monkeypatch) -> None:
     assert result.status == SessionStatus.COMPLETED
 
 
+def test_rewind_repetido_vuelve_a_ejecutar_la_fase(tmp_path: Path, monkeypatch) -> None:
+    """El SEGUNDO rewind de la misma fase también la corre.
+
+    Bug de producción: el fork usaba el vecino del historial como padre, cierto
+    solo en una corrida lineal. Tras el primer rewind el historial intercala
+    ramas y el vecino era el snapshot TERMINAL de la rama anterior: bifurcar
+    desde ahí no ejecutaba nada y devolvía el bloqueo viejo como si la fase
+    hubiera corrido (`rewind --phase 6` no tradujo un solo nodo).
+    """
+    session, state = _blocked_at_gate6(tmp_path)
+
+    from sas_migrator.graph import stubs
+
+    corridas: list[int] = []
+    original = stubs.stub_generate_notebooks
+
+    def espia(*args):
+        corridas.append(1)
+        return original(*args)
+
+    monkeypatch.setattr(stubs, "stub_generate_notebooks", espia)
+
+    # Hacen falta varias vueltas: el historial recién intercala ramas (y el
+    # vecino deja de ser el padre) después de un par de rewinds.
+    for vuelta in (1, 2, 3):
+        MigrationSession(session.workspace).rewind_to_phase(6)
+        assert len(corridas) == vuelta, f"el rewind #{vuelta} no re-ejecutó la fase"
+
+    _resolve_all(state)
+    result = MigrationSession(session.workspace).rewind_to_phase(6)
+
+    assert len(corridas) == 4
+    assert result.status == SessionStatus.COMPLETED, (
+        "resuelto el needs_human, la corrida sigue hasta el final"
+    )
+
+
 def test_retry_gate_sin_gate_bloqueado_es_error_claro(tmp_path: Path) -> None:
     session = MigrationSession(make_workspace(tmp_path))
     session.start(stub_mode=True)  # completa sin bloqueos

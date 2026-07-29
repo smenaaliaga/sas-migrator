@@ -158,13 +158,23 @@ class MigrationSession:
                 f"fase desconocida: {phase} (esperado 0-{max(PHASE_ENTRY_NODE)})"
             )
 
-        history = list(self.graph.get_state_history(self._config()))
-        for i, snap in enumerate(history):
-            if node in (snap.next or ()) and i + 1 < len(history):
-                # invoke() sobre el config del padre bifurca desde ahí: el gate
-                # anterior se re-evalúa (barato) y la fase arranca limpia.
-                result = self.graph.invoke(None, history[i + 1].config)
-                return self._to_result(result)
+        for snap in self.graph.get_state_history(self._config()):
+            if node not in (snap.next or ()):
+                continue
+            # El padre es `parent_config`, NO el elemento siguiente del
+            # historial: get_state_history devuelve todas las ramas de más
+            # nueva a más vieja, así que en cuanto existe un rewind previo el
+            # vecino puede ser el snapshot TERMINAL de otra rama. Bifurcar
+            # desde un terminal no ejecuta nada y devuelve el bloqueo viejo
+            # como si la fase hubiera corrido (pasó en producción: el segundo
+            # rewind --phase 6 no tradujo un solo nodo).
+            parent = snap.parent_config
+            if not parent:
+                continue
+            # invoke() sobre el config del padre bifurca desde ahí: el gate
+            # anterior se re-evalúa (barato) y la fase arranca limpia.
+            result = self.graph.invoke(None, parent)
+            return self._to_result(result)
         raise LookupError(
             f"no hay checkpoint anterior a {node}: la fase {phase} nunca se alcanzó "
             "en este workspace"
