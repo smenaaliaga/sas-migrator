@@ -434,6 +434,31 @@ def test_strip_self_assignments_no_toca_bloques_anidados() -> None:
     assert f is not None and f.reason == "self_assignment"
 
 
+def test_chequear_codigo_generado_no_ensucia_la_consola() -> None:
+    """Una celda con una regex en string no-raw ('D\\.') hacía que Python
+    emitiera un SyntaxWarning por CADA pasada de parseo (chequeo, símbolos,
+    ensamblado, auditoría). El usuario no puede corregir eso a mitad de
+    corrida y ahogaba el progreso por nodo."""
+    import warnings
+
+    cell = (
+        "ventas = pd.DataFrame({'c': ['D.1']})\n"
+        "malos = ventas['c'].str.contains('D\\.', na=False)\n"
+    )
+    with warnings.catch_warnings(record=True) as capturadas:
+        warnings.simplefilter("always")
+        assert check_node_translation(_nt("A", [cell])) is None
+
+    assert [w for w in capturadas if issubclass(w.category, SyntaxWarning)] == []
+
+
+def test_error_de_sintaxis_real_sigue_reportandose() -> None:
+    """Silenciar el ruido no puede tapar lo accionable: un SyntaxError de
+    verdad se sigue rechazando (y el nodo se re-traduce)."""
+    f = check_node_translation(_nt("A", ["ventas = (1 + \n"]))
+    assert f is not None and f.reason == "syntax_error"
+
+
 def test_strip_self_assignments_sin_tic_devuelve_el_mismo_objeto() -> None:
     from sas_migrator.core.assembly.notebook import strip_self_assignments
 

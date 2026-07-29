@@ -18,6 +18,8 @@ from __future__ import annotations
 import ast
 import builtins
 
+from sas_migrator.core.utils.pysource import parse_generated
+
 BUILTIN_NAMES = frozenset(dir(builtins)) | {"__file__", "__name__"}
 
 
@@ -264,7 +266,7 @@ def undefined_in_cells(cells: list[str], known: set[str]) -> tuple[list[str], se
     walker = _BlockWalker(set(known) | BUILTIN_NAMES)
     for cell in cells:
         try:
-            tree = ast.parse(cell)
+            tree = parse_generated(cell)
         except SyntaxError:
             continue  # ya lo reporta el chequeo de sintaxis, con mejor mensaje
         walker.block(tree.body)

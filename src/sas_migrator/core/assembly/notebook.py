@@ -44,6 +44,7 @@ from sas_migrator.core.models.translation import (
     NodeTranslation,
     SasPythonMapping,
 )
+from sas_migrator.core.utils.pysource import parse_generated
 from sas_migrator.core.validation.symbols import undefined_in_cells
 
 BASELINE_IMPORTS = ("import pandas as pd", "import numpy as np")
@@ -314,7 +315,7 @@ def strip_self_assignments(nt: "NodeTranslation") -> "NodeTranslation":
     removed: list[str] = []
     for cell in nt.cells:
         try:
-            tree = ast.parse(cell)
+            tree = parse_generated(cell)
         except SyntaxError:
             new_cells.append(cell)
             continue
@@ -486,7 +487,7 @@ def check_node_translation_all(
     cell_trees: list[tuple[int, ast.AST]] = []
     for i, cell in enumerate(nt.cells):
         try:
-            tree = ast.parse(cell)
+            tree = parse_generated(cell)
         except SyntaxError as exc:
             add("syntax_error", f"celda {i}: {exc.msg} (línea {exc.lineno})")
             continue
@@ -494,7 +495,7 @@ def check_node_translation_all(
         cell_trees.append((i, tree))
     for line in nt.imports:
         try:
-            trees.append(ast.parse(line))
+            trees.append(parse_generated(line))
         except SyntaxError as exc:
             add("syntax_error", f"import inválido '{line}': {exc.msg}")
 
@@ -681,7 +682,7 @@ def _names_bound_by_imports(import_lines: list[str]) -> set[str]:
     names: set[str] = set()
     for line in import_lines:
         try:
-            tree = ast.parse(line)
+            tree = parse_generated(line)
         except SyntaxError:
             continue
         for node in ast.walk(tree):
@@ -765,7 +766,7 @@ def _strip_log_calls(nt: NodeTranslation) -> NodeTranslation:
     cells: list[str] = []
     for cell in nt.cells:
         try:
-            tree = ast.parse(cell)
+            tree = parse_generated(cell)
         except SyntaxError:
             cells.append(cell)  # lo reporta el chequeo de sintaxis, no este
             continue
@@ -953,7 +954,7 @@ def _write_requirements(output_dir: Path, import_lines: list[str]) -> None:
     roots: set[str] = set()
     for line in import_lines:
         try:
-            roots |= _import_root_names(ast.parse(line))
+            roots |= _import_root_names(parse_generated(line))
         except SyntaxError:
             continue
     third_party = sorted(
