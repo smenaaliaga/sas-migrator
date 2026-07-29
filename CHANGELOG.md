@@ -24,6 +24,7 @@ internos viven en los commits y las decisiones en `docs/adr/`.
 - La consola deja de inundarse con `SyntaxWarning: invalid escape sequence` del código traducido: una regex en string no-raw disparaba tres advertencias por cada pasada de parseo y ahogaba el progreso por nodo. El notebook conserva el literal, así que la advertencia reaparece al ejecutarlo — cuando sí se puede hacer algo.
 - `rewind --phase N` repetido vuelve a ejecutar la fase: sobre un historial ya rebobinado antes, rebobinar no corría nada y devolvía el bloqueo anterior como si la fase se hubiera rehecho.
 - Un `max_tokens` grande (>16000) ya no hace fallar todos los nodos al instante: el SDK veta requests no-streaming largos y ahora ese camino usa streaming; si el veto llegara igual, se reporta como bug accionable en vez de `validation_retries_exhausted`.
+- Un nodo traducido bien ya no se descarta del notebook por dos falsos positivos del chequeo de nombres sin definir: un `for i, (name, group) in ...` dentro de una función, y el patrón `if 'x' in locals():` con el que la traducción consume un DataFrame que puede venir de otro nodo. En una corrida real esto tiró 4 nodos válidos, entre ellos el que inicializa la tabla base de todo el flujo.
 
 ## [2.0.0a1] - 2026-07-28
 

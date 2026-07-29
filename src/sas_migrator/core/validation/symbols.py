@@ -88,6 +88,50 @@ def bound_names(stmt: ast.stmt) -> set[str]:
     return names
 
 
+# ── Cargas protegidas por una guarda de existencia ──────────────────────────
+
+# `locals()`/`globals()`/`vars()`/`dir()`: las cuatro formas de preguntar "¿este
+# nombre existe?" sin evaluarlo.
+_INTROSPECTION_CALLS = frozenset({"locals", "globals", "vars", "dir"})
+
+
+def _existence_guarded_names(node: ast.AST) -> set[str]:
+    """Nombres que ``node`` declara "usar solo si existen".
+
+    El traductor produce esto para consumir un DataFrame que PUEDE venir de un
+    nodo anterior, en dos formas:
+
+        if 'rp_hh' in locals():
+            bd_ctsi = pd.concat([bd_ctsi, rp_hh])
+        af31_51_70 = af31_51_70 if 'af31_51_70' in locals() else pd.DataFrame()
+        x = pd.read_sql(...) if 'x' not in locals() else x
+
+    Las tres son seguras en runtime —Python evalúa la condición antes que la
+    rama—, pero la carga que protegen no la liga ninguna sentencia anterior.
+    Sin reconocer la guarda, el chequeo tira el nodo entero por undefined_name:
+    pasó con S2_01_Inicio y con S2_06_Bonos en producción.
+
+    ``not in`` cuenta igual que ``in``: solo cambia en qué rama queda la carga
+    protegida, y el chequeo no razona por rama.
+    """
+    names: set[str] = set()
+    for sub in ast.walk(node):
+        if not isinstance(sub, ast.Compare):
+            continue
+        if not any(isinstance(op, (ast.In, ast.NotIn)) for op in sub.ops):
+            continue
+        if not (isinstance(sub.left, ast.Constant) and isinstance(sub.left.value, str)):
+            continue
+        if any(
+            isinstance(c, ast.Call)
+            and isinstance(c.func, ast.Name)
+            and c.func.id in _INTROSPECTION_CALLS
+            for c in sub.comparators
+        ):
+            names.add(sub.left.value)
+    return names
+
+
 # ── Nombres usados (cargas no resueltas localmente) ─────────────────────────
 
 class _LoadCollector(ast.NodeVisitor):
@@ -133,13 +177,23 @@ class _LoadCollector(ast.NodeVisitor):
         if name:
             params.add(name)
 
-        inner = _LoadCollector()
-        inner._local = [*self._local, params]
+        # Un nombre asignado en CUALQUIER parte del cuerpo es local a TODA la
+        # función: así liga Python, y así hay que sembrar el ámbito ANTES de
+        # visitar. Ligar de a un statement —visitar, después ligar— reportaba
+        # como libre todo lo que un `if`/`for`/`try` asigna y usa dentro de sí
+        # mismo, porque `visit` ya había recorrido el bloque entero cuando
+        # `bound_names` lo ligaba. Un `for i, (name, group) in enumerate(x):`
+        # dentro de un `def` mandaba el nodo entero a needs_human por eso.
         body = node.body if isinstance(node.body, list) else [node.body]
+        locals_fn = set(params)
+        for stmt in body:
+            if isinstance(stmt, ast.stmt):
+                locals_fn |= bound_names(stmt)  # ya desciende a if/for/with/try
+
+        inner = _LoadCollector()
+        inner._local = [*self._local, locals_fn]
         for stmt in body:
             inner.visit(stmt)
-            if isinstance(stmt, ast.stmt):
-                inner._local[-1] |= bound_names(stmt)
         # El cuerpo corre cuando se llama, no acá: difiere el chequeo.
         self.deferred |= {n for n in inner.free | inner.deferred if not self._bound_here(n)}
 
@@ -202,7 +256,10 @@ class _BlockWalker:
         collector = _LoadCollector()
         collector.visit(node)
         self.deferred |= collector.deferred
-        for name in sorted(collector.free - self.visible):
+        # Una guarda DENTRO de la misma expresión protege la carga: cubre el
+        # ternario `x = x if 'x' in locals() else pd.DataFrame()`.
+        guarded = _existence_guarded_names(node)
+        for name in sorted(collector.free - self.visible - guarded):
             if name not in self.missing:
                 self.missing.append(name)
 
@@ -237,6 +294,11 @@ class _BlockWalker:
 
         if isinstance(stmt, (ast.If, ast.While)):
             self._loads(stmt.test)
+            # `if 'x' in locals():` habilita `x` para el cuerpo. Va a `visible`
+            # y NO a `defined`: el nodo no deja ese nombre para los siguientes
+            # —solo lo consume si ya está—, y anunciarlo taparía un undefined
+            # real más adelante.
+            self.visible |= _existence_guarded_names(stmt.test)
             self.block(stmt.body)
             self.block(stmt.orelse)
             return
